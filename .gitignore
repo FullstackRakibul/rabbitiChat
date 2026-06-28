@@ -1,0 +1,35 @@
+# .NET
+bin/
+obj/
+*.db
+*.db-shm
+*.db-wal
+appsettings.Development.json
+appsettings.local.json
+appsettings.*.local.json
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
