@@ -26,7 +26,7 @@ pnpm-debug.log*
 .vs/
 .vscode/
 .idea/
-*.user
+*.user 
 *.suo
 *.sln.docstates
 

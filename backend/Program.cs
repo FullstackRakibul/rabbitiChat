@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +24,7 @@ builder.Services.AddHttpClient("ollama", c =>
 
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+    p.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://10.10.60.156:5173/", "http://192.168.61.41:5173/")
      .AllowAnyHeader()
      .AllowAnyMethod()
      .WithExposedHeaders("X-Conversation-Id")));
@@ -31,11 +32,71 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 var app = builder.Build();
 app.UseCors();
 
-// Create the SQLite file + tables on first run (no migrations needed for this).
+// Create the SQLite file + tables on first run, then bring an older db up to the new schema.
 using (var scope = app.Services.CreateScope())
-    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreated();
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();   // creates everything fresh if the file is new
+    SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
+}
+
+// ===================== Auth helpers =====================
+
+// Resolve the user from the Authorization: Bearer <token> header. Null if missing/invalid.
+static async Task<User?> ResolveUser(HttpContext ctx, AppDbContext db)
+{
+    var header = ctx.Request.Headers.Authorization.ToString();
+    if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
+    var token = header["Bearer ".Length..].Trim();
+    if (string.IsNullOrEmpty(token)) return null;
+    return await db.Users.FirstOrDefaultAsync(u => u.Token == token);
+}
+
+static (string hash, string salt) HashSecret(string secret, byte[]? existingSalt = null)
+{
+    var salt = existingSalt ?? RandomNumberGenerator.GetBytes(16);
+    var hash = Rfc2898DeriveBytes.Pbkdf2(
+        Encoding.UTF8.GetBytes(secret), salt, 100_000, HashAlgorithmName.SHA256, 32);
+    return (Convert.ToBase64String(hash), Convert.ToBase64String(salt));
+}
+
+static string NewToken() =>
+    Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+        .Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
 // ===================== Endpoints =====================
+
+// Login or auto-register. New username => create account; existing => verify secret.
+app.MapPost("/api/auth/login", async (LoginRequest req, AppDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Secret))
+        return Results.BadRequest(new { error = "username and secret are required." });
+
+    var username = req.Username.Trim();
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Username == username);
+    bool created = false;
+
+    if (user is null)
+    {
+        var (hash, salt) = HashSecret(req.Secret);
+        user = new User { Username = username, SecretHash = hash, SecretSalt = salt, Token = NewToken() };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        created = true;
+    }
+    else
+    {
+        var (hash, _) = HashSecret(req.Secret, Convert.FromBase64String(user.SecretSalt));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromBase64String(hash), Convert.FromBase64String(user.SecretHash)))
+            return Results.Json(new { error = "Wrong secret for that username." }, statusCode: 401);
+
+        user.Token = NewToken(); // fresh token each login
+        await db.SaveChangesAsync();
+    }
+
+    return Results.Ok(new { username = user.Username, token = user.Token, created });
+});
 
 // List installed Ollama models (proxied so the browser never touches Ollama directly).
 app.MapGet("/api/models", async (IHttpClientFactory http, CancellationToken ct) =>
@@ -52,18 +113,27 @@ app.MapGet("/api/models", async (IHttpClientFactory http, CancellationToken ct) 
     }
 });
 
-// List conversations (newest first).
-app.MapGet("/api/conversations", async (AppDbContext db) =>
-    await db.Conversations
+// List the current user's conversations (newest first).
+app.MapGet("/api/conversations", async (HttpContext ctx, AppDbContext db) =>
+{
+    var user = await ResolveUser(ctx, db);
+    if (user is null) return Results.Unauthorized();
+
+    return Results.Ok(await db.Conversations
+        .Where(c => c.UserId == user.Id)
         .OrderByDescending(c => c.CreatedAt)
         .Select(c => new { c.Id, c.Title, c.CreatedAt })
         .ToListAsync());
+});
 
-// Get one conversation with its messages.
-app.MapGet("/api/conversations/{id:int}", async (int id, AppDbContext db) =>
+// Get one of the current user's conversations with its messages.
+app.MapGet("/api/conversations/{id:int}", async (int id, HttpContext ctx, AppDbContext db) =>
 {
+    var user = await ResolveUser(ctx, db);
+    if (user is null) return Results.Unauthorized();
+
     var convo = await db.Conversations
-        .Where(c => c.Id == id)
+        .Where(c => c.Id == id && c.UserId == user.Id)
         .Select(c => new
         {
             c.Id,
@@ -78,10 +148,13 @@ app.MapGet("/api/conversations/{id:int}", async (int id, AppDbContext db) =>
     return convo is null ? Results.NotFound() : Results.Ok(convo);
 });
 
-// Delete a conversation.
-app.MapDelete("/api/conversations/{id:int}", async (int id, AppDbContext db) =>
+// Delete one of the current user's conversations.
+app.MapDelete("/api/conversations/{id:int}", async (int id, HttpContext ctx, AppDbContext db) =>
 {
-    var convo = await db.Conversations.FindAsync(id);
+    var user = await ResolveUser(ctx, db);
+    if (user is null) return Results.Unauthorized();
+
+    var convo = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id && c.UserId == user.Id);
     if (convo is null) return Results.NotFound();
     db.Conversations.Remove(convo);
     await db.SaveChangesAsync();
@@ -91,6 +164,14 @@ app.MapDelete("/api/conversations/{id:int}", async (int id, AppDbContext db) =>
 // Chat: save the user turn, stream the model reply token-by-token, then save the reply.
 app.MapPost("/api/chat", async (ChatRequest req, AppDbContext db, IHttpClientFactory http, HttpContext ctx) =>
 {
+    var user = await ResolveUser(ctx, db);
+    if (user is null)
+    {
+        ctx.Response.StatusCode = 401;
+        await ctx.Response.WriteAsync("Unauthorized.");
+        return;
+    }
+
     if (string.IsNullOrWhiteSpace(req.Message) || string.IsNullOrWhiteSpace(req.Model))
     {
         ctx.Response.StatusCode = 400;
@@ -98,15 +179,16 @@ app.MapPost("/api/chat", async (ChatRequest req, AppDbContext db, IHttpClientFac
         return;
     }
 
-    // Resolve or create the conversation.
+    // Resolve or create the conversation — scoped to this user so you can't post into someone else's.
     Conversation convo;
-    if (req.ConversationId is int cid && await db.Conversations.FindAsync(cid) is { } existing)
+    if (req.ConversationId is int cid &&
+        await db.Conversations.FirstOrDefaultAsync(c => c.Id == cid && c.UserId == user.Id) is { } existing)
     {
         convo = existing;
     }
     else
     {
-        convo = new Conversation { Title = Truncate(req.Message, 40) };
+        convo = new Conversation { UserId = user.Id, Title = Truncate(req.Message, 40) };
         db.Conversations.Add(convo);
         await db.SaveChangesAsync();
     }
@@ -191,5 +273,6 @@ static string Truncate(string s, int n) =>
     s.Length <= n ? s : s[..n].TrimEnd() + "…";
 
 // ---- DTOs ----
+record LoginRequest(string Username, string Secret);
 record ChatRequest(int? ConversationId, string Model, string Message);
 record ChatMsg(string role, string content);
