@@ -24,7 +24,7 @@ builder.Services.AddHttpClient("ollama", c =>
 
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://10.10.60.156:5173/", "http://192.168.61.41:5173/")
+    p.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://10.10.60.156:5173/", "http://192.168.61.41:5173/", "http://10.10.60.156:4200")
      .AllowAnyHeader()
      .AllowAnyMethod()
      .WithExposedHeaders("X-Conversation-Id")));
