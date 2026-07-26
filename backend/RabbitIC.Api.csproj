@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -10,6 +10,10 @@
   <ItemGroup>
     <!-- If a version fails to restore, run: dotnet add package <name> -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Helper\" />
   </ItemGroup>
 
 </Project>

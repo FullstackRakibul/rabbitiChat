@@ -1,11 +1,37 @@
 {
-  "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
     "http": {
       "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
       "dotnetRunMessages": true,
-      "applicationUrl": "http://localhost:5274",
-      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
+      "applicationUrl": "http://localhost:5274"
+    },
+    "WSL": {
+      "commandName": "WSL2",
+      "launchUrl": "http://localhost:5274",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5274"
+      },
+      "distributionName": ""
+    },
+    "IIS Express": {
+      "commandName": "IISExpress",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  },
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:5915/",
+      "sslPort": 44379
     }
   }
 }
