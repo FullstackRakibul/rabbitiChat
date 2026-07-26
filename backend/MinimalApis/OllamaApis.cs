@@ -177,7 +177,7 @@ namespace RabbitIC.Api.MinimalApis
                 var payload = new { model = req.Model, messages = history, stream = true };
 
                 var client = http.CreateClient("ollama");
-                using var upstream = new HttpRequestMessage(HttpMethod.Post, "/chat")
+                using var upstream = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
                 {
                     Content = JsonContent.Create(payload)
                 };

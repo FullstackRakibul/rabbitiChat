@@ -33,7 +33,8 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173", "http://192.168.61.41:4200",
                   "https://weavo-go.vercel.app", "http://127.0.0.1:5173",
                   "http://10.10.60.156:5173/", "http://192.168.61.41:5173/",
-                  "http://10.10.60.156:4200", "http://192.168.61.41:4200", "http://localhost:4200")
+                  "http://10.10.60.156:4200", "http://192.168.61.41:4200", 
+                  "http://localhost:4200")
      .AllowAnyHeader()
      .AllowAnyMethod()
      .WithExposedHeaders("X-Conversation-Id")));
