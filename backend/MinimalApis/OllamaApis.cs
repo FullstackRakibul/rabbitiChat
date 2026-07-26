@@ -16,6 +16,7 @@ namespace RabbitIC.Api.MinimalApis
         {
             var group = app.MapGroup("/").WithTags("Ollama APIs");
 
+
             // List installed Ollama models (proxied so the browser never touches Ollama directly).
             group.MapGet("/models", async(IHttpClientFactory http, CancellationToken ct) =>{
 
@@ -106,6 +107,7 @@ namespace RabbitIC.Api.MinimalApis
                 return convo is null ? Results.NotFound() : Results.Ok(convo);
             });
 
+
             // Delete one of the current user's conversations.
             app.MapDelete("/conversations/{id:int}", async (int id, HttpContext ctx, AppDbContext db) =>
             {
@@ -118,6 +120,7 @@ namespace RabbitIC.Api.MinimalApis
                 await db.SaveChangesAsync();
                 return Results.NoContent();
             });
+
 
             // Chat: save the user turn, stream the model reply token-by-token, then save the reply.
             app.MapPost("/chat", async (ChatRequest req, AppDbContext db, IHttpClientFactory http, HttpContext ctx) =>
