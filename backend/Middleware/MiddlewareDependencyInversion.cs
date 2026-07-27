@@ -17,6 +17,14 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        public static WebApplication ApplicationDocumentApis(this WebApplication app)
+        {
+            var documentApi = app.MapGroup("/api").WithTags("Document APIs");
+
+            documentApi.MapDocumentApis();
+            return app;
+        }
+
         public static WebApplication ApplicationOllamaApis(this WebApplication app)
         {
             var ollamaApi = app.MapGroup("/api").WithTags("Ollama APIs");

@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify'
 import {
   getModels, listConversations, getConversation,
   deleteConversation, streamChat,
+  uploadDocument, listDocuments, deleteDocument, extractDocument, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
@@ -228,7 +229,7 @@ async function send() {
 
 // Load everything that requires a session.
 async function bootstrap() {
-  await Promise.all([refreshModels(), refreshConversations()])
+  await Promise.all([refreshModels(), refreshConversations(), refreshDocuments()])
 }
 
 onMounted(() => {
@@ -240,9 +241,11 @@ onMounted(() => {
 // ─────────────────────────────────────────────────────────────
 
 // Tab state
-const activeTab = ref('chat') // 'chat' | 'todo' | 'sources' | 'settings'
+const activeTab = ref('chat') // 'chat' | 'workspace' | 'docs' | 'todo' | 'sources' | 'settings'
 const tabs = [
   { id: 'chat', label: 'Chat' },
+  { id: 'workspace', label: 'Workspace' },
+  { id: 'docs', label: 'Documents' },
   { id: 'todo', label: 'To-Do' },
   { id: 'sources', label: 'Sources' },
   { id: 'settings', label: 'Settings' },
@@ -275,6 +278,185 @@ const filteredTasks = computed(() => {
 })
 const activeTaskCount = computed(() => tasks.value.filter(t => !t.done).length)
 const doneTaskCount = computed(() => tasks.value.filter(t => t.done).length)
+
+// ---- Documents (PO ingestion) ----
+const documents = ref([])
+const docFile = ref(null)          // File chosen in the picker
+const docBuyer = ref('')
+const docUploading = ref(false)
+const docError = ref('')
+const docNotice = ref('')
+const docInput = ref(null)         // <input type=file> element
+
+function onDocPicked(e) {
+  docFile.value = e.target.files?.[0] ?? null
+  docError.value = ''
+  docNotice.value = ''
+}
+
+async function refreshDocuments() {
+  try {
+    documents.value = await listDocuments()
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  }
+}
+
+async function doUpload() {
+  if (docUploading.value || !docFile.value) return
+  docError.value = ''
+  docNotice.value = ''
+  docUploading.value = true
+  try {
+    const res = await uploadDocument(docFile.value, docBuyer.value.trim())
+    docNotice.value = `“${res.fileName}” ingested — ${res.chunks} chunks indexed.`
+    docFile.value = null
+    if (docInput.value) docInput.value.value = ''
+    await refreshDocuments()
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  } finally {
+    docUploading.value = false
+  }
+}
+
+async function removeDocument(id) {
+  if (!confirm('Delete this document and its indexed chunks?')) return
+  try {
+    await deleteDocument(id)
+    await refreshDocuments()
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  }
+}
+
+// ---- Workspace (agentic PO chat) ----
+// Buyer profiles are local for now; they become backend entities in the next module.
+const buyerProfiles = ['Kohls', 'Walmart', 'Target', 'H&M', 'Generic']
+const wsBuyer = ref('Kohls')
+const wsFile = ref(null)
+const wsDoc = ref(null)            // last ingested document for this session
+const wsUploading = ref(false)
+const wsDragging = ref(false)
+const wsMessages = ref([])         // { role: 'user'|'assistant'|'event', content, meta? }
+const wsInput = ref('')
+const wsBusy = ref(false)
+const wsError = ref('')
+const wsExtracting = ref(false)
+const wsFileInput = ref(null)
+const wsScroller = ref(null)
+let wsController = null
+
+function wsScrollDown() {
+  nextTick(() => {
+    if (wsScroller.value) wsScroller.value.scrollTop = wsScroller.value.scrollHeight
+  })
+}
+
+function wsEvent(content, meta = '') {
+  wsMessages.value.push({ role: 'event', content, meta })
+  wsScrollDown()
+}
+
+function onWsFilePicked(e) {
+  wsFile.value = e.target.files?.[0] ?? null
+  wsError.value = ''
+}
+
+function onWsDrop(e) {
+  wsDragging.value = false
+  const f = e.dataTransfer?.files?.[0]
+  if (f) { wsFile.value = f; wsError.value = '' }
+}
+
+async function wsUpload() {
+  if (wsUploading.value || !wsFile.value) return
+  wsError.value = ''
+  wsUploading.value = true
+  wsEvent(`Uploading “${wsFile.value.name}” for buyer profile ${wsBuyer.value}…`, 'ingest')
+  try {
+    const res = await uploadDocument(wsFile.value, wsBuyer.value)
+    wsDoc.value = res
+    wsEvent(`Parsed, chunked and embedded — ${res.chunks} chunks indexed and ready for retrieval.`, 'done')
+    wsFile.value = null
+    if (wsFileInput.value) wsFileInput.value.value = ''
+    refreshDocuments()
+  } catch (e) {
+    if (handleAuthError(e)) return
+    wsError.value = e.message
+    wsEvent(`Ingestion failed: ${e.message}`, 'fail')
+  } finally {
+    wsUploading.value = false
+  }
+}
+
+// RAG chat: the backend grounds the answer on the pinned document's chunks
+// (or a vector search over all my chunks when nothing is pinned). Stateless —
+// workspace turns are never saved to Conversations.
+async function wsSend() {
+  if (wsBusy.value) { wsController?.abort(); return }
+  const text = wsInput.value.trim()
+  if (!text || !model.value) return
+
+  wsError.value = ''
+  wsMessages.value.push({ role: 'user', content: text })
+  wsInput.value = ''
+  wsScrollDown()
+
+  const reply = { role: 'assistant', content: '' }
+  wsMessages.value.push(reply)
+
+  wsBusy.value = true
+  wsController = new AbortController()
+  try {
+    await workspaceChat(
+      { documentId: wsDoc.value?.id ?? null, model: model.value, message: text },
+      (chunk) => { reply.content += chunk; wsScrollDown() },
+      wsController.signal,
+    )
+  } catch (e) {
+    if (handleAuthError(e)) return
+    if (e.name !== 'AbortError') {
+      wsError.value = e.message
+      reply.content = reply.content || '⚠ ' + e.message
+    }
+  } finally {
+    wsBusy.value = false
+    wsController = null
+  }
+}
+
+// One-click structured extraction of the pinned PO, shown as pretty JSON.
+async function wsExtract() {
+  if (wsExtracting.value || !wsDoc.value || !model.value) return
+  wsError.value = ''
+  wsExtracting.value = true
+  wsEvent(`Extracting structured JSON from “${wsDoc.value.fileName}”…`, 'ingest')
+  try {
+    const res = await extractDocument(wsDoc.value.id, model.value)
+    wsEvent(`Extraction complete — sources: ${res.sources.join(', ')}`, 'done')
+    wsMessages.value.push({
+      role: 'assistant',
+      content: '```json\n' + JSON.stringify(res.extracted, null, 2) + '\n```',
+    })
+    wsScrollDown()
+  } catch (e) {
+    if (handleAuthError(e)) return
+    wsError.value = e.message
+    wsEvent(`Extraction failed: ${e.message}`, 'fail')
+  } finally {
+    wsExtracting.value = false
+  }
+}
+
+function wsNewChat() {
+  wsController?.abort()
+  wsMessages.value = []
+  wsDoc.value = null
+  wsFile.value = null
+  wsError.value = ''
+  if (wsFileInput.value) wsFileInput.value.value = ''
+}
 
 // Context selector (local only)
 const context = ref('General')
@@ -530,6 +712,139 @@ function startNewChat() {
             </button>
           </div>
         </footer>
+      </section>
+
+      <!-- ── Workspace tab (agentic PO chat) ── -->
+      <section v-show="activeTab === 'workspace'" class="workspace">
+        <div class="ws-head">
+          <div class="ws-controls">
+            <div class="select-pill" title="Buyer profile">
+              <span class="select-label">Buyer</span>
+              <select v-model="wsBuyer">
+                <option v-for="b in buyerProfiles" :key="b" :value="b">{{ b }}</option>
+              </select>
+            </div>
+            <div class="select-pill" title="Model">
+              <span class="select-label">Model</span>
+              <select v-model="model">
+                <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <span v-if="wsDoc" class="chip doc-chip" :title="wsDoc.fileName">
+              📎 {{ wsDoc.fileName }} · {{ wsDoc.chunks }} chunks
+            </span>
+            <button v-if="wsDoc" class="newchat-mini" :disabled="wsExtracting" @click="wsExtract">
+              {{ wsExtracting ? 'Extracting…' : '{ } Extract JSON' }}
+            </button>
+            <button class="newchat-mini" @click="wsNewChat">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              New Chat
+            </button>
+          </div>
+        </div>
+
+        <div class="messages" ref="wsScroller">
+          <!-- Empty-state hero: guides the buyer → upload → ask flow -->
+          <div v-if="!wsMessages.length" class="ws-hero">
+            <div class="ws-hero-icon">🧠</div>
+            <h3>Agentic PO Workspace</h3>
+            <p>Pick a buyer profile, drop in a purchase order, then ask anything about it.</p>
+            <div class="ws-steps">
+              <span class="ws-step"><b>1</b> Buyer: {{ wsBuyer }}</span>
+              <span class="ws-step" :class="{ done: wsDoc }"><b>2</b> {{ wsDoc ? wsDoc.fileName : 'Upload the PO' }}</span>
+              <span class="ws-step"><b>3</b> Ask & extract</span>
+            </div>
+          </div>
+
+          <template v-for="(m, i) in wsMessages" :key="i">
+            <!-- Agent activity cards -->
+            <div v-if="m.role === 'event'" class="ws-event" :class="m.meta">
+              <span class="ws-event-dot"></span>
+              <span>{{ m.content }}</span>
+            </div>
+            <!-- Normal chat bubbles -->
+            <div v-else class="row" :class="m.role">
+              <div class="bubble" :class="m.role">
+                <div v-if="m.role === 'assistant'" class="who">WORKSPACE AGENT<span>+</span></div>
+                <div v-if="m.role === 'assistant'" class="md" v-html="renderMarkdown(m.content)"></div>
+                <template v-else>{{ m.content }}</template>
+                <span v-if="wsBusy && i === wsMessages.length - 1 && m.role === 'assistant'" class="caret">▋</span>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <p v-if="wsError" class="error">{{ wsError }}</p>
+
+        <!-- Upload strip: drag & drop or pick, then ingest -->
+        <div class="ws-upload" :class="{ dragging: wsDragging }" @dragover.prevent="wsDragging = true"
+          @dragleave.prevent="wsDragging = false" @drop.prevent="onWsDrop">
+          <input ref="wsFileInput" type="file" accept=".pdf,.xlsx,.txt,.csv" class="ws-file-input"
+            @change="onWsFilePicked" />
+          <button class="btn-ghost ws-attach" @click="wsFileInput?.click()">
+            📎 {{ wsFile ? wsFile.name : 'Attach PO (PDF, XLSX, TXT, CSV) — or drop it here' }}
+          </button>
+          <button v-if="wsFile" class="btn-accent" :disabled="wsUploading" @click="wsUpload">
+            {{ wsUploading ? 'Ingesting…' : `Ingest for ${wsBuyer}` }}
+          </button>
+        </div>
+
+        <footer class="composer">
+          <div class="composer-inner">
+            <span class="composer-ico">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z" />
+                <path d="M9 21h6" />
+              </svg>
+            </span>
+            <input v-model="wsInput" :placeholder="wsDoc ? `Ask about ${wsDoc.fileName}…` : 'Ask the workspace agent…'"
+              @keydown.enter.exact.prevent="wsSend" />
+            <button class="send" :class="{ stop: wsBusy }" :title="wsBusy ? 'Stop' : 'Send'" @click="wsSend">
+              <svg v-if="!wsBusy" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          </div>
+        </footer>
+      </section>
+
+      <!-- ── Documents tab (PO upload + ingestion) ── -->
+      <section v-show="activeTab === 'docs'" class="panel">
+        <div class="panel-card">
+          <h2>Documents</h2>
+          <p class="panel-sub">Upload a PO / order file (PDF, XLSX, TXT, CSV). It's parsed, chunked and embedded for
+            retrieval.</p>
+
+          <form class="doc-upload" @submit.prevent="doUpload">
+            <input ref="docInput" type="file" accept=".pdf,.xlsx,.txt,.csv" @change="onDocPicked" />
+            <input v-model="docBuyer" class="doc-buyer" placeholder="Buyer (e.g. Kohls) — optional" />
+            <button type="submit" class="btn-accent" :disabled="docUploading || !docFile">
+              {{ docUploading ? 'Ingesting…' : 'Upload' }}
+            </button>
+          </form>
+
+          <p v-if="docNotice" class="doc-notice">{{ docNotice }}</p>
+          <p v-if="docError" class="gate-err">{{ docError }}</p>
+
+          <ul class="doc-list">
+            <li v-for="d in documents" :key="d.id" class="doc-row">
+              <span class="doc-status" :class="d.status">{{ d.status }}</span>
+              <span class="doc-name" :title="d.fileName">{{ d.fileName }}</span>
+              <span v-if="d.buyer" class="chip">{{ d.buyer }}</span>
+              <span class="doc-meta">{{ d.chunks }} chunks</span>
+              <button class="task-del" title="Delete" @click="removeDocument(d.id)">✕</button>
+            </li>
+          </ul>
+          <p v-if="!documents.length" class="empty-list">No documents yet — upload your first PO above.</p>
+        </div>
       </section>
 
       <!-- ── To-Do tab ── -->
@@ -1667,6 +1982,260 @@ textarea {
 
 .btn-ghost.danger:hover {
   background: #fdf1f0;
+}
+
+/* ---- Workspace (agentic PO chat) ---- */
+.ws-hero {
+  max-width: 460px;
+  margin: 10vh auto 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.ws-hero-icon {
+  font-size: 42px;
+  margin-bottom: 6px;
+}
+
+.ws-hero h3 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 19px;
+}
+
+.ws-hero p {
+  margin: 0 0 18px;
+  font-size: 14px;
+}
+
+.ws-steps {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ws-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #33424e;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-step b {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.ws-step.done {
+  border-color: #c9ede7;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* Agent activity cards in the thread */
+.ws-event {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 auto 14px;
+  padding: 8px 14px;
+  max-width: 560px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #fbfdfd;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ws-event-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cfd8de;
+  flex: 0 0 auto;
+}
+
+.ws-event.ingest .ws-event-dot {
+  background: #f0b429;
+  animation: blink 1s steps(1) infinite;
+}
+
+.ws-event.done {
+  border-color: #c9ede7;
+  color: var(--accent-ink);
+}
+
+.ws-event.done .ws-event-dot {
+  background: var(--accent);
+}
+
+.ws-event.fail {
+  border-color: #f2d4d1;
+  color: var(--danger);
+}
+
+.ws-event.fail .ws-event-dot {
+  background: var(--danger);
+}
+
+/* Upload strip above the composer */
+.ws-upload {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 30px;
+  width: 100%;
+}
+
+.ws-upload.dragging .ws-attach {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.ws-file-input {
+  display: none;
+}
+
+.ws-attach {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border-style: dashed;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.doc-chip {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--accent-soft);
+  border-color: #c9ede7;
+  color: var(--accent-ink);
+}
+
+/* Documents */
+.doc-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.doc-upload input[type="file"] {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.doc-buyer {
+  flex: 1 1 180px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  font-size: 14px;
+  background: #f6f9f9;
+  min-width: 0;
+}
+
+.doc-buyer:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: #fff;
+}
+
+.doc-notice {
+  color: var(--accent-ink);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.doc-row:hover {
+  background: #fafcfc;
+}
+
+.doc-row:hover .task-del {
+  opacity: 1;
+}
+
+.doc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.doc-meta {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.doc-status {
+  font-size: 11.5px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 10px;
+  text-transform: capitalize;
+  background: #f0f5f4;
+  color: var(--muted);
+}
+
+.doc-status.ready {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.doc-status.failed {
+  background: #fdf1f0;
+  color: var(--danger);
 }
 
 /* To-Do */

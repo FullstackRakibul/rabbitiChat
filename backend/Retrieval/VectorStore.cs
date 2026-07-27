@@ -159,7 +159,13 @@ public sealed class EmbeddingService
         var client = _http.CreateClient("ollama");
         var resp = await client.PostAsJsonAsync("/api/embeddings",
             new { model = _model, prompt = text }, ct);
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode)
+        {
+            var detail = await resp.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException(
+                $"Ollama embeddings returned {(int)resp.StatusCode} for model '{_model}'. " +
+                $"If the model is missing, run: ollama pull {_model}. Detail: {detail}");
+        }
 
         var body = await resp.Content.ReadFromJsonAsync<EmbedResponse>(cancellationToken: ct);
         if (body?.embedding is null || body.embedding.Length == 0)

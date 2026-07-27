@@ -17,6 +17,19 @@
 
 
 
+        /// <summary>Workspace chat: stateless, RAG-grounded, never saved to Conversations.</summary>
+        public class WorkspaceChatRequest
+        {
+            public int? DocumentId { get; set; }   // pin to one document; null = search all my chunks
+            public string Model { get; set; } = string.Empty;
+            public string Message { get; set; } = string.Empty;
+        };
+
+        public class ExtractRequest
+        {
+            public string Model { get; set; } = string.Empty;
+        };
+
         public class ChatMsg
         {
             public string Role  { get; set; } = string.Empty;

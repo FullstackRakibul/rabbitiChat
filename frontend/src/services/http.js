@@ -69,6 +69,22 @@ export const http = {
     return (await request(path, { ...options, method: 'POST', body })).json()
   },
 
+  /**
+   * POST multipart/form-data (file uploads). Pass a FormData instance;
+   * the browser sets the Content-Type boundary itself.
+   */
+  async postForm(path, formData, { signal } = {}) {
+    const res = await fetch(buildUrl(path), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: formData,
+      signal,
+    })
+    if (res.status === 401) throw new AuthError()
+    if (!res.ok) throw new HttpError((await errorMessage(res)) || `Upload failed (${res.status})`, res.status)
+    return res.json()
+  },
+
   async del(path, options) {
     await request(path, { ...options, method: 'DELETE' })
   },

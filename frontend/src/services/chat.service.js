@@ -1,9 +1,15 @@
 import { http } from './http.js'
 
-/** List installed Ollama model names (proxied through the backend). */
+// Embedding models are installed alongside chat models but can't answer chat
+// requests ("does not support chat"), so they never belong in the model picker.
+const EMBEDDING_MODELS = /embed|bge-|gte-|e5-/i
+
+/** List installed Ollama chat model names (proxied through the backend). */
 export async function getModels() {
   const data = await http.get('/models')
-  return (data.models || []).map((m) => m.name)
+  return (data.models || [])
+    .map((m) => m.name)
+    .filter((name) => !EMBEDDING_MODELS.test(name))
 }
 
 /**

@@ -29,6 +29,41 @@ builder.Services.AddHttpClient("ollama", c =>
     c.Timeout = TimeSpan.FromMinutes(10); // local models can be slow on first load
 });
 
+// ---- Swagger (API explorer) ----
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(o =>
+{
+    o.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "RabbitIC API",
+        Version = "v1",
+        Description = "Chat + document ingestion (RAG) API. Authorize with the bearer token from /api/auth/login.",
+    });
+    // Bearer token auth so protected endpoints are testable from the UI.
+    o.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "Paste the token returned by /api/auth/login.",
+    });
+    o.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer",
+                },
+            },
+            Array.Empty<string>()
+        },
+    });
+});
+
 // ---- Retrieval (RAG) ----
 builder.Services.AddSingleton<VectorIndex>();       // in-memory index, lives for the app lifetime
 builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings client
@@ -50,8 +85,16 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 
 var app = builder.Build();
 
+// Swagger UI at /swagger — enabled in all environments (this is an internal tool).
+app.UseSwagger();
+app.UseSwaggerUI(o =>
+{
+    o.SwaggerEndpoint("/swagger/v1/swagger.json", "RabbitIC API v1");
+});
+
 app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
+app.ApplicationDocumentApis();
 
 
 app.UseCors();
