@@ -135,8 +135,34 @@ namespace RabbitIC.Api.MinimalApis
                         error = d.Error,
                         createdAt = d.CreatedAt,
                         chunks = d.Chunks.Count,
+                        conversationId = d.ConversationId,
+                        extractedAt = d.ExtractedAt,
+                        hasExtraction = d.ExtractedJson != null,
                     })
                     .ToListAsync());
+            });
+
+            // The stored extraction for a document — lets the UI re-display without re-running the model.
+            app.MapGet("/documents/{id:int}/extract", async (int id, HttpContext ctx, AppDbContext db) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == id && d.OwnerUserId == user.Id);
+                if (doc is null) return Results.NotFound();
+                if (doc.ExtractedJson is null) return Results.NoContent();
+
+                using var parsed = JsonDocument.Parse(doc.ExtractedJson);
+                return Results.Ok(new
+                {
+                    documentId = doc.Id,
+                    fileName = doc.FileName,
+                    buyer = doc.Buyer,
+                    conversationId = doc.ConversationId,
+                    extractedAt = doc.ExtractedAt,
+                    extracted = parsed.RootElement.Clone(),
+                    sources = Array.Empty<string>(),
+                });
             });
 
             // Delete a document: rows go via cascade, then evict from the in-memory index.
@@ -229,26 +255,74 @@ namespace RabbitIC.Api.MinimalApis
                 using var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
                 var content = body.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
 
+                JsonDocument parsed;
                 try
                 {
-                    using var parsed = JsonDocument.Parse(content);
-                    return Results.Ok(new
-                    {
-                        documentId = doc.Id,
-                        fileName = doc.FileName,
-                        buyer = doc.Buyer,
-                        extracted = parsed.RootElement.Clone(),
-                        sources = chunks.Select(c => c.SourceRef).Distinct(),
-                    });
+                    parsed = JsonDocument.Parse(content);
                 }
                 catch (JsonException)
                 {
                     return Results.Problem("Model returned invalid JSON. Try again or use a stronger model.", statusCode: 502);
                 }
+
+                using (parsed)
+                {
+                    // Normalise once so what we store and what we return are identical.
+                    var pretty = JsonSerializer.Serialize(parsed.RootElement,
+                        new JsonSerializerOptions { WriteIndented = true });
+                    var sources = chunks.Select(c => c.SourceRef).Distinct().ToList();
+
+                    // Persist on the document so the UI can re-display without re-running the model.
+                    doc.ExtractedJson = pretty;
+                    doc.ExtractedAt = DateTime.UtcNow;
+
+                    // Append to the document's workspace conversation, creating it on first extract.
+                    var convo = doc.ConversationId is int existingId
+                        ? await db.Conversations.FirstOrDefaultAsync(c => c.Id == existingId && c.UserId == user.Id, ct)
+                        : null;
+                    if (convo is null)
+                    {
+                        convo = new Conversation
+                        {
+                            UserId = user.Id,
+                            Title = Authorization.Truncate($"Workspace · {doc.FileName}", 40),
+                        };
+                        db.Conversations.Add(convo);
+                        await db.SaveChangesAsync(ct);
+                        doc.ConversationId = convo.Id;
+                    }
+
+                    db.Messages.Add(new Message
+                    {
+                        ConversationId = convo.Id,
+                        Role = "user",
+                        Content = $"Extract structured JSON from {doc.FileName}" +
+                                  (string.IsNullOrWhiteSpace(doc.Buyer) ? "" : $" (buyer profile: {doc.Buyer})"),
+                    });
+                    db.Messages.Add(new Message
+                    {
+                        ConversationId = convo.Id,
+                        Role = "assistant",
+                        Content = $"```json\n{pretty}\n```\n\nSources: {string.Join(", ", sources)}",
+                    });
+                    await db.SaveChangesAsync(ct);
+
+                    return Results.Ok(new
+                    {
+                        documentId = doc.Id,
+                        fileName = doc.FileName,
+                        buyer = doc.Buyer,
+                        conversationId = convo.Id,
+                        extractedAt = doc.ExtractedAt,
+                        extracted = parsed.RootElement.Clone(),
+                        sources,
+                    });
+                }
             });
 
-            // Workspace chat: stateless RAG chat, streamed. Separate from /chat on purpose —
-            // nothing is saved to Conversations, and the model only sees retrieved chunks.
+            // Workspace chat: RAG chat, streamed. Separate from /chat on purpose — the model only
+            // sees retrieved chunks, and turns are saved to the pinned document's own conversation
+            // so the workspace thread (including extractions) survives a reload.
             app.MapPost("/documents/workspace-chat", async (
                 WorkspaceChatRequest req, HttpContext ctx, AppDbContext db,
                 EmbeddingService embedder, VectorIndex index, IHttpClientFactory http) =>
@@ -264,10 +338,11 @@ namespace RabbitIC.Api.MinimalApis
 
                 // Context: whole document when pinned; otherwise top-K vector search over my chunks.
                 List<(string? SourceRef, string Text)> contextChunks;
+                Document? pinned = null;
                 if (req.DocumentId is int docId)
                 {
-                    var owned = await db.Documents.AnyAsync(d => d.Id == docId && d.OwnerUserId == user.Id, ct);
-                    if (!owned) { ctx.Response.StatusCode = 404; return; }
+                    pinned = await db.Documents.FirstOrDefaultAsync(d => d.Id == docId && d.OwnerUserId == user.Id, ct);
+                    if (pinned is null) { ctx.Response.StatusCode = 404; return; }
 
                     contextChunks = (await db.EmbeddingChunks
                         .Where(c => c.DocumentId == docId)
@@ -319,7 +394,32 @@ namespace RabbitIC.Api.MinimalApis
                     return;
                 }
 
+                // Pinned documents get a persisted thread; unpinned questions stay ephemeral.
+                Conversation? convo = null;
+                if (pinned is not null)
+                {
+                    convo = pinned.ConversationId is int existingId
+                        ? await db.Conversations.FirstOrDefaultAsync(c => c.Id == existingId && c.UserId == user.Id, ct)
+                        : null;
+                    if (convo is null)
+                    {
+                        convo = new Conversation
+                        {
+                            UserId = user.Id,
+                            Title = Authorization.Truncate($"Workspace · {pinned.FileName}", 40),
+                        };
+                        db.Conversations.Add(convo);
+                        await db.SaveChangesAsync(ct);
+                        pinned.ConversationId = convo.Id;
+                    }
+                    db.Messages.Add(new Message { ConversationId = convo.Id, Role = "user", Content = req.Message });
+                    await db.SaveChangesAsync(ct);
+
+                    ctx.Response.Headers["X-Conversation-Id"] = convo.Id.ToString();
+                }
+
                 ctx.Response.ContentType = "text/plain; charset=utf-8";
+                var full = new StringBuilder();
                 await using var stream = await resp.Content.ReadAsStreamAsync(ct);
                 using var reader = new StreamReader(stream);
 
@@ -339,9 +439,17 @@ namespace RabbitIC.Api.MinimalApis
 
                     if (!string.IsNullOrEmpty(token))
                     {
+                        full.Append(token);
                         await ctx.Response.WriteAsync(token, ct);
                         await ctx.Response.Body.FlushAsync(ct);
                     }
+                }
+
+                if (convo is not null && full.Length > 0)
+                {
+                    db.Messages.Add(new Message
+                    { ConversationId = convo.Id, Role = "assistant", Content = full.ToString() });
+                    await db.SaveChangesAsync(CancellationToken.None);
                 }
             });
 

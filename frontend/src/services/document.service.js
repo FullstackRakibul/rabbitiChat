@@ -29,6 +29,15 @@ export function extractDocument(id, model, signal) {
 }
 
 /**
+ * The stored extraction for a document, or null when it hasn't been extracted yet.
+ * Avoids re-running the model just to re-display a result.
+ */
+export async function getExtraction(id) {
+  const res = await http.raw(`/documents/${id}/extract`)
+  return res.status === 204 ? null : res.json()
+}
+
+/**
  * Stateless RAG workspace chat (never saved to Conversations).
  * Streams the reply via onChunk. Pin documentId to ground on one PO.
  */

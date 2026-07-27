@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify'
 import {
   getModels, listConversations, getConversation,
   deleteConversation, streamChat,
-  uploadDocument, listDocuments, deleteDocument, extractDocument, workspaceChat,
+  uploadDocument, listDocuments, deleteDocument, extractDocument, getExtraction, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
@@ -324,10 +324,57 @@ async function removeDocument(id) {
   if (!confirm('Delete this document and its indexed chunks?')) return
   try {
     await deleteDocument(id)
+    if (docResultId.value === id) docResult.value = null
     await refreshDocuments()
   } catch (e) {
     if (!handleAuthError(e)) docError.value = e.message
   }
+}
+
+// Structured extraction from the Documents tab — result shown inline below the row.
+const docExtractingId = ref(null)
+const docResultId = ref(null)
+const docResult = ref(null)
+
+async function extractDoc(id) {
+  if (docExtractingId.value || !model.value) return
+  docError.value = ''
+  docNotice.value = ''
+  docExtractingId.value = id
+  if (docResultId.value !== id) docResult.value = null
+  try {
+    const res = await extractDocument(id, model.value)
+    docResultId.value = id
+    docResult.value = res
+    docNotice.value = 'Extraction saved to the document and its workspace thread.'
+    refreshDocuments()
+    refreshConversations()
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  } finally {
+    docExtractingId.value = null
+  }
+}
+
+// Show the JSON already stored on the server — no model run needed.
+async function showStoredExtraction(id) {
+  docError.value = ''
+  docNotice.value = ''
+  if (docResultId.value === id && docResult.value) { docResult.value = null; return } // toggle off
+  try {
+    const res = await getExtraction(id)
+    if (!res) { docNotice.value = 'No stored extraction yet — run Extract JSON.'; return }
+    docResultId.value = id
+    docResult.value = res
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  }
+}
+
+function copyDocResult() {
+  if (!docResult.value) return
+  navigator.clipboard.writeText(JSON.stringify(docResult.value.extracted, null, 2))
+  docNotice.value = 'JSON copied to clipboard.'
 }
 
 // ---- Workspace (agentic PO chat) ----
@@ -426,7 +473,8 @@ async function wsSend() {
   }
 }
 
-// One-click structured extraction of the pinned PO, shown as pretty JSON.
+// One-click structured extraction of the pinned PO. The backend stores the JSON on
+// the document AND appends it to the workspace conversation, so it survives reloads.
 async function wsExtract() {
   if (wsExtracting.value || !wsDoc.value || !model.value) return
   wsError.value = ''
@@ -434,12 +482,14 @@ async function wsExtract() {
   wsEvent(`Extracting structured JSON from “${wsDoc.value.fileName}”…`, 'ingest')
   try {
     const res = await extractDocument(wsDoc.value.id, model.value)
-    wsEvent(`Extraction complete — sources: ${res.sources.join(', ')}`, 'done')
+    wsEvent(`Extraction complete — saved to this workspace thread. Sources: ${res.sources.join(', ')}`, 'done')
     wsMessages.value.push({
       role: 'assistant',
       content: '```json\n' + JSON.stringify(res.extracted, null, 2) + '\n```',
     })
     wsScrollDown()
+    refreshDocuments()
+    refreshConversations()
   } catch (e) {
     if (handleAuthError(e)) return
     wsError.value = e.message
@@ -447,6 +497,28 @@ async function wsExtract() {
   } finally {
     wsExtracting.value = false
   }
+}
+
+// Pin an already-ingested document and restore its saved thread (chat + extractions).
+async function wsOpenDocument(d) {
+  wsController?.abort()
+  wsDoc.value = { id: d.id, fileName: d.fileName, chunks: d.chunks }
+  if (d.buyer) wsBuyer.value = d.buyer
+  wsMessages.value = []
+  wsError.value = ''
+  activeTab.value = 'workspace'
+
+  if (d.conversationId) {
+    try {
+      const convo = await getConversation(d.conversationId)
+      wsMessages.value = convo.messages.map((m) => ({ role: m.role, content: m.content }))
+      wsScrollDown()
+      return
+    } catch (e) {
+      if (handleAuthError(e)) return
+    }
+  }
+  wsEvent(`Pinned “${d.fileName}” — ${d.chunks} chunks ready for retrieval.`, 'done')
 }
 
 function wsNewChat() {
@@ -818,7 +890,7 @@ function startNewChat() {
 
       <!-- ── Documents tab (PO upload + ingestion) ── -->
       <section v-show="activeTab === 'docs'" class="panel">
-        <div class="panel-card">
+        <div class="panel-card wide">
           <h2>Documents</h2>
           <p class="panel-sub">Upload a PO / order file (PDF, XLSX, TXT, CSV). It's parsed, chunked and embedded for
             retrieval.</p>
@@ -835,13 +907,37 @@ function startNewChat() {
           <p v-if="docError" class="gate-err">{{ docError }}</p>
 
           <ul class="doc-list">
-            <li v-for="d in documents" :key="d.id" class="doc-row">
-              <span class="doc-status" :class="d.status">{{ d.status }}</span>
-              <span class="doc-name" :title="d.fileName">{{ d.fileName }}</span>
-              <span v-if="d.buyer" class="chip">{{ d.buyer }}</span>
-              <span class="doc-meta">{{ d.chunks }} chunks</span>
-              <button class="task-del" title="Delete" @click="removeDocument(d.id)">✕</button>
-            </li>
+            <template v-for="d in documents" :key="d.id">
+              <li class="doc-row">
+                <span class="doc-status" :class="d.status">{{ d.status }}</span>
+                <span class="doc-name" :title="d.fileName">{{ d.fileName }}</span>
+                <span v-if="d.buyer" class="chip">{{ d.buyer }}</span>
+                <span class="doc-meta">{{ d.chunks }} chunks</span>
+                <button v-if="d.hasExtraction" class="doc-extract stored" title="Show the stored JSON"
+                  @click="showStoredExtraction(d.id)">
+                  ✓ Saved JSON
+                </button>
+                <button class="doc-extract" :disabled="d.status !== 'ready' || docExtractingId === d.id"
+                  :title="d.status === 'ready' ? `Extract JSON using ${model}` : 'Document is not ready'"
+                  @click="extractDoc(d.id)">
+                  {{ docExtractingId === d.id ? 'Extracting…' : (d.hasExtraction ? '{ } Re-extract' : '{ } Extract JSON') }}
+                </button>
+                <button class="doc-extract" title="Open in Workspace" @click="wsOpenDocument(d)">Workspace →</button>
+                <button class="task-del" title="Delete" @click="removeDocument(d.id)">✕</button>
+              </li>
+              <!-- Extraction result, inline under its row -->
+              <li v-if="docResultId === d.id && docResult" class="doc-result">
+                <div class="doc-result-head">
+                  <span class="section-label">
+                    Extracted JSON
+                    <template v-if="docResult.sources.length"> · {{ docResult.sources.join(', ') }}</template>
+                    <template v-if="docResult.extractedAt"> · saved {{ new Date(docResult.extractedAt).toLocaleString() }}</template>
+                  </span>
+                  <button class="btn-ghost doc-copy" @click="copyDocResult">Copy</button>
+                </div>
+                <pre>{{ JSON.stringify(docResult.extracted, null, 2) }}</pre>
+              </li>
+            </template>
           </ul>
           <p v-if="!documents.length" class="empty-list">No documents yet — upload your first PO above.</p>
         </div>
@@ -2236,6 +2332,82 @@ textarea {
 .doc-status.failed {
   background: #fdf1f0;
   color: var(--danger);
+}
+
+.doc-extract {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.doc-extract:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: #c9ede7;
+}
+
+.doc-extract:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: .6;
+}
+
+.doc-extract.stored {
+  background: var(--accent-soft);
+  border-color: #c9ede7;
+}
+
+/* Extraction result block under its document row */
+.doc-result {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fbfdfd;
+}
+
+.doc-result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.doc-result-head .section-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-copy {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  flex: 0 0 auto;
+}
+
+.doc-result pre {
+  margin: 0;
+  max-height: 340px;
+  overflow: auto;
+  background: #13202a;
+  color: #e6eef7;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* The Documents panel carries JSON, so give it more room than the other panels. */
+.panel-card.wide {
+  max-width: 860px;
 }
 
 /* To-Do */

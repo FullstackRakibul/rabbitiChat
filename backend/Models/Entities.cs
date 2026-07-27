@@ -32,6 +32,12 @@ public class Document
     public string? Buyer { get; set; }                // e.g. "Kohls" — set at upload time
     public string Status { get; set; } = "processing"; // "processing" | "ready" | "failed"
     public string? Error { get; set; }                // populated when Status == "failed"
+
+    /// <summary>Last successful extraction, stored verbatim so the UI can re-display without re-running the model.</summary>
+    public string? ExtractedJson { get; set; }
+    public DateTime? ExtractedAt { get; set; }
+    /// <summary>Workspace thread this document belongs to — extractions are appended here.</summary>
+    public int? ConversationId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public List<EmbeddingChunk> Chunks { get; set; } = new();

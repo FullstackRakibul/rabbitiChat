@@ -78,16 +78,29 @@ public static class SchemaUpgrade
         {
             db.Database.ExecuteSqlRaw(@"
                 CREATE TABLE ""Documents"" (
-                    ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_Documents"" PRIMARY KEY AUTOINCREMENT,
-                    ""OwnerUserId"" INTEGER NOT NULL,
-                    ""FileName""    TEXT NOT NULL,
-                    ""ContentType"" TEXT NOT NULL,
-                    ""Buyer""       TEXT NULL,
-                    ""Status""      TEXT NOT NULL,
-                    ""Error""       TEXT NULL,
-                    ""CreatedAt""   TEXT NOT NULL
+                    ""Id""             INTEGER NOT NULL CONSTRAINT ""PK_Documents"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId""    INTEGER NOT NULL,
+                    ""FileName""       TEXT NOT NULL,
+                    ""ContentType""    TEXT NOT NULL,
+                    ""Buyer""          TEXT NULL,
+                    ""Status""         TEXT NOT NULL,
+                    ""Error""          TEXT NULL,
+                    ""ExtractedJson""  TEXT NULL,
+                    ""ExtractedAt""    TEXT NULL,
+                    ""ConversationId"" INTEGER NULL,
+                    ""CreatedAt""      TEXT NOT NULL
                 );");
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Documents_OwnerUserId"" ON ""Documents"" (""OwnerUserId"");");
+        }
+        else
+        {
+            // Older db files predate the extraction columns.
+            if (!ColumnExists(db, "Documents", "ExtractedJson"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ExtractedJson"" TEXT NULL;");
+            if (!ColumnExists(db, "Documents", "ExtractedAt"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ExtractedAt"" TEXT NULL;");
+            if (!ColumnExists(db, "Documents", "ConversationId"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ConversationId"" INTEGER NULL;");
         }
 
         if (!TableExists(db, "EmbeddingChunks"))
