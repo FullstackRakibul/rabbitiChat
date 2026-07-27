@@ -23,6 +23,44 @@ public class Conversation
     public List<Message> Messages { get; set; } = new();
 }
 
+public class Document
+{
+    public int Id { get; set; }
+    public int OwnerUserId { get; set; }              // owner — every query is scoped to this
+    public string FileName { get; set; } = "";
+    public string ContentType { get; set; } = "";
+    public string? Buyer { get; set; }                // e.g. "Kohls" — set at upload time
+    public string Status { get; set; } = "processing"; // "processing" | "ready" | "failed"
+    public string? Error { get; set; }                // populated when Status == "failed"
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public List<EmbeddingChunk> Chunks { get; set; } = new();
+}
+
+/// <summary>One embedded text chunk of a Document. Vector is a raw float32 LE blob.</summary>
+public class EmbeddingChunk
+{
+    public int Id { get; set; }
+
+    public int DocumentId { get; set; }
+    /// <summary>Owner. Null = shared team knowledge base.</summary>
+    public int? OwnerUserId { get; set; }
+
+    // Filterable metadata — indexed in AppDbContext.
+    public string? Buyer { get; set; }
+    public string? StyleNumber { get; set; }
+    public string? SourceRef { get; set; }            // e.g. "15901248.pdf p2" — used for citations
+
+    public string Text { get; set; } = "";
+
+    /// <summary>L2-normalised float32 vector, raw little-endian bytes.</summary>
+    public byte[] Vector { get; set; } = Array.Empty<byte>();
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public Document? Document { get; set; }
+}
+
 public class Message
 {
     public int Id { get; set; }

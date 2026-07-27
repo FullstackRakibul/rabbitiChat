@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Middleware;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Retrieval;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +28,10 @@ builder.Services.AddHttpClient("ollama", c =>
     c.BaseAddress = new Uri(ollamaUrl);
     c.Timeout = TimeSpan.FromMinutes(10); // local models can be slow on first load
 });
+
+// ---- Retrieval (RAG) ----
+builder.Services.AddSingleton<VectorIndex>();       // in-memory index, lives for the app lifetime
+builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings client
 
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -57,6 +62,11 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();   // creates everything fresh if the file is new
     SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
+
+    // Warm the vector index from SQLite so retrieval works from the first request.
+    var vectorIndex = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Retrieval.VectorIndex>();
+    vectorIndex.Load(db.EmbeddingChunks.AsNoTracking());
+    app.Logger.LogInformation("VectorIndex loaded with {Count} chunks.", vectorIndex.Count);
 }
 
 

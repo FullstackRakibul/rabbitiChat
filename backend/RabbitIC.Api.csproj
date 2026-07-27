@@ -10,6 +10,7 @@
   <ItemGroup>
     <!-- If a version fails to restore, run: dotnet add package <name> -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
+    <PackageReference Include="System.Numerics.Tensors" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

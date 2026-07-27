@@ -24,6 +24,7 @@ public static class SchemaUpgrade
         if (!TableExists(db, "Conversations")) return; // brand-new db; EnsureCreated already did it all
 
         EnsureUsersTable(db);
+        EnsureDocumentTables(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -69,6 +70,47 @@ public static class SchemaUpgrade
             );");
         db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_Users_Username"" ON ""Users"" (""Username"");");
         db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Users_Token"" ON ""Users"" (""Token"");");
+    }
+
+    private static void EnsureDocumentTables(AppDbContext db)
+    {
+        if (!TableExists(db, "Documents"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""Documents"" (
+                    ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_Documents"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId"" INTEGER NOT NULL,
+                    ""FileName""    TEXT NOT NULL,
+                    ""ContentType"" TEXT NOT NULL,
+                    ""Buyer""       TEXT NULL,
+                    ""Status""      TEXT NOT NULL,
+                    ""Error""       TEXT NULL,
+                    ""CreatedAt""   TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Documents_OwnerUserId"" ON ""Documents"" (""OwnerUserId"");");
+        }
+
+        if (!TableExists(db, "EmbeddingChunks"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""EmbeddingChunks"" (
+                    ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_EmbeddingChunks"" PRIMARY KEY AUTOINCREMENT,
+                    ""DocumentId""  INTEGER NOT NULL,
+                    ""OwnerUserId"" INTEGER NULL,
+                    ""Buyer""       TEXT NULL,
+                    ""StyleNumber"" TEXT NULL,
+                    ""SourceRef""   TEXT NULL,
+                    ""Text""        TEXT NOT NULL,
+                    ""Vector""      BLOB NOT NULL,
+                    ""CreatedAt""   TEXT NOT NULL,
+                    CONSTRAINT ""FK_EmbeddingChunks_Documents_DocumentId""
+                        FOREIGN KEY (""DocumentId"") REFERENCES ""Documents"" (""Id"") ON DELETE CASCADE
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_DocumentId""  ON ""EmbeddingChunks"" (""DocumentId"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_OwnerUserId"" ON ""EmbeddingChunks"" (""OwnerUserId"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_Buyer""       ON ""EmbeddingChunks"" (""Buyer"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_StyleNumber"" ON ""EmbeddingChunks"" (""StyleNumber"");");
+        }
     }
 
     private static bool EnsureConversationUserIdColumn(AppDbContext db)
