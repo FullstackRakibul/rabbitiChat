@@ -6,7 +6,7 @@ import {
 import {
   getModels, listConversations, getConversation,
   deleteConversation, streamChat,
-  uploadDocument, listDocuments, deleteDocument, extractDocument, workspaceChat,
+  uploadDocument, listDocuments, deleteDocument, extractDocument, getExtraction, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
@@ -335,10 +335,57 @@ async function removeDocument(id) {
   if (!confirm('Delete this document and its indexed chunks?')) return
   try {
     await deleteDocument(id)
+    if (docResultId.value === id) docResult.value = null
     await refreshDocuments()
   } catch (e) {
     if (!handleAuthError(e)) docError.value = e.message
   }
+}
+
+// Structured extraction from the Documents tab — result shown inline below the row.
+const docExtractingId = ref(null)
+const docResultId = ref(null)
+const docResult = ref(null)
+
+async function extractDoc(id) {
+  if (docExtractingId.value || !model.value) return
+  docError.value = ''
+  docNotice.value = ''
+  docExtractingId.value = id
+  if (docResultId.value !== id) docResult.value = null
+  try {
+    const res = await extractDocument(id, model.value)
+    docResultId.value = id
+    docResult.value = res
+    docNotice.value = 'Extraction saved to the document and its workspace thread.'
+    refreshDocuments()
+    refreshConversations()
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  } finally {
+    docExtractingId.value = null
+  }
+}
+
+// Show the JSON already stored on the server — no model run needed.
+async function showStoredExtraction(id) {
+  docError.value = ''
+  docNotice.value = ''
+  if (docResultId.value === id && docResult.value) { docResult.value = null; return } // toggle off
+  try {
+    const res = await getExtraction(id)
+    if (!res) { docNotice.value = 'No stored extraction yet — run Extract JSON.'; return }
+    docResultId.value = id
+    docResult.value = res
+  } catch (e) {
+    if (!handleAuthError(e)) docError.value = e.message
+  }
+}
+
+function copyDocResult() {
+  if (!docResult.value) return
+  navigator.clipboard.writeText(JSON.stringify(docResult.value.extracted, null, 2))
+  docNotice.value = 'JSON copied to clipboard.'
 }
 
 // ---- Workspace (agentic PO chat) ----
@@ -430,7 +477,8 @@ async function wsSend() {
   }
 }
 
-// One-click structured extraction of the pinned PO, shown as pretty JSON.
+// One-click structured extraction of the pinned PO. The backend stores the JSON on
+// the document AND appends it to the workspace conversation, so it survives reloads.
 async function wsExtract() {
   if (wsExtracting.value || !wsDoc.value || !model.value) return
   wsError.value = ''
@@ -438,12 +486,14 @@ async function wsExtract() {
   wsEvent(`Extracting structured JSON from “${wsDoc.value.fileName}”…`, 'ingest')
   try {
     const res = await extractDocument(wsDoc.value.id, model.value)
-    wsEvent(`Extraction complete — sources: ${res.sources.join(', ')}`, 'done')
+    wsEvent(`Extraction complete — saved to this workspace thread. Sources: ${res.sources.join(', ')}`, 'done')
     wsMessages.value.push({
       role: 'assistant',
       content: '```json\n' + JSON.stringify(res.extracted, null, 2) + '\n```',
     })
     wsScrollDown()
+    refreshDocuments()
+    refreshConversations()
   } catch (e) {
     if (handleAuthError(e)) return
     wsError.value = e.message
@@ -451,6 +501,28 @@ async function wsExtract() {
   } finally {
     wsExtracting.value = false
   }
+}
+
+// Pin an already-ingested document and restore its saved thread (chat + extractions).
+async function wsOpenDocument(d) {
+  wsController?.abort()
+  wsDoc.value = { id: d.id, fileName: d.fileName, chunks: d.chunks }
+  if (d.buyer) wsBuyer.value = d.buyer
+  wsMessages.value = []
+  wsError.value = ''
+  activeTab.value = 'workspace'
+
+  if (d.conversationId) {
+    try {
+      const convo = await getConversation(d.conversationId)
+      wsMessages.value = convo.messages.map((m) => ({ role: m.role, content: m.content }))
+      wsScrollDown()
+      return
+    } catch (e) {
+      if (handleAuthError(e)) return
+    }
+  }
+  wsEvent(`Pinned “${d.fileName}” — ${d.chunks} chunks ready for retrieval.`, 'done')
 }
 
 function wsNewChat() {
@@ -500,35 +572,17 @@ function startNewChat() {
 
 <template>
   <!-- Login gate -->
-  <LoginGate
-    v-if="!loggedIn"
-    v-model:username="loginUser"
-    v-model:secret="loginSecret"
-    :busy="loginBusy"
-    :error="loginError"
-    @submit="doLogin"
-  />
+  <LoginGate v-if="!loggedIn" v-model:username="loginUser" v-model:secret="loginSecret" :busy="loginBusy"
+    :error="loginError" @submit="doLogin" />
 
   <!-- App -->
   <div v-else class="flex h-screen overflow-hidden bg-background text-foreground">
-    <AppSidebar
-      v-model:open="sidebarOpen"
-      v-model:source-search="sourceSearch"
-      :username="username"
-      :initials="initials"
-      :sources="sources"
-      :filtered-sources="filteredSources"
-      :active-sources-count="activeSourcesCount"
-      :grouped-conversations="groupedConversations"
-      :conversation-count="conversations.length"
-      :current-id="currentId"
-      @new-chat="openNewChat"
-      @open-conversation="openConversation"
-      @delete-conversation="removeConversation"
-      @clear-all="clearAllConversations"
-      @logout="logout"
-      @open-settings="activeTab = 'settings'; closeSidebar()"
-    />
+    <AppSidebar v-model:open="sidebarOpen" v-model:source-search="sourceSearch" :username="username"
+      :initials="initials" :sources="sources" :filtered-sources="filteredSources"
+      :active-sources-count="activeSourcesCount" :grouped-conversations="groupedConversations"
+      :conversation-count="conversations.length" :current-id="currentId" @new-chat="openNewChat"
+      @open-conversation="openConversation" @delete-conversation="removeConversation" @clear-all="clearAllConversations"
+      @logout="logout" @open-settings="activeTab = 'settings'; closeSidebar()" />
 
     <main class="flex min-w-0 flex-1 flex-col">
       <!-- unmount-on-hide=false keeps every panel alive across tab switches, so a
@@ -536,13 +590,7 @@ function startNewChat() {
       <Tabs v-model="activeTab" :unmount-on-hide="false" class="flex min-h-0 flex-1 flex-col">
         <!-- Top bar -->
         <div class="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            class="md:hidden"
-            aria-label="Open menu"
-            @click="sidebarOpen = true"
-          >
+          <Button variant="ghost" size="icon" class="md:hidden" aria-label="Open menu" @click="sidebarOpen = true">
             <Menu />
           </Button>
 
@@ -554,23 +602,14 @@ function startNewChat() {
           </TabsList>
 
           <div class="ml-auto flex items-center gap-2">
-            <span
-              class="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"
-              :title="status"
-            >
-              <span
-                :class="cn(
-                  'h-2 w-2 rounded-full',
-                  connected ? 'bg-emerald-500' : 'bg-muted-foreground/40',
-                )"
-              />
+            <span class="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" :title="status">
+              <span :class="cn(
+                'h-2 w-2 rounded-full',
+                connected ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+              )" />
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              :title="theme === 'dark' ? 'Switch to light' : 'Switch to dark'"
-              @click="toggleTheme"
-            >
+            <Button variant="ghost" size="icon" :title="theme === 'dark' ? 'Switch to light' : 'Switch to dark'"
+              @click="toggleTheme">
               <Moon v-if="theme === 'dark'" />
               <Sun v-else />
               <span class="sr-only">Toggle theme</span>
@@ -580,111 +619,46 @@ function startNewChat() {
 
         <!-- Panels -->
         <TabsContent value="chat" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <ChatTab
-            v-model:model="model"
-            v-model:context="context"
-            v-model:input="input"
-            :models="models"
-            :messages="messages"
-            :busy="busy"
-            :error="error"
-            :active-sources="activeSources"
-            :topics-count="topicsCount"
-            :ideas-count="ideasCount"
-            :docs-count="docsCount"
-            :contexts="contexts"
-            @send="send"
-            @new-chat="openNewChat"
-            @scroller="el => scroller = el"
-          />
+          <ChatTab v-model:model="model" v-model:context="context" v-model:input="input" :models="models"
+            :messages="messages" :busy="busy" :error="error" :active-sources="activeSources" :topics-count="topicsCount"
+            :ideas-count="ideasCount" :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"
+            @scroller="el => scroller = el" />
         </TabsContent>
 
         <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <WorkspaceTab
-            ref="wsTab"
-            v-model:buyer="wsBuyer"
-            v-model:model="model"
-            v-model:input="wsInput"
-            :buyer-profiles="buyerProfiles"
-            :models="models"
-            :doc="wsDoc"
-            :file="wsFile"
-            :messages="wsMessages"
-            :busy="wsBusy"
-            :uploading="wsUploading"
-            :extracting="wsExtracting"
-            :error="wsError"
-            @file-picked="onWsFilePicked"
-            @upload="wsUpload"
-            @extract="wsExtract"
-            @send="wsSend"
-            @new-chat="wsNewChat"
-            @scroller="el => wsScroller = el"
-          />
+          <WorkspaceTab ref="wsTab" v-model:buyer="wsBuyer" v-model:model="model" v-model:input="wsInput"
+            :buyer-profiles="buyerProfiles" :models="models" :doc="wsDoc" :file="wsFile" :messages="wsMessages"
+            :busy="wsBusy" :uploading="wsUploading" :extracting="wsExtracting" :error="wsError"
+            @file-picked="onWsFilePicked" @upload="wsUpload" @extract="wsExtract" @send="wsSend" @new-chat="wsNewChat"
+            @scroller="el => wsScroller = el" />
         </TabsContent>
 
         <TabsContent value="docs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <DocumentsTab
-            ref="docsTab"
-            v-model:buyer="docBuyer"
-            :documents="documents"
-            :file="docFile"
-            :uploading="docUploading"
-            :error="docError"
-            :notice="docNotice"
-            @file-picked="onDocPicked"
-            @upload="doUpload"
-            @delete="removeDocument"
-          />
+          <DocumentsTab ref="docsTab" v-model:buyer="docBuyer" :documents="documents" :file="docFile"
+            :uploading="docUploading" :error="docError" :notice="docNotice" @file-picked="onDocPicked"
+            @upload="doUpload" @delete="removeDocument" />
         </TabsContent>
 
         <TabsContent value="todo" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <TodoTab
-            v-model:new-task="newTask"
-            :tasks="tasks"
-            :filtered-tasks="filteredTasks"
-            :filter="filterTodo"
-            :active-count="activeTaskCount"
-            :done-count="doneTaskCount"
-            @update:filter="filterTodo = $event"
-            @add="addTask"
-            @toggle="toggleTask"
-            @delete="deleteTask"
-          />
+          <TodoTab v-model:new-task="newTask" :tasks="tasks" :filtered-tasks="filteredTasks" :filter="filterTodo"
+            :active-count="activeTaskCount" :done-count="doneTaskCount" @update:filter="filterTodo = $event"
+            @add="addTask" @toggle="toggleTask" @delete="deleteTask" />
         </TabsContent>
 
         <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <SourcesTab
-            v-model:search="sourceSearch"
-            :sources="sources"
-            :filtered-sources="filteredSources"
-            :active-count="activeSourcesCount"
-          />
+          <SourcesTab v-model:search="sourceSearch" :sources="sources" :filtered-sources="filteredSources"
+            :active-count="activeSourcesCount" />
         </TabsContent>
 
         <TabsContent value="settings" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <SettingsTab
-            v-model:model="model"
-            v-model:context="context"
-            :username="username"
-            :initials="initials"
-            :status="status"
-            :connected="connected"
-            :api-base-url="environment.apiBaseUrl"
-            :models="models"
-            :contexts="contexts"
-            @logout="logout"
-          />
+          <SettingsTab v-model:model="model" v-model:context="context" :username="username" :initials="initials"
+            :status="status" :connected="connected" :api-base-url="environment.apiBaseUrl" :models="models"
+            :contexts="contexts" @logout="logout" />
         </TabsContent>
       </Tabs>
     </main>
 
-    <NewChatDialog
-      v-model:open="showNewChat"
-      v-model:context="context"
-      :contexts="contexts"
-      :sources="sources"
-      @start="startNewChat"
-    />
+    <NewChatDialog v-model:open="showNewChat" v-model:context="context" :contexts="contexts" :sources="sources"
+      @start="startNewChat" />
   </div>
 </template>

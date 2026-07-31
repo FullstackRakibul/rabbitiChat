@@ -65,6 +65,11 @@ export const http = {
     return (await request(path, options)).json()
   },
 
+  /** Raw Response — for endpoints that may answer 204 (no body to parse). */
+  async raw(path, options) {
+    return request(path, options)
+  },
+
   async post(path, body, options) {
     return (await request(path, { ...options, method: 'POST', body })).json()
   },
