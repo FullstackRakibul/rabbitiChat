@@ -204,6 +204,7 @@ namespace RabbitIC.Api.MinimalApis
                 using var reader = new StreamReader(stream);
 
                 string? line;
+
                 while ((line = await reader.ReadLineAsync(ctx.RequestAborted)) is not null)
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
@@ -236,11 +237,11 @@ namespace RabbitIC.Api.MinimalApis
 
 
 
-                        group.MapGet("/version", () => Results.Ok())
-                            .WithName("GetOllamaVersion")
-                            .WithSummary("Get the version of the Ollama API.")
-                            .WithDescription("Returns the version information of the Ollama API.");
-                        return app;
-                    }
-                }
-            }
+            group.MapGet("/version", () => Results.Ok())
+                .WithName("GetOllamaVersion")
+                .WithSummary("Get the version of the Ollama API.")
+                .WithDescription("Returns the version information of the Ollama API.");
+            return app;
+        }
+    }
+}
