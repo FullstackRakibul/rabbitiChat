@@ -106,7 +106,21 @@ public sealed class ExtractionDispatcher(
 
         // ---- fallback path ----
         var llmInput = isPdf ? ReadAllPdfText(doc.FilePath!) : await chunkText();
-        var llm = await fallback.ExtractAsync(llmInput, model, ct);
+
+        ExtractionResult? llm;
+        try
+        {
+            llm = await fallback.ExtractAsync(llmInput, model, ct);
+        }
+        catch (LlmPoFallback.ModelUnavailableException ex)
+        {
+            // A timeout or unreachable model is an infrastructure failure, not a
+            // bad extraction — report it as such instead of a 500, and keep any
+            // note explaining why we ended up on this path at all.
+            return new("failed", "GenericLlm", profile?.Name, profile?.Id, confidence, null,
+                       Array.Empty<ValidationCheck>(), note, ex.Message);
+        }
+
         if (llm is null)
             return new("failed", "GenericLlm", profile?.Name, profile?.Id, confidence, null,
                        Array.Empty<ValidationCheck>(), note,

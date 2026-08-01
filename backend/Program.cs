@@ -71,6 +71,7 @@ builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings cl
 // ---- PO extraction ----
 // Deterministic parsers register here as IPoParser implementations; the
 // dispatcher routes to them by BuyerProfile.ParserKey and falls back to the LLM.
+builder.Services.AddScoped<RabbitIC.Api.Extraction.IPoParser, RabbitIC.Api.Extraction.PoExtractor>();
 builder.Services.AddScoped<RabbitIC.Api.Extraction.LlmPoFallback>();
 builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
 

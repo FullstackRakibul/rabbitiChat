@@ -5,6 +5,7 @@
 // validation gate the deterministic parsers get.
 
 using System.Text.Json;
+using RabbitIC.Api.AuthHelper;
 
 namespace RabbitIC.Api.Extraction;
 
@@ -55,6 +56,13 @@ public sealed class LlmPoFallback(IHttpClientFactory http, IConfiguration config
         6. Every line item in the document must appear. Do not summarise or truncate.
         """;
 
+    /// <summary>
+    /// Raised when the model call fails in a way the user can act on (timeout,
+    /// Ollama unreachable, model not pulled). Distinct from returning null, which
+    /// means "the model answered, but not with usable JSON".
+    /// </summary>
+    public sealed class ModelUnavailableException(string message) : Exception(message);
+
     /// <summary>Returns the mapped result WITHOUT validation applied — the dispatcher gates it.</summary>
     public async Task<ExtractionResult?> ExtractAsync(string documentText, string? model, CancellationToken ct)
     {
@@ -83,17 +91,45 @@ public sealed class LlmPoFallback(IHttpClientFactory http, IConfiguration config
         {
             var client = http.CreateClient("ollama");
             var resp = await client.PostAsJsonAsync("/api/chat", payload, ct);
-            resp.EnsureSuccessStatusCode();
+
+            // Ollama reports "model not found" as 404 with a JSON body — surface
+            // that verbatim rather than as a bare status code, because the fix
+            // (`ollama pull <model>`) is only obvious once you can see the name.
+            if (!resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync(CancellationToken.None);
+                throw new ModelUnavailableException(
+                    $"Ollama returned {(int)resp.StatusCode} for model '{chosenModel}'. " +
+                    Authorization.Truncate(body, 300));
+            }
 
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
             var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString();
             return string.IsNullOrWhiteSpace(content) ? null : Map(content);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // HttpClient.Timeout elapsing throws TaskCanceledException — which derives
+        // from OperationCanceledException and so looks exactly like the caller
+        // giving up. The caller's token is the only reliable way to tell them
+        // apart: if it is NOT signalled, this was our timeout, not their abort.
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return null;
+            throw new ModelUnavailableException(
+                $"The model '{chosenModel}' did not respond within the {TimeoutMinutes}-minute limit. " +
+                "It may still be loading, or the document may be too large for it — " +
+                $"try a smaller/faster model, or pre-load it with `ollama run {chosenModel}`.");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ModelUnavailableException($"Could not reach Ollama: {ex.Message}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not ModelUnavailableException)
+        {
+            return null;   // answered, but not with usable JSON
         }
     }
+
+    /// <summary>Mirrors the "ollama" handler's configured timeout, for the message above only.</summary>
+    private const int TimeoutMinutes = 10;
 
     private static ExtractionResult? Map(string json)
     {
