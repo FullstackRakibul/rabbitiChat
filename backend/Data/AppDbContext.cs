@@ -12,6 +12,8 @@ public class AppDbContext : DbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<EmbeddingChunk> EmbeddingChunks => Set<EmbeddingChunk>();
+    public DbSet<BuyerProfile> BuyerProfiles => Set<BuyerProfile>();
+    public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -48,5 +50,8 @@ public class AppDbContext : DbContext
         b.Entity<EmbeddingChunk>().HasIndex(c => c.OwnerUserId);
         b.Entity<EmbeddingChunk>().HasIndex(c => c.Buyer);
         b.Entity<EmbeddingChunk>().HasIndex(c => c.StyleNumber);
+
+        b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
+        b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);
     }
 }

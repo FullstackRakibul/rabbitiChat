@@ -33,6 +33,13 @@ public class Document
     public string Status { get; set; } = "processing"; // "processing" | "ready" | "failed"
     public string? Error { get; set; }                // populated when Status == "failed"
 
+    /// <summary>
+    /// Where the original upload is stored on disk (data/uploads/{id}{ext}).
+    /// Null for documents uploaded before files were persisted — those can be
+    /// chatted with (chunks exist) but not re-parsed or viewed as a source PDF.
+    /// </summary>
+    public string? FilePath { get; set; }
+
     /// <summary>Last successful extraction, stored verbatim so the UI can re-display without re-running the model.</summary>
     public string? ExtractedJson { get; set; }
     public DateTime? ExtractedAt { get; set; }

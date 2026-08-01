@@ -27,7 +27,18 @@
 
         public class ExtractRequest
         {
-            public string Model { get; set; } = string.Empty;
+            /// <summary>Chat model for the LLM fallback path. Optional — config default applies.</summary>
+            public string? Model { get; set; }
+        };
+
+        /// <summary>Human sign-off on an extraction run.</summary>
+        public class ConfirmExtractionRequest
+        {
+            /// <summary>The reviewed (possibly edited) extraction payload.</summary>
+            public System.Text.Json.JsonElement ResultJson { get; set; }
+
+            /// <summary>Which field paths changed from machine output, plus any override reason.</summary>
+            public System.Text.Json.JsonElement Edits { get; set; }
         };
 
         public class ChatMsg

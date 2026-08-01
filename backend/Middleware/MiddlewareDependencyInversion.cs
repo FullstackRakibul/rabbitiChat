@@ -25,6 +25,14 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        public static WebApplication ApplicationBuyerProfileApis(this WebApplication app)
+        {
+            var profileApi = app.MapGroup("/api").WithTags("Buyer profiles");
+
+            profileApi.MapBuyerProfileApis();
+            return app;
+        }
+
         public static WebApplication ApplicationOllamaApis(this WebApplication app)
         {
             var ollamaApi = app.MapGroup("/api").WithTags("Ollama APIs");

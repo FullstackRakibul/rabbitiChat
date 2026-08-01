@@ -21,11 +21,30 @@ export function deleteDocument(id) {
 }
 
 /**
- * Extract structured PO JSON from an ingested document.
- * Returns { documentId, fileName, buyer, extracted, sources }.
+ * Extract structured PO data through the detect → parse → validate pipeline.
+ * Returns { runId, status, parser, buyer, detectConfidence, note, error,
+ *           failedChecks, checks, data }. status "ok" only comes from a
+ * deterministic parser with every check passing.
  */
-export function extractDocument(id, model, signal) {
-  return http.post(`/documents/${id}/extract`, { model }, { signal })
+export function extractDocument(id, { model, buyerProfileId } = {}, signal) {
+  const q = buyerProfileId ? `?buyerProfileId=${buyerProfileId}` : ''
+  return http.post(`/documents/${id}/extract${q}`, { model }, { signal })
+}
+
+/** The stored original as a blob (auth header goes with it — no cookie). */
+export async function fetchDocumentFile(id) {
+  const res = await http.raw(`/documents/${id}/file`)
+  return res.blob()
+}
+
+/** Human sign-off: the edited payload plus which field paths changed. */
+export function confirmExtraction(id, resultJson, edits) {
+  return http.post(`/documents/${id}/extraction/confirm`, { resultJson, edits })
+}
+
+/** Buyer profiles for the extract-time selector ("Auto-detect" = omit the id). */
+export function listBuyerProfiles() {
+  return http.get('/buyer-profiles')
 }
 
 /**

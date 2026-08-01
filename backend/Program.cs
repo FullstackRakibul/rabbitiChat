@@ -68,6 +68,12 @@ builder.Services.AddSwaggerGen(o =>
 builder.Services.AddSingleton<VectorIndex>();       // in-memory index, lives for the app lifetime
 builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings client
 
+// ---- PO extraction ----
+// Deterministic parsers register here as IPoParser implementations; the
+// dispatcher routes to them by BuyerProfile.ParserKey and falls back to the LLM.
+builder.Services.AddScoped<RabbitIC.Api.Extraction.LlmPoFallback>();
+builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
+
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173", "http://192.168.61.41:4200",
@@ -95,6 +101,7 @@ app.UseSwaggerUI(o =>
 app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
+app.ApplicationBuyerProfileApis();
 
 
 app.UseCors();

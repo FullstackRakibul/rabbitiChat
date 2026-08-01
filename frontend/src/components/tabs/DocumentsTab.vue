@@ -17,7 +17,7 @@ const props = defineProps({
   notice: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:buyer', 'file-picked', 'upload', 'delete'])
+const emit = defineEmits(['update:buyer', 'file-picked', 'upload', 'delete', 'review'])
 
 const buyerValue = computed({
   get: () => props.buyer,
@@ -89,6 +89,9 @@ defineExpose({ reset: () => { if (fileInput.value) fileInput.value.value = '' } 
               {{ d.buyer }}
             </Badge>
             <span class="shrink-0 text-xs text-muted-foreground">{{ d.chunks }} chunks</span>
+            <Button variant="outline" size="sm" class="h-7 shrink-0" @click="emit('review', d.id)">
+              Review
+            </Button>
             <Button
               variant="ghost"
               size="icon"

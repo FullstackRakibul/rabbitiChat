@@ -7,4 +7,5 @@ export { listConversations, getConversation, deleteConversation } from './conver
 export {
   uploadDocument, listDocuments, deleteDocument,
   extractDocument, getExtraction, workspaceChat,
+  fetchDocumentFile, confirmExtraction, listBuyerProfiles,
 } from './document.service.js'

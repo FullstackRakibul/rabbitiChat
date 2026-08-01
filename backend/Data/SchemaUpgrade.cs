@@ -25,6 +25,7 @@ public static class SchemaUpgrade
 
         EnsureUsersTable(db);
         EnsureDocumentTables(db);
+        EnsureExtractionTables(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -85,6 +86,7 @@ public static class SchemaUpgrade
                     ""Buyer""          TEXT NULL,
                     ""Status""         TEXT NOT NULL,
                     ""Error""          TEXT NULL,
+                    ""FilePath""       TEXT NULL,
                     ""ExtractedJson""  TEXT NULL,
                     ""ExtractedAt""    TEXT NULL,
                     ""ConversationId"" INTEGER NULL,
@@ -101,6 +103,8 @@ public static class SchemaUpgrade
                 db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ExtractedAt"" TEXT NULL;");
             if (!ColumnExists(db, "Documents", "ConversationId"))
                 db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ConversationId"" INTEGER NULL;");
+            if (!ColumnExists(db, "Documents", "FilePath"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""FilePath"" TEXT NULL;");
         }
 
         if (!TableExists(db, "EmbeddingChunks"))
@@ -123,6 +127,71 @@ public static class SchemaUpgrade
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_OwnerUserId"" ON ""EmbeddingChunks"" (""OwnerUserId"");");
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_Buyer""       ON ""EmbeddingChunks"" (""Buyer"");");
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_StyleNumber"" ON ""EmbeddingChunks"" (""StyleNumber"");");
+        }
+    }
+
+    private static void EnsureExtractionTables(AppDbContext db)
+    {
+        if (!TableExists(db, "BuyerProfiles"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""BuyerProfiles"" (
+                    ""Id""               INTEGER NOT NULL CONSTRAINT ""PK_BuyerProfiles"" PRIMARY KEY AUTOINCREMENT,
+                    ""Name""             TEXT NOT NULL,
+                    ""DetectPattern""    TEXT NOT NULL,
+                    ""ParserKey""        TEXT NOT NULL,
+                    ""ChunkingStrategy"" TEXT NOT NULL,
+                    ""IsActive""         INTEGER NOT NULL,
+                    ""CreatedAt""        TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_BuyerProfiles_Name"" ON ""BuyerProfiles"" (""Name"");");
+        }
+
+        if (!TableExists(db, "ExtractionRuns"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""ExtractionRuns"" (
+                    ""Id""                INTEGER NOT NULL CONSTRAINT ""PK_ExtractionRuns"" PRIMARY KEY AUTOINCREMENT,
+                    ""DocumentId""        INTEGER NOT NULL,
+                    ""OwnerUserId""       INTEGER NOT NULL,
+                    ""BuyerProfileId""    INTEGER NULL,
+                    ""ParserKey""         TEXT NOT NULL,
+                    ""Status""            TEXT NOT NULL,
+                    ""ResultJson""        TEXT NOT NULL,
+                    ""FailedChecks""      TEXT NOT NULL,
+                    ""ConfirmedJson""     TEXT NULL,
+                    ""ConfirmedByUserId"" INTEGER NULL,
+                    ""ConfirmedAt""       TEXT NULL,
+                    ""EditsJson""         TEXT NULL,
+                    ""CreatedAt""         TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ExtractionRuns_DocumentId"" ON ""ExtractionRuns"" (""DocumentId"");");
+        }
+        else
+        {
+            // Confirm columns arrived after the table itself.
+            if (!ColumnExists(db, "ExtractionRuns", "ConfirmedJson"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""ConfirmedJson"" TEXT NULL;");
+            if (!ColumnExists(db, "ExtractionRuns", "ConfirmedByUserId"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""ConfirmedByUserId"" INTEGER NULL;");
+            if (!ColumnExists(db, "ExtractionRuns", "ConfirmedAt"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""ConfirmedAt"" TEXT NULL;");
+            if (!ColumnExists(db, "ExtractionRuns", "EditsJson"))
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""EditsJson"" TEXT NULL;");
+        }
+
+        // Seed the one template that has a dedicated parser.
+        var kohls = db.Database
+            .SqlQueryRaw<int>(@"SELECT COUNT(*) AS ""Value"" FROM ""BuyerProfiles"" WHERE ""Name"" = 'Kohls';")
+            .AsEnumerable().First();
+        if (kohls == 0)
+        {
+            db.Database.ExecuteSqlRaw(@"
+                INSERT INTO ""BuyerProfiles""
+                    (""Name"", ""DetectPattern"", ""ParserKey"", ""ChunkingStrategy"", ""IsActive"", ""CreatedAt"")
+                VALUES
+                    ('Kohls', 'SPS Commerce|Kohls|Order #:|Vendors Style', 'KohlsSps', 'none', 1, {0});",
+                DateTime.UtcNow.ToString("o"));
         }
     }
 

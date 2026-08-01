@@ -18,6 +18,14 @@ namespace RabbitIC.Api.MinimalApis
         private const int ChunkOverlap = 100;
         private const long MaxFileBytes = 20 * 1024 * 1024; // 20 MB
 
+        // Originals live beside rabbitic.db; the relative path resolves against the
+        // same working directory the connection string does.
+        private static readonly string UploadsDir = Path.Combine("data", "uploads");
+
+        // Same camelCase contract the minimal-API responses use, so the cached
+        // ExtractedJson round-trips into the review UI unchanged.
+        private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
         /// <summary>A contiguous piece of extracted text plus where it came from (for citations).</summary>
         private sealed record Section(string SourceRef, string Text);
 
@@ -57,11 +65,23 @@ namespace RabbitIC.Api.MinimalApis
                 db.Documents.Add(doc);
                 await db.SaveChangesAsync(ct);
 
+                // ---- persist the original ----
+                // The stored file is the source of truth for deterministic re-parsing
+                // and for the review screen's side-by-side PDF view. Saved before text
+                // extraction so a failed ingest still leaves the file recoverable.
+                Directory.CreateDirectory(UploadsDir);
+                var storedPath = Path.Combine(UploadsDir, $"{doc.Id}{ext}");
+                await using (var target = File.Create(storedPath))
+                await using (var source = file.OpenReadStream())
+                    await source.CopyToAsync(target, ct);
+                doc.FilePath = storedPath;
+                await db.SaveChangesAsync(ct);
+
                 try
                 {
                     // ---- extract ----
                     List<Section> sections;
-                    await using (var stream = file.OpenReadStream())
+                    await using (var stream = File.OpenRead(storedPath))
                     {
                         sections = ext switch
                         {
@@ -142,6 +162,31 @@ namespace RabbitIC.Api.MinimalApis
                     .ToListAsync());
             });
 
+            // Stream the stored original (review screen source pane). Same ownership
+            // rule as everything else: not yours → 404, indistinguishable from absent.
+            app.MapGet("/documents/{id:int}/file", async (int id, HttpContext ctx, AppDbContext db) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == id && d.OwnerUserId == user.Id);
+                if (doc is null) return Results.NotFound();
+                if (doc.FilePath is null || !File.Exists(doc.FilePath))
+                    return Results.Problem(
+                        "No stored file — this document was uploaded before originals were kept. Re-upload it to review.",
+                        statusCode: 410);
+
+                var contentType = Path.GetExtension(doc.FilePath).ToLowerInvariant() switch
+                {
+                    ".pdf" => "application/pdf",
+                    ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ".csv" => "text/csv",
+                    _ => "text/plain",
+                };
+                ctx.Response.Headers.ContentDisposition = $"inline; filename=\"{doc.FileName}\"";
+                return Results.File(File.OpenRead(doc.FilePath), contentType);
+            });
+
             // The stored extraction for a document — lets the UI re-display without re-running the model.
             app.MapGet("/documents/{id:int}/extract", async (int id, HttpContext ctx, AppDbContext db) =>
             {
@@ -178,146 +223,133 @@ namespace RabbitIC.Api.MinimalApis
                 db.Documents.Remove(doc);
                 await db.SaveChangesAsync();
                 index.RemoveDocument(id);
+
+                // Stored original goes with the row. Best-effort: a locked file
+                // shouldn't fail the delete the user asked for.
+                if (doc.FilePath is not null)
+                    try { File.Delete(doc.FilePath); } catch (IOException) { }
+
                 return Results.NoContent();
             });
 
-            // Extract structured PO JSON from an ingested document. Uses ALL of the
-            // document's chunks (not retrieval) so no line item is missed, and Ollama's
-            // format:"json" so the output is always valid JSON.
+            // Extract structured PO data: detect the buyer template, prefer the
+            // deterministic parser, fall back to the model — and gate everything
+            // through the same arithmetic checks. Model output is never "ok".
             app.MapPost("/documents/{id:int}/extract", async (
                 int id, ExtractRequest req, HttpContext ctx, AppDbContext db,
-                IHttpClientFactory http, CancellationToken ct) =>
+                Extraction.ExtractionDispatcher dispatcher, int? buyerProfileId,
+                CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                if (string.IsNullOrWhiteSpace(req.Model))
-                    return Results.BadRequest(new { error = "model is required." });
-                if (IsEmbeddingModel(req.Model))
+                if (!string.IsNullOrWhiteSpace(req.Model) && IsEmbeddingModel(req.Model))
                     return Results.BadRequest(new { error = $"'{req.Model}' is an embedding model — pick a chat model." });
 
                 var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == id && d.OwnerUserId == user.Id, ct);
                 if (doc is null) return Results.NotFound();
 
-                var chunks = await db.EmbeddingChunks
-                    .Where(c => c.DocumentId == id)
-                    .OrderBy(c => c.Id)
-                    .Select(c => new { c.SourceRef, c.Text })
-                    .ToListAsync(ct);
-                if (chunks.Count == 0)
-                    return Results.BadRequest(new { error = "Document has no indexed content." });
+                // Legacy documents have no stored file; their indexed text is the
+                // only input the fallback can use.
+                async Task<string> ChunkText()
+                {
+                    var chunks = await db.EmbeddingChunks
+                        .Where(c => c.DocumentId == id)
+                        .OrderBy(c => c.Id)
+                        .Select(c => c.Text)
+                        .ToListAsync(ct);
+                    return string.Join("\n", chunks);
+                }
 
-                var docText = new StringBuilder();
-                foreach (var c in chunks)
-                    docText.AppendLine($"[{c.SourceRef}]\n{c.Text}\n");
+                var outcome = await dispatcher.DispatchAsync(doc, ChunkText, buyerProfileId, req.Model, ct);
 
-                var system =
-                    "You extract purchase-order data from garment/retail PO documents. " +
-                    "Output ONLY a JSON object matching this schema (use null for missing fields, numbers as numbers, dates as YYYY-MM-DD):\n" +
-                    """
-                    {
-                      "po_number": "string", "buyer": "string", "po_type": "string",
-                      "po_date": "YYYY-MM-DD", "cancel_date": "YYYY-MM-DD",
-                      "ship_window": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" },
-                      "exit_factory_date": "YYYY-MM-DD",
-                      "vendor": "string", "manufacturing_plant": "string",
-                      "style_number": "string", "product_description": "string",
-                      "total_quantity": 0, "po_total": 0.0, "currency": "string",
-                      "line_items": [ { "line": 0, "sku": "string", "upc": "string", "color": "string",
-                                        "size": "string", "unit_cost": 0.0, "retail_price": 0.0,
-                                        "qty": 0, "uom": "string" } ]
-                    }
-                    """ +
-                    "\nRules: a prepack/assortment header line summarises the size-breakdown lines below it — " +
-                    "list the size-breakdown lines as line_items and do not double-count quantities. " +
-                    "Unit price pairs like '6.29 34.99' are unit_cost then retail_price.";
+                var resultJson = outcome.Result is null
+                    ? ""
+                    : JsonSerializer.Serialize(outcome.Result, WebJson);
 
-                if (!string.IsNullOrWhiteSpace(doc.Buyer))
-                    system += $"\nThe buyer profile for this document is: {doc.Buyer}.";
+                // Cache the machine output for re-display; confirm overwrites this
+                // cache (not the audit row) with the human-approved version.
+                if (outcome.Result is not null)
+                {
+                    doc.ExtractedJson = resultJson;
+                    doc.ExtractedAt = DateTime.UtcNow;
+                }
+
+                var run = new ExtractionRun
+                {
+                    DocumentId = doc.Id,
+                    OwnerUserId = user.Id,
+                    BuyerProfileId = buyerProfileId ?? outcome.BuyerProfileId,
+                    ParserKey = outcome.ParserKey,
+                    Status = outcome.Status,
+                    ResultJson = resultJson,
+                    FailedChecks = string.Join("; ", outcome.FailedChecks.Select(c => c.Check)),
+                };
+                db.ExtractionRuns.Add(run);
+                await db.SaveChangesAsync(ct);
 
                 var payload = new
                 {
-                    model = req.Model,
-                    messages = new[]
-                    {
-                        new { role = "system", content = system },
-                        new { role = "user", content = "Extract the purchase order data from this document:\n\n" + docText },
-                    },
-                    stream = false,
-                    format = "json",
-                    options = new { temperature = 0 },
+                    runId = run.Id,
+                    documentId = doc.Id,
+                    fileName = doc.FileName,
+                    status = outcome.Status,
+                    parser = outcome.ParserKey,
+                    buyer = outcome.BuyerName,
+                    detectConfidence = Math.Round(outcome.DetectConfidence, 2),
+                    note = outcome.Note,
+                    error = outcome.Error,
+                    failedChecks = outcome.FailedChecks.Select(c => new { c.Check, c.Detail }),
+                    checks = outcome.Result?.Validation.Select(c => new { c.Check, c.Passed, c.Detail }),
+                    data = outcome.Result,
                 };
+                return outcome.Status == "failed"
+                    ? Results.Json(payload, statusCode: 422)
+                    : Results.Ok(payload);
+            });
 
-                var client = http.CreateClient("ollama");
-                var resp = await client.PostAsJsonAsync("/api/chat", payload, ct);
-                if (!resp.IsSuccessStatusCode)
-                    return Results.Problem($"Ollama error: {await resp.Content.ReadAsStringAsync(ct)}", statusCode: 502);
+            // Human confirmation of an extraction. The machine output stays on the
+            // run untouched; the approved payload and the reviewer's edits are
+            // stored beside it so machine vs human is always auditable.
+            app.MapPost("/documents/{id:int}/extraction/confirm", async (
+                int id, ConfirmExtractionRequest req, HttpContext ctx, AppDbContext db,
+                CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
 
-                using var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-                var content = body.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+                var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == id && d.OwnerUserId == user.Id, ct);
+                if (doc is null) return Results.NotFound();
+                if (req.ResultJson.ValueKind != JsonValueKind.Object)
+                    return Results.BadRequest(new { error = "resultJson must be the edited extraction object." });
 
-                JsonDocument parsed;
-                try
+                var run = await db.ExtractionRuns
+                    .Where(r => r.DocumentId == id)
+                    .OrderByDescending(r => r.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (run is null)
+                    return Results.BadRequest(new { error = "No extraction run to confirm — extract first." });
+
+                run.ConfirmedJson = JsonSerializer.Serialize(req.ResultJson);
+                run.ConfirmedByUserId = user.Id;
+                run.ConfirmedAt = DateTime.UtcNow;
+                run.EditsJson = req.Edits.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
+                    ? "[]"
+                    : JsonSerializer.Serialize(req.Edits);
+
+                // The display cache becomes the approved version.
+                doc.ExtractedJson = run.ConfirmedJson;
+                doc.ExtractedAt = run.ConfirmedAt;
+                await db.SaveChangesAsync(ct);
+
+                return Results.Ok(new
                 {
-                    parsed = JsonDocument.Parse(content);
-                }
-                catch (JsonException)
-                {
-                    return Results.Problem("Model returned invalid JSON. Try again or use a stronger model.", statusCode: 502);
-                }
-
-                using (parsed)
-                {
-                    // Normalise once so what we store and what we return are identical.
-                    var pretty = JsonSerializer.Serialize(parsed.RootElement,
-                        new JsonSerializerOptions { WriteIndented = true });
-                    var sources = chunks.Select(c => c.SourceRef).Distinct().ToList();
-
-                    // Persist on the document so the UI can re-display without re-running the model.
-                    doc.ExtractedJson = pretty;
-                    doc.ExtractedAt = DateTime.UtcNow;
-
-                    // Append to the document's workspace conversation, creating it on first extract.
-                    var convo = doc.ConversationId is int existingId
-                        ? await db.Conversations.FirstOrDefaultAsync(c => c.Id == existingId && c.UserId == user.Id, ct)
-                        : null;
-                    if (convo is null)
-                    {
-                        convo = new Conversation
-                        {
-                            UserId = user.Id,
-                            Title = Authorization.Truncate($"Workspace · {doc.FileName}", 40),
-                        };
-                        db.Conversations.Add(convo);
-                        await db.SaveChangesAsync(ct);
-                        doc.ConversationId = convo.Id;
-                    }
-
-                    db.Messages.Add(new Message
-                    {
-                        ConversationId = convo.Id,
-                        Role = "user",
-                        Content = $"Extract structured JSON from {doc.FileName}" +
-                                  (string.IsNullOrWhiteSpace(doc.Buyer) ? "" : $" (buyer profile: {doc.Buyer})"),
-                    });
-                    db.Messages.Add(new Message
-                    {
-                        ConversationId = convo.Id,
-                        Role = "assistant",
-                        Content = $"```json\n{pretty}\n```\n\nSources: {string.Join(", ", sources)}",
-                    });
-                    await db.SaveChangesAsync(ct);
-
-                    return Results.Ok(new
-                    {
-                        documentId = doc.Id,
-                        fileName = doc.FileName,
-                        buyer = doc.Buyer,
-                        conversationId = convo.Id,
-                        extractedAt = doc.ExtractedAt,
-                        extracted = parsed.RootElement.Clone(),
-                        sources,
-                    });
-                }
+                    runId = run.Id,
+                    documentId = doc.Id,
+                    status = run.Status,
+                    confirmedAt = run.ConfirmedAt,
+                    confirmedBy = user.Username,
+                    edits = req.Edits,
+                });
             });
 
             // Workspace chat: RAG chat, streamed. Separate from /chat on purpose — the model only

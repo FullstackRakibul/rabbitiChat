@@ -6,7 +6,7 @@ import {
 import {
   getModels, listConversations, getConversation,
   deleteConversation, streamChat,
-  uploadDocument, listDocuments, deleteDocument, extractDocument, getExtraction, workspaceChat,
+  uploadDocument, listDocuments, deleteDocument, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import LoginGate from '@/components/LoginGate.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import NewChatDialog from '@/components/NewChatDialog.vue'
+import ExtractionReview from '@/components/ExtractionReview.vue'
 import ChatTab from '@/components/tabs/ChatTab.vue'
 import WorkspaceTab from '@/components/tabs/WorkspaceTab.vue'
 import DocumentsTab from '@/components/tabs/DocumentsTab.vue'
@@ -335,57 +336,24 @@ async function removeDocument(id) {
   if (!confirm('Delete this document and its indexed chunks?')) return
   try {
     await deleteDocument(id)
-    if (docResultId.value === id) docResult.value = null
     await refreshDocuments()
   } catch (e) {
     if (!handleAuthError(e)) docError.value = e.message
   }
 }
 
-// Structured extraction from the Documents tab — result shown inline below the row.
-const docExtractingId = ref(null)
-const docResultId = ref(null)
-const docResult = ref(null)
+// ---- Extraction review overlay (the human-in-the-loop gate) ----
+const reviewDoc = ref(null)          // { id, fileName } | null
 
-async function extractDoc(id) {
-  if (docExtractingId.value || !model.value) return
-  docError.value = ''
-  docNotice.value = ''
-  docExtractingId.value = id
-  if (docResultId.value !== id) docResult.value = null
-  try {
-    const res = await extractDocument(id, model.value)
-    docResultId.value = id
-    docResult.value = res
-    docNotice.value = 'Extraction saved to the document and its workspace thread.'
-    refreshDocuments()
-    refreshConversations()
-  } catch (e) {
-    if (!handleAuthError(e)) docError.value = e.message
-  } finally {
-    docExtractingId.value = null
-  }
+function openReview(doc) {
+  reviewDoc.value = { id: doc.id, fileName: doc.fileName }
 }
-
-// Show the JSON already stored on the server — no model run needed.
-async function showStoredExtraction(id) {
-  docError.value = ''
-  docNotice.value = ''
-  if (docResultId.value === id && docResult.value) { docResult.value = null; return } // toggle off
-  try {
-    const res = await getExtraction(id)
-    if (!res) { docNotice.value = 'No stored extraction yet — run Extract JSON.'; return }
-    docResultId.value = id
-    docResult.value = res
-  } catch (e) {
-    if (!handleAuthError(e)) docError.value = e.message
-  }
+function extractDoc(id) {
+  const d = documents.value.find(x => x.id === id)
+  if (d) openReview({ id: d.id, fileName: d.fileName })
 }
-
-function copyDocResult() {
-  if (!docResult.value) return
-  navigator.clipboard.writeText(JSON.stringify(docResult.value.extracted, null, 2))
-  docNotice.value = 'JSON copied to clipboard.'
+function onReviewConfirmed() {
+  refreshDocuments()
 }
 
 // ---- Workspace (agentic PO chat) ----
@@ -477,30 +445,12 @@ async function wsSend() {
   }
 }
 
-// One-click structured extraction of the pinned PO. The backend stores the JSON on
-// the document AND appends it to the workspace conversation, so it survives reloads.
-async function wsExtract() {
-  if (wsExtracting.value || !wsDoc.value || !model.value) return
-  wsError.value = ''
-  wsExtracting.value = true
-  wsEvent(`Extracting structured JSON from “${wsDoc.value.fileName}”…`, 'ingest')
-  try {
-    const res = await extractDocument(wsDoc.value.id, model.value)
-    wsEvent(`Extraction complete — saved to this workspace thread. Sources: ${res.sources.join(', ')}`, 'done')
-    wsMessages.value.push({
-      role: 'assistant',
-      content: '```json\n' + JSON.stringify(res.extracted, null, 2) + '\n```',
-    })
-    wsScrollDown()
-    refreshDocuments()
-    refreshConversations()
-  } catch (e) {
-    if (handleAuthError(e)) return
-    wsError.value = e.message
-    wsEvent(`Extraction failed: ${e.message}`, 'fail')
-  } finally {
-    wsExtracting.value = false
-  }
+// Extraction opens the review overlay: detect → parse → validate, then a human
+// confirms (or corrects) before anything is accepted.
+function wsExtract() {
+  if (!wsDoc.value) return
+  wsEvent(`Opened extraction review for “${wsDoc.value.fileName}”.`, 'ingest')
+  openReview(wsDoc.value)
 }
 
 // Pin an already-ingested document and restore its saved thread (chat + extractions).
@@ -636,7 +586,7 @@ function startNewChat() {
         <TabsContent value="docs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
           <DocumentsTab ref="docsTab" v-model:buyer="docBuyer" :documents="documents" :file="docFile"
             :uploading="docUploading" :error="docError" :notice="docNotice" @file-picked="onDocPicked"
-            @upload="doUpload" @delete="removeDocument" />
+            @upload="doUpload" @delete="removeDocument" @review="extractDoc" />
         </TabsContent>
 
         <TabsContent value="todo" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
@@ -660,5 +610,9 @@ function startNewChat() {
 
     <NewChatDialog v-model:open="showNewChat" v-model:context="context" :contexts="contexts" :sources="sources"
       @start="startNewChat" />
+
+    <!-- Human-in-the-loop extraction review -->
+    <ExtractionReview v-if="reviewDoc" :doc="reviewDoc" :model="model"
+      @close="reviewDoc = null" @confirmed="onReviewConfirmed" />
   </div>
 </template>
