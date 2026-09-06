@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import {
-  FileText, ListTodo, Menu, MessageSquare, Moon, Plug, Settings, Sun, Brain,
+  FileText, Globe, ListTodo, Menu, MessageSquare, Moon, Plug, Settings, Sun, Brain,
 } from '@lucide/vue'
 import {
   getModels, listConversations, getConversation,
@@ -23,6 +23,7 @@ import WorkspaceTab from '@/components/tabs/WorkspaceTab.vue'
 import DocumentsTab from '@/components/tabs/DocumentsTab.vue'
 import TodoTab from '@/components/tabs/TodoTab.vue'
 import SourcesTab from '@/components/tabs/SourcesTab.vue'
+import SearchTab from '@/components/tabs/SearchTab.vue'
 import SettingsTab from '@/components/tabs/SettingsTab.vue'
 
 const { theme, toggleTheme } = useTheme()
@@ -126,7 +127,9 @@ async function openConversation(id) {
   try {
     const convo = await getConversation(id)
     currentId.value = convo.id
-    messages.value = convo.messages.map((m) => ({ role: m.role, content: m.content }))
+    messages.value = convo.messages.map((m) => ({
+      role: m.role, content: m.content, webSearchUsed: m.webSearchUsed,
+    }))
     activeTab.value = 'chat'
     closeSidebar()
     scrollDown()
@@ -212,14 +215,23 @@ async function send() {
   input.value = ''
   scrollDown()
 
-  const reply = { role: 'assistant', content: '' }
+  // Capture and clear the toggle up-front: it applies to this message only.
+  const useWebSearch = webSearch.value
+  webSearch.value = false
+
+  const reply = { role: 'assistant', content: '', webSearchUsed: useWebSearch }
   messages.value.push(reply)
 
   busy.value = true
   controller = new AbortController()
   try {
     const id = await streamChat(
-      { conversationId: currentId.value, model: model.value, message: text },
+      {
+        conversationId: currentId.value,
+        model: model.value,
+        message: text,
+        webSearch: useWebSearch,
+      },
       (chunk) => { reply.content += chunk; scrollDown() },
       controller.signal,
     )
@@ -253,43 +265,29 @@ onMounted(() => {
 // ─────────────────────────────────────────────────────────────
 
 // Tab state
-const activeTab = ref('chat') // 'chat' | 'workspace' | 'docs' | 'todo' | 'sources' | 'settings'
+const activeTab = ref('chat') // 'chat' | 'workspace' | 'docs' | 'todo' | 'search' | 'sources' | 'settings'
 const tabs = [
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'workspace', label: 'Workspace', icon: Brain },
   { id: 'docs', label: 'Documents', icon: FileText },
   { id: 'todo', label: 'To-Do', icon: ListTodo },
+  { id: 'search', label: 'Search', icon: Globe },
   { id: 'sources', label: 'Sources', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
-// To-Do List (local only)
-const tasks = ref([])
-const newTask = ref('')
-const filterTodo = ref('all') // 'all' | 'active' | 'completed'
+// Per-message web grounding for the next chat send. Resets after each send —
+// it is never sticky for a conversation or profile.
+const webSearch = ref(false)
 
-function addTask() {
-  if (!newTask.value.trim()) return
-  tasks.value.push({ id: Date.now(), text: newTask.value.trim(), done: false })
-  newTask.value = ''
+// "Ask about these results" hands the query to the composer with search armed.
+function askFromSearch(query) {
+  input.value = query
+  webSearch.value = true
+  activeTab.value = 'chat'
 }
 
-function toggleTask(id) {
-  const task = tasks.value.find(t => t.id === id)
-  if (task) task.done = !task.done
-}
-
-function deleteTask(id) {
-  tasks.value = tasks.value.filter(t => t.id !== id)
-}
-
-const filteredTasks = computed(() => {
-  if (filterTodo.value === 'active') return tasks.value.filter(t => !t.done)
-  if (filterTodo.value === 'completed') return tasks.value.filter(t => t.done)
-  return tasks.value
-})
-const activeTaskCount = computed(() => tasks.value.filter(t => !t.done).length)
-const doneTaskCount = computed(() => tasks.value.filter(t => t.done).length)
+// To-Do — todorabbit owns its own server-backed state; nothing to wire here.
 
 // ---- Documents (PO ingestion) ----
 const documents = ref([])
@@ -569,9 +567,10 @@ function startNewChat() {
 
         <!-- Panels -->
         <TabsContent value="chat" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <ChatTab v-model:model="model" v-model:context="context" v-model:input="input" :models="models"
-            :messages="messages" :busy="busy" :error="error" :active-sources="activeSources" :topics-count="topicsCount"
-            :ideas-count="ideasCount" :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"
+          <ChatTab v-model:model="model" v-model:context="context" v-model:input="input"
+            v-model:web-search="webSearch" :models="models" :messages="messages" :busy="busy" :error="error"
+            :active-sources="activeSources" :topics-count="topicsCount" :ideas-count="ideasCount"
+            :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"
             @scroller="el => scroller = el" />
         </TabsContent>
 
@@ -590,9 +589,11 @@ function startNewChat() {
         </TabsContent>
 
         <TabsContent value="todo" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <TodoTab v-model:new-task="newTask" :tasks="tasks" :filtered-tasks="filteredTasks" :filter="filterTodo"
-            :active-count="activeTaskCount" :done-count="doneTaskCount" @update:filter="filterTodo = $event"
-            @add="addTask" @toggle="toggleTask" @delete="deleteTask" />
+          <TodoTab />
+        </TabsContent>
+
+        <TabsContent value="search" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+          <SearchTab @ask="askFromSearch" />
         </TabsContent>
 
         <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

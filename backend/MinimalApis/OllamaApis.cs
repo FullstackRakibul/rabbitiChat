@@ -100,7 +100,7 @@ namespace RabbitIC.Api.MinimalApis
                         c.CreatedAt,
                         Messages = c.Messages
                             .OrderBy(m => m.Id)
-                            .Select(m => new { m.Role, m.Content, m.CreatedAt })
+                            .Select(m => new { m.Role, m.Content, m.WebSearchUsed, m.CreatedAt })
                     })
                     .FirstOrDefaultAsync();
 
@@ -123,7 +123,8 @@ namespace RabbitIC.Api.MinimalApis
 
 
             // Chat: save the user turn, stream the model reply token-by-token, then save the reply.
-            app.MapPost("/chat", async (ChatRequest req, AppDbContext db, IHttpClientFactory http, HttpContext ctx) =>
+            app.MapPost("/chat", async (ChatRequest req, AppDbContext db, IHttpClientFactory http, HttpContext ctx,
+                                        IConfiguration config, ILoggerFactory logs) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 var systemPrompt = Environment.GetEnvironmentVariable("Ollama:SystemPrompt");
@@ -174,6 +175,36 @@ namespace RabbitIC.Api.MinimalApis
                         Content = systemPrompt!
                     });
 
+                // Per-message web grounding. One search, prepended as a system message.
+                // If search is unconfigured or fails we still answer — just without it.
+                var webSearchUsed = false;
+                string? searchNotice = null;
+                if (req.WebSearch)
+                {
+                    if (SearchApis.IsConfigured(config))
+                    {
+                        var context = await WebSearchContext.BuildAsync(
+                            http.CreateClient("ollama-cloud"),
+                            req.Message,
+                            logs.CreateLogger("ChatWebSearch"),
+                            ctx.RequestAborted);
+
+                        if (context is not null)
+                        {
+                            history.Insert(0, new ChatMsg { Role = "system", Content = context });
+                            webSearchUsed = true;
+                        }
+                        else
+                        {
+                            searchNotice = "_Web search returned no usable results — answering without it._\n\n";
+                        }
+                    }
+                    else
+                    {
+                        searchNotice = "_Web search is not configured on this server — answering without it._\n\n";
+                    }
+                }
+
                 var payload = new { model = req.Model, messages = history, stream = true };
 
                 var client = http.CreateClient("ollama");
@@ -200,6 +231,15 @@ namespace RabbitIC.Api.MinimalApis
                 ctx.Response.ContentType = "text/plain; charset=utf-8";
 
                 var full = new StringBuilder();
+
+                // Tell the user up-front that the reply is ungrounded despite the toggle.
+                if (searchNotice is not null)
+                {
+                    full.Append(searchNotice);
+                    await ctx.Response.WriteAsync(searchNotice, ctx.RequestAborted);
+                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }
+
                 await using var stream = await resp.Content.ReadAsStreamAsync(ctx.RequestAborted);
                 using var reader = new StreamReader(stream);
 
@@ -231,7 +271,13 @@ namespace RabbitIC.Api.MinimalApis
                 }
 
                 // Persist the assistant reply once streaming completes.
-                db.Messages.Add(new Message { ConversationId = convo.Id, Role = "assistant", Content = full.ToString() });
+                db.Messages.Add(new Message
+                {
+                    ConversationId = convo.Id,
+                    Role = "assistant",
+                    Content = full.ToString(),
+                    WebSearchUsed = webSearchUsed,
+                });
                 await db.SaveChangesAsync();
             });
 

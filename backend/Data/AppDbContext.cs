@@ -1,5 +1,6 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Models.TodoRabbit;
 
 namespace RabbitIC.Api.Data;
 
@@ -14,6 +15,11 @@ public class AppDbContext : DbContext
     public DbSet<EmbeddingChunk> EmbeddingChunks => Set<EmbeddingChunk>();
     public DbSet<BuyerProfile> BuyerProfiles => Set<BuyerProfile>();
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
+
+    // todorabbit — Kanban boards (a creation of Mostisko, the AI).
+    public DbSet<Board> Boards => Set<Board>();
+    public DbSet<BoardColumn> Columns => Set<BoardColumn>();
+    public DbSet<Card> Cards => Set<Card>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -50,6 +56,23 @@ public class AppDbContext : DbContext
         b.Entity<EmbeddingChunk>().HasIndex(c => c.OwnerUserId);
         b.Entity<EmbeddingChunk>().HasIndex(c => c.Buyer);
         b.Entity<EmbeddingChunk>().HasIndex(c => c.StyleNumber);
+
+        // todorabbit — a board is a cascade tree owned by one user.
+        b.Entity<Board>().HasIndex(x => x.OwnerUserId);
+
+        b.Entity<BoardColumn>()
+            .HasOne(c => c.Board)
+            .WithMany(x => x.Columns)
+            .HasForeignKey(c => c.BoardId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<BoardColumn>().HasIndex(c => c.BoardId);
+
+        b.Entity<Card>()
+            .HasOne(c => c.Column)
+            .WithMany(x => x.Cards)
+            .HasForeignKey(c => c.ColumnId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<Card>().HasIndex(c => c.ColumnId);
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);

@@ -14,12 +14,17 @@ export async function getModels() {
 
 /**
  * Send a message and stream the reply.
- * @param {object} args - { conversationId, model, message }
+ * @param {object} args - { conversationId, model, message, webSearch }
+ *   webSearch grounds this one turn on live web results (per-message opt-in).
  * @param {(chunk: string) => void} onToken - called for each streamed token
  * @param {AbortSignal} signal
  * @returns {Promise<number>} the conversation id (new or existing)
  */
-export async function streamChat({ conversationId, model, message }, onToken, signal) {
-  const res = await http.stream('/chat', { conversationId, model, message }, onToken, signal)
+export async function streamChat(
+  { conversationId, model, message, webSearch = false }, onToken, signal,
+) {
+  const res = await http.stream(
+    '/chat', { conversationId, model, message, webSearch }, onToken, signal,
+  )
   return Number(res.headers.get('X-Conversation-Id')) || conversationId
 }

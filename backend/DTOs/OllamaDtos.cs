@@ -13,6 +13,23 @@
             public int? ConversationId {  get; set; }
             public string Model { get; set; } = string.Empty;
             public string Message { get; set; } = string.Empty;
+
+            /// <summary>Per-message opt-in: ground this one turn on live web results.</summary>
+            public bool WebSearch { get; set; }
+        };
+
+
+        /// <summary>Proxied web search. MaxResults is clamped to 1..10 server-side.</summary>
+        public class SearchRequest
+        {
+            public string Query { get; set; } = string.Empty;
+            public int? MaxResults { get; set; }
+        };
+
+        /// <summary>Proxied single-page fetch. Url must be absolute http(s).</summary>
+        public class FetchPageRequest
+        {
+            public string Url { get; set; } = string.Empty;
         };
 
 

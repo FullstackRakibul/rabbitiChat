@@ -74,6 +74,10 @@ export const http = {
     return (await request(path, { ...options, method: 'POST', body })).json()
   },
 
+  async put(path, body, options) {
+    return (await request(path, { ...options, method: 'PUT', body })).json()
+  },
+
   /**
    * POST multipart/form-data (file uploads). Pass a FormData instance;
    * the browser sets the Content-Type boundary itself.

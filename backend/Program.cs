@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -27,6 +27,19 @@ builder.Services.AddHttpClient("ollama", c =>
 {
     c.BaseAddress = new Uri(ollamaUrl);
     c.Timeout = TimeSpan.FromMinutes(10); // local models can be slow on first load
+});
+
+// Ollama's hosted web search. The key stays server-side — the browser calls our
+// /api/search proxy instead. A missing key is NOT fatal here: the endpoints answer
+// 503 at request time so the rest of the app still boots.
+var ollamaCloudKey = builder.Configuration["OllamaCloud:ApiKey"];
+builder.Services.AddHttpClient("ollama-cloud", c =>
+{
+    c.BaseAddress = new Uri("https://ollama.com");
+    c.Timeout = TimeSpan.FromSeconds(30);
+    if (!string.IsNullOrWhiteSpace(ollamaCloudKey))
+        c.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ollamaCloudKey);
 });
 
 // ---- Swagger (API explorer) ----
@@ -74,6 +87,11 @@ builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings cl
 builder.Services.AddScoped<RabbitIC.Api.Extraction.LlmPoFallback>();
 builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
 
+// ---- todorabbit (Kanban boards) ----
+builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
+                           RabbitIC.Api.Repositories.TodoRabbitRepository>();
+builder.Services.AddScoped<RabbitIC.Api.Services.TodoRabbitService>();
+
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173", "http://192.168.61.41:4200",
@@ -102,6 +120,8 @@ app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
 app.ApplicationBuyerProfileApis();
+app.ApplicationSearchApis();
+app.ApplicationTodoRabbitApis();
 
 
 app.UseCors();

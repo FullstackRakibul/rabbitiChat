@@ -26,6 +26,8 @@ public static class SchemaUpgrade
         EnsureUsersTable(db);
         EnsureDocumentTables(db);
         EnsureExtractionTables(db);
+        EnsureTodoRabbitTables(db);
+        EnsureMessageWebSearchColumn(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -193,6 +195,70 @@ public static class SchemaUpgrade
                     ('Kohls', 'SPS Commerce|Kohls|Order #:|Vendors Style', 'KohlsSps', 'none', 1, {0});",
                 DateTime.UtcNow.ToString("o"));
         }
+    }
+
+    /// <summary>
+    /// todorabbit — a creation of Mostisko, the AI.
+    /// Kanban tables. Each is created only when absent, so an existing db file
+    /// gains the board module without touching any other table's data.
+    /// </summary>
+    private static void EnsureTodoRabbitTables(AppDbContext db)
+    {
+        if (!TableExists(db, "Boards"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""Boards"" (
+                    ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_Boards"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId"" INTEGER NOT NULL,
+                    ""Name""        TEXT NOT NULL,
+                    ""CreatedAt""   TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Boards_OwnerUserId"" ON ""Boards"" (""OwnerUserId"");");
+        }
+
+        if (!TableExists(db, "Columns"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""Columns"" (
+                    ""Id""        INTEGER NOT NULL CONSTRAINT ""PK_Columns"" PRIMARY KEY AUTOINCREMENT,
+                    ""BoardId""   INTEGER NOT NULL,
+                    ""Title""     TEXT NOT NULL,
+                    ""SortOrder"" INTEGER NOT NULL,
+                    ""ColorKey""  TEXT NOT NULL,
+                    ""CreatedAt"" TEXT NOT NULL,
+                    CONSTRAINT ""FK_Columns_Boards_BoardId""
+                        FOREIGN KEY (""BoardId"") REFERENCES ""Boards"" (""Id"") ON DELETE CASCADE
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Columns_BoardId"" ON ""Columns"" (""BoardId"");");
+        }
+
+        if (!TableExists(db, "Cards"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""Cards"" (
+                    ""Id""        INTEGER NOT NULL CONSTRAINT ""PK_Cards"" PRIMARY KEY AUTOINCREMENT,
+                    ""ColumnId""  INTEGER NOT NULL,
+                    ""Title""     TEXT NOT NULL,
+                    ""Content""   TEXT NOT NULL,
+                    ""Priority""  TEXT NULL,
+                    ""SortOrder"" INTEGER NOT NULL,
+                    ""CreatedAt"" TEXT NOT NULL,
+                    ""UpdatedAt"" TEXT NOT NULL,
+                    CONSTRAINT ""FK_Cards_Columns_ColumnId""
+                        FOREIGN KEY (""ColumnId"") REFERENCES ""Columns"" (""Id"") ON DELETE CASCADE
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Cards_ColumnId"" ON ""Cards"" (""ColumnId"");");
+        }
+    }
+
+    /// <summary>Flags replies that were grounded on live web results. Older files predate it.</summary>
+    private static void EnsureMessageWebSearchColumn(AppDbContext db)
+    {
+        if (!TableExists(db, "Messages")) return;
+        if (ColumnExists(db, "Messages", "WebSearchUsed")) return;
+
+        db.Database.ExecuteSqlRaw(
+            @"ALTER TABLE ""Messages"" ADD COLUMN ""WebSearchUsed"" INTEGER NOT NULL DEFAULT 0;");
     }
 
     private static bool EnsureConversationUserIdColumn(AppDbContext db)

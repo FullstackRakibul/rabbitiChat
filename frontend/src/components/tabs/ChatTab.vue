@@ -22,10 +22,12 @@ const props = defineProps({
   topicsCount: { type: Number, default: 0 },
   ideasCount: { type: Number, default: 0 },
   docsCount: { type: Number, default: 0 },
+  webSearch: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
-  'update:model', 'update:context', 'update:input', 'send', 'new-chat', 'scroller',
+  'update:model', 'update:context', 'update:input', 'update:webSearch',
+  'send', 'new-chat', 'scroller',
 ])
 
 const modelValue = computed({
@@ -120,8 +122,11 @@ const contextValue = computed({
     <ChatComposer
       :model-value="input"
       :busy="busy"
+      show-web-search
+      :web-search="webSearch"
       class="shrink-0"
       @update:model-value="emit('update:input', $event)"
+      @update:web-search="emit('update:webSearch', $event)"
       @send="emit('send')"
     />
   </div>

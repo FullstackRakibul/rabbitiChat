@@ -40,5 +40,21 @@ namespace RabbitIC.Api.Middleware
             ollamaApi.MapOllamaApis();
             return app;
         }
+
+        public static WebApplication ApplicationTodoRabbitApis(this WebApplication app)
+        {
+            var todoRabbitApi = app.MapGroup("/api").WithTags("todorabbit");
+
+            todoRabbitApi.MapTodoRabbitApis();
+            return app;
+        }
+
+        public static WebApplication ApplicationSearchApis(this WebApplication app)
+        {
+            var searchApi = app.MapGroup("/api").WithTags("Web search");
+
+            searchApi.MapSearchApis();
+            return app;
+        }
     }
 }

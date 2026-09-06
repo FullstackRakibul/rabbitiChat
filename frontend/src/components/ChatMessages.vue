@@ -1,4 +1,5 @@
 <script setup>
+import { Globe } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { renderMarkdown } from '@/lib/markdown'
 
@@ -43,9 +44,17 @@ defineProps({
         >
           <div
             v-if="m.role === 'assistant'"
-            class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+            class="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
           >
             {{ assistantLabel }}
+            <span
+              v-if="m.webSearchUsed"
+              class="inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] normal-case text-muted-foreground"
+              title="Answered using live web results"
+            >
+              <Globe class="h-2.5 w-2.5" />
+              web
+            </span>
           </div>
 
           <!-- Assistant output is sanitized markdown; user text stays plain. -->

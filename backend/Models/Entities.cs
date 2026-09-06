@@ -80,6 +80,8 @@ public class Message
     public int ConversationId { get; set; }
     public string Role { get; set; } = "user";      // "user" | "assistant" | "system"
     public string Content { get; set; } = "";
+    /// <summary>True when this reply was grounded on live web results, so history can show the badge.</summary>
+    public bool WebSearchUsed { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Conversation? Conversation { get; set; }
