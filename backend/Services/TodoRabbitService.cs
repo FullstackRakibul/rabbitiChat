@@ -54,7 +54,7 @@ public class TodoRabbitService
         var board = new Board
         {
             OwnerUserId = userId,
-            Name = Clean(input.Name) ?? "My board",
+            Name = Clean(input.Name) ?? "কাজ মনে রাখার তালিকা", // "To-do list" in Bengali
         };
 
         for (var i = 0; i < DefaultColumns.Length; i++)

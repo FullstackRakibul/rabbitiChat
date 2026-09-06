@@ -128,7 +128,7 @@ async function openBoard(id, { silent = false } = {}) {
 async function onCreateBoard() {
   busy.value = true
   try {
-    const created = await createBoard('My board')
+    const created = await createBoard('কাজ মনে রাখার তালিকা')
     board.value = created
     boards.value.unshift({
       id: created.id,
@@ -374,30 +374,23 @@ watch(board, () => {
               <p class="px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Boards
               </p>
-              <button
-                v-for="b in boards"
-                :key="b.id"
-                :class="cn(
-                  'w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground',
-                  b.id === board.id && 'bg-accent/60 font-medium',
-                )"
-                @click="openBoard(b.id)"
-              >
+              <button v-for="b in boards" :key="b.id" :class="cn(
+                'w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground',
+                b.id === board.id && 'bg-accent/60 font-medium',
+              )" @click="openBoard(b.id)">
                 {{ b.name }}
               </button>
 
               <div class="my-1 h-px bg-border" />
               <button
                 class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                @click="onCreateBoard"
-              >
+                @click="onCreateBoard">
                 <Plus class="h-3.5 w-3.5" />
                 New board
               </button>
               <button
                 class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-                @click="onDeleteBoard"
-              >
+                @click="onDeleteBoard">
                 <Trash2 class="h-3.5 w-3.5" />
                 Delete this board
               </button>
@@ -405,31 +398,17 @@ watch(board, () => {
           </template>
         </div>
 
-        <input
-          v-if="renamingBoard"
-          v-model="boardNameDraft"
+        <input v-if="renamingBoard" v-model="boardNameDraft"
           class="min-w-0 flex-1 rounded-sm bg-transparent text-base font-semibold text-foreground outline-none ring-1 ring-ring"
-          @keydown.enter.prevent="commitRenameBoard"
-          @keydown.esc.prevent="renamingBoard = false"
-          @blur="commitRenameBoard"
-        >
-        <h2
-          v-else
-          class="min-w-0 flex-1 cursor-text truncate text-base font-semibold text-foreground"
-          title="Double-click to rename"
-          @dblclick="beginRenameBoard"
-        >
+          @keydown.enter.prevent="commitRenameBoard" @keydown.esc.prevent="renamingBoard = false"
+          @blur="commitRenameBoard">
+        <h2 v-else class="min-w-0 flex-1 cursor-text truncate text-base font-semibold text-foreground"
+          title="Double-click to rename" @dblclick="beginRenameBoard">
           {{ board.name }}
         </h2>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          class="h-8 w-8 text-muted-foreground"
-          title="Reload board"
-          :disabled="busy"
-          @click="openBoard(board.id)"
-        >
+        <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground" title="Reload board" :disabled="busy"
+          @click="openBoard(board.id)">
           <RefreshCw class="h-4 w-4" />
         </Button>
 
@@ -490,42 +469,23 @@ watch(board, () => {
 
       <!-- The board -->
       <div v-else class="flex h-full items-start gap-4">
-        <draggable
-          v-model="columns"
-          :item-key="'id'"
-          group="todorabbit-columns"
-          handle=".tr-column-handle"
-          class="flex h-full items-stretch gap-4"
-          ghost-class="tr-ghost"
-          drag-class="tr-drag"
-          :animation="160"
-        >
+        <draggable v-model="columns" :item-key="'id'" group="todorabbit-columns" handle=".tr-column-handle"
+          class="flex h-full items-stretch gap-4" ghost-class="tr-ghost" drag-class="tr-drag" :animation="160">
           <template #item="{ element }">
-            <KanbanColumn
-              :column="element"
-              :color-keys="COLOR_KEYS"
-              :dot-class="dotClass"
-              @rename="(title) => onRenameColumn(element, title)"
-              @recolor="(key) => onRecolorColumn(element, key)"
-              @delete="onDeleteColumn(element)"
-              @add-card="(title) => onAddCard(element, title)"
+            <KanbanColumn :column="element" :color-keys="COLOR_KEYS" :dot-class="dotClass"
+              @rename="(title) => onRenameColumn(element, title)" @recolor="(key) => onRecolorColumn(element, key)"
+              @delete="onDeleteColumn(element)" @add-card="(title) => onAddCard(element, title)"
               @save-card="(card, patch) => onSaveCard(element, card, patch)"
               @delete-card="(card) => onDeleteCard(element, card)"
-              @cards-changed="(cards) => onCardsChanged(element, cards)"
-            />
+              @cards-changed="(cards) => onCardsChanged(element, cards)" />
           </template>
         </draggable>
 
         <!-- Inline add-column -->
         <div v-if="addingColumn" class="w-72 shrink-0 rounded-xl border bg-muted/40 p-3">
-          <input
-            ref="newColumnEl"
-            v-model="newColumnTitle"
+          <input ref="newColumnEl" v-model="newColumnTitle"
             class="w-full bg-transparent text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
-            placeholder="Column title…"
-            @keydown.enter.prevent="commitAddColumn"
-            @keydown.esc.prevent="cancelAddColumn"
-          >
+            placeholder="Column title…" @keydown.enter.prevent="commitAddColumn" @keydown.esc.prevent="cancelAddColumn">
           <div class="mt-3 flex items-center justify-end gap-2">
             <Button variant="ghost" size="sm" class="h-7" @click="cancelAddColumn">
               Cancel
@@ -536,11 +496,9 @@ watch(board, () => {
           </div>
         </div>
 
-        <button
-          v-else
+        <button v-else
           class="flex w-72 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed py-3 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-          @click="beginAddColumn"
-        >
+          @click="beginAddColumn">
           <Plus class="h-4 w-4" />
           Add column
         </button>
@@ -548,16 +506,10 @@ watch(board, () => {
     </div>
 
     <!-- Toast -->
-    <Transition
-      enter-active-class="transition duration-150 ease-out"
-      enter-from-class="translate-y-2 opacity-0"
-      leave-active-class="transition duration-150 ease-in"
-      leave-to-class="translate-y-2 opacity-0"
-    >
-      <div
-        v-if="toast"
-        class="absolute bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-popover px-4 py-2.5 shadow-lg"
-      >
+    <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0"
+      leave-active-class="transition duration-150 ease-in" leave-to-class="translate-y-2 opacity-0">
+      <div v-if="toast"
+        class="absolute bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-popover px-4 py-2.5 shadow-lg">
         <span class="text-sm text-foreground">{{ toast }}</span>
         <button class="text-muted-foreground transition hover:text-foreground" @click="toast = ''">
           <X class="h-3.5 w-3.5" />

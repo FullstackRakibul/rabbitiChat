@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import {
-  FileText, Globe, ListTodo, Menu, MessageSquare, Moon, Plug, Settings, Sun, Brain,
+  FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
+  Plug, Plus, Settings, Brain, Upload,
 } from '@lucide/vue'
 import {
   getModels, listConversations, getConversation,
@@ -10,14 +11,17 @@ import {
   login, getToken, getUsername, clearSession, AuthError,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
-import { cn } from '@/lib/utils'
 import { useTheme } from '@/composables/useTheme'
-import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useShortcuts } from '@/composables/useShortcuts'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import LoginGate from '@/components/LoginGate.vue'
-import AppSidebar from '@/components/AppSidebar.vue'
+import AppShell from '@/components/AppShell.vue'
+import ChatSidebar from '@/components/sidebars/ChatSidebar.vue'
+import WorkspaceSidebar from '@/components/sidebars/WorkspaceSidebar.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
 import NewChatDialog from '@/components/NewChatDialog.vue'
 import ExtractionReview from '@/components/ExtractionReview.vue'
+import DashboardTab from '@/components/tabs/DashboardTab.vue'
 import ChatTab from '@/components/tabs/ChatTab.vue'
 import WorkspaceTab from '@/components/tabs/WorkspaceTab.vue'
 import DocumentsTab from '@/components/tabs/DocumentsTab.vue'
@@ -184,11 +188,17 @@ const groupedConversations = computed(() => {
   return groups
 })
 
-// Mobile sidebar drawer. Closed by default; toggled from the tab bar.
-const sidebarOpen = ref(false)
+// Two independent things: the desktop collapse (Cmd/Ctrl+B) and the mobile
+// drawer. Only Chat and Workspace render a sidebar at all.
+const sidebarCollapsed = ref(false)
+const mobileSidebarOpen = ref(false)
 function closeSidebar() {
-  sidebarOpen.value = false
+  mobileSidebarOpen.value = false
 }
+
+/** Tabs that fill the shell's sidebar slot; every other tab is full-bleed. */
+const SIDEBAR_TABS = ['chat', 'workspace']
+const tabHasSidebar = computed(() => SIDEBAR_TABS.includes(activeTab.value))
 
 // Clear All — deletes every conversation via the existing API, then resets.
 async function clearAllConversations() {
@@ -265,8 +275,9 @@ onMounted(() => {
 // ─────────────────────────────────────────────────────────────
 
 // Tab state
-const activeTab = ref('chat') // 'chat' | 'workspace' | 'docs' | 'todo' | 'search' | 'sources' | 'settings'
+const activeTab = ref('dashboard') // dashboard | chat | workspace | docs | todo | search | sources | settings
 const tabs = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'workspace', label: 'Workspace', icon: Brain },
   { id: 'docs', label: 'Documents', icon: FileText },
@@ -516,6 +527,86 @@ function startNewChat() {
   showNewChat.value = false
   activeTab.value = 'chat'
 }
+
+// ─────────────────────────────────────────────────────────────
+// SHELL: command palette + keyboard shortcuts
+// ─────────────────────────────────────────────────────────────
+
+const paletteOpen = ref(false)
+
+/** Sidebar document pick — reuses the tab's own restore-the-thread flow. */
+function wsPickDocument(doc) {
+  wsOpenDocument(doc)
+  closeSidebar()
+}
+
+/** Cmd/Ctrl+B — only meaningful where a sidebar exists. */
+function toggleSidebar() {
+  if (!tabHasSidebar.value) return          // no-op on full-bleed tabs
+  if (window.matchMedia('(max-width: 767px)').matches) {
+    mobileSidebarOpen.value = !mobileSidebarOpen.value
+  } else {
+    sidebarCollapsed.value = !sidebarCollapsed.value
+  }
+}
+
+/** Cmd/Ctrl+Enter — the primary action of whichever tab is showing. */
+function primaryAction() {
+  if (activeTab.value === 'chat') send()
+  else if (activeTab.value === 'workspace') wsSend()
+  else if (activeTab.value === 'dashboard') openNewChat()
+}
+
+function goTab(id) {
+  activeTab.value = id
+  closeSidebar()
+}
+
+// Palette rows. Tab navigation first, then the actions worth reaching by name.
+const commands = computed(() => [
+  ...tabs.map(t => ({
+    id: `tab:${t.id}`,
+    label: t.label,
+    group: 'Go to',
+    icon: t.icon,
+    keys: { chat: 'g then c', workspace: 'g then w', docs: 'g then d', todo: 'g then t' }[t.id],
+    run: () => goTab(t.id),
+  })),
+  {
+    id: 'action:new-chat', label: 'New chat', group: 'Actions', icon: Plus,
+    run: () => openNewChat(),
+  },
+  {
+    id: 'action:upload', label: 'Upload a purchase order', group: 'Actions', icon: Upload,
+    run: () => goTab('workspace'),
+  },
+  {
+    id: 'action:sidebar', label: 'Toggle sidebar', group: 'Actions', icon: PanelLeft,
+    keys: 'mod + B', run: () => toggleSidebar(),
+  },
+  {
+    id: 'action:theme',
+    label: theme.value === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+    group: 'Actions', icon: Settings, run: () => toggleTheme(),
+  },
+])
+
+function runCommand(cmd) {
+  cmd.run?.()
+}
+
+useShortcuts({
+  enabled: () => loggedIn.value,
+  onPalette: () => { paletteOpen.value = !paletteOpen.value },
+  onSidebar: toggleSidebar,
+  onSubmit: primaryAction,
+  onEscape: () => {
+    if (paletteOpen.value) paletteOpen.value = false
+    else if (showNewChat.value) showNewChat.value = false
+    else if (mobileSidebarOpen.value) mobileSidebarOpen.value = false
+  },
+  onJump: goTab,
+})
 </script>
 
 <template>
@@ -523,91 +614,78 @@ function startNewChat() {
   <LoginGate v-if="!loggedIn" v-model:username="loginUser" v-model:secret="loginSecret" :busy="loginBusy"
     :error="loginError" @submit="doLogin" />
 
-  <!-- App -->
-  <div v-else class="flex h-screen overflow-hidden bg-background text-foreground">
-    <AppSidebar v-model:open="sidebarOpen" v-model:source-search="sourceSearch" :username="username"
-      :initials="initials" :sources="sources" :filtered-sources="filteredSources"
-      :active-sources-count="activeSourcesCount" :grouped-conversations="groupedConversations"
-      :conversation-count="conversations.length" :current-id="currentId" @new-chat="openNewChat"
-      @open-conversation="openConversation" @delete-conversation="removeConversation" @clear-all="clearAllConversations"
-      @logout="logout" @open-settings="activeTab = 'settings'; closeSidebar()" />
+  <!-- App. Tabs is the outermost element so the header's tab bar and the
+       panels below share one root; unmount-on-hide=false keeps every panel
+       alive across switches, so a streaming reply survives navigating away. -->
+  <Tabs v-else v-model="activeTab" :unmount-on-hide="false" class="contents">
+    <AppShell :tabs="tabs" :theme="theme" :connected="connected" :status="status"
+      :has-sidebar="tabHasSidebar" :sidebar-open="!sidebarCollapsed"
+      v-model:mobile-open="mobileSidebarOpen"
+      @toggle-theme="toggleTheme" @open-palette="paletteOpen = true">
+      <!-- Sidebar slot: filled only by the tabs that have one. -->
+      <template v-if="tabHasSidebar" #sidebar>
+        <ChatSidebar v-show="activeTab === 'chat'" v-model:source-search="sourceSearch" :username="username"
+          :initials="initials" :sources="sources" :filtered-sources="filteredSources"
+          :active-sources-count="activeSourcesCount" :grouped-conversations="groupedConversations"
+          :conversation-count="conversations.length" :current-id="currentId" @new-chat="openNewChat"
+          @open-conversation="openConversation" @delete-conversation="removeConversation"
+          @clear-all="clearAllConversations" @logout="logout"
+          @open-settings="activeTab = 'settings'; closeSidebar()" />
 
-    <main class="flex min-w-0 flex-1 flex-col">
-      <!-- unmount-on-hide=false keeps every panel alive across tab switches, so a
-           streaming reply and its scroll position survive navigating away. -->
-      <Tabs v-model="activeTab" :unmount-on-hide="false" class="flex min-h-0 flex-1 flex-col">
-        <!-- Top bar -->
-        <div class="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
-          <Button variant="ghost" size="icon" class="md:hidden" aria-label="Open menu" @click="sidebarOpen = true">
-            <Menu />
-          </Button>
+        <WorkspaceSidebar v-show="activeTab === 'workspace'" :documents="documents" :active-doc="wsDoc"
+          :messages="wsMessages" :busy="wsBusy" @new-session="wsNewChat" @open-document="wsPickDocument"
+          @go-documents="activeTab = 'docs'; closeSidebar()" />
+      </template>
 
-          <TabsList class="h-9 overflow-x-auto">
-            <TabsTrigger v-for="t in tabs" :key="t.id" :value="t.id">
-              <component :is="t.icon" />
-              <span class="hidden sm:inline">{{ t.label }}</span>
-            </TabsTrigger>
-          </TabsList>
+      <!-- Panels -->
+      <TabsContent value="dashboard" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <DashboardTab :username="username" @navigate="goTab" @new-chat="openNewChat"
+          @open-palette="paletteOpen = true" />
+      </TabsContent>
 
-          <div class="ml-auto flex items-center gap-2">
-            <span class="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" :title="status">
-              <span :class="cn(
-                'h-2 w-2 rounded-full',
-                connected ? 'bg-emerald-500' : 'bg-muted-foreground/40',
-              )" />
-            </span>
-            <Button variant="ghost" size="icon" :title="theme === 'dark' ? 'Switch to light' : 'Switch to dark'"
-              @click="toggleTheme">
-              <Moon v-if="theme === 'dark'" />
-              <Sun v-else />
-              <span class="sr-only">Toggle theme</span>
-            </Button>
-          </div>
-        </div>
+      <TabsContent value="chat" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <ChatTab v-model:model="model" v-model:context="context" v-model:input="input"
+          v-model:web-search="webSearch" :models="models" :messages="messages" :busy="busy" :error="error"
+          :active-sources="activeSources" :topics-count="topicsCount" :ideas-count="ideasCount"
+          :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"
+          @scroller="el => scroller = el" />
+      </TabsContent>
 
-        <!-- Panels -->
-        <TabsContent value="chat" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <ChatTab v-model:model="model" v-model:context="context" v-model:input="input"
-            v-model:web-search="webSearch" :models="models" :messages="messages" :busy="busy" :error="error"
-            :active-sources="activeSources" :topics-count="topicsCount" :ideas-count="ideasCount"
-            :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"
-            @scroller="el => scroller = el" />
-        </TabsContent>
+      <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <WorkspaceTab ref="wsTab" v-model:buyer="wsBuyer" v-model:model="model" v-model:input="wsInput"
+          :buyer-profiles="buyerProfiles" :models="models" :doc="wsDoc" :file="wsFile" :messages="wsMessages"
+          :busy="wsBusy" :uploading="wsUploading" :extracting="wsExtracting" :error="wsError"
+          @file-picked="onWsFilePicked" @upload="wsUpload" @extract="wsExtract" @send="wsSend" @new-chat="wsNewChat"
+          @scroller="el => wsScroller = el" />
+      </TabsContent>
 
-        <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <WorkspaceTab ref="wsTab" v-model:buyer="wsBuyer" v-model:model="model" v-model:input="wsInput"
-            :buyer-profiles="buyerProfiles" :models="models" :doc="wsDoc" :file="wsFile" :messages="wsMessages"
-            :busy="wsBusy" :uploading="wsUploading" :extracting="wsExtracting" :error="wsError"
-            @file-picked="onWsFilePicked" @upload="wsUpload" @extract="wsExtract" @send="wsSend" @new-chat="wsNewChat"
-            @scroller="el => wsScroller = el" />
-        </TabsContent>
+      <TabsContent value="docs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <DocumentsTab ref="docsTab" v-model:buyer="docBuyer" :documents="documents" :file="docFile"
+          :uploading="docUploading" :error="docError" :notice="docNotice" @file-picked="onDocPicked"
+          @upload="doUpload" @delete="removeDocument" @review="extractDoc" />
+      </TabsContent>
 
-        <TabsContent value="docs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <DocumentsTab ref="docsTab" v-model:buyer="docBuyer" :documents="documents" :file="docFile"
-            :uploading="docUploading" :error="docError" :notice="docNotice" @file-picked="onDocPicked"
-            @upload="doUpload" @delete="removeDocument" @review="extractDoc" />
-        </TabsContent>
+      <TabsContent value="todo" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <TodoTab />
+      </TabsContent>
 
-        <TabsContent value="todo" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <TodoTab />
-        </TabsContent>
+      <TabsContent value="search" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <SearchTab @ask="askFromSearch" />
+      </TabsContent>
 
-        <TabsContent value="search" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <SearchTab @ask="askFromSearch" />
-        </TabsContent>
+      <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <SourcesTab v-model:search="sourceSearch" :sources="sources" :filtered-sources="filteredSources"
+          :active-count="activeSourcesCount" />
+      </TabsContent>
 
-        <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <SourcesTab v-model:search="sourceSearch" :sources="sources" :filtered-sources="filteredSources"
-            :active-count="activeSourcesCount" />
-        </TabsContent>
+      <TabsContent value="settings" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <SettingsTab v-model:model="model" v-model:context="context" :username="username" :initials="initials"
+          :status="status" :connected="connected" :api-base-url="environment.apiBaseUrl" :models="models"
+          :contexts="contexts" @logout="logout" />
+      </TabsContent>
+    </AppShell>
 
-        <TabsContent value="settings" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <SettingsTab v-model:model="model" v-model:context="context" :username="username" :initials="initials"
-            :status="status" :connected="connected" :api-base-url="environment.apiBaseUrl" :models="models"
-            :contexts="contexts" @logout="logout" />
-        </TabsContent>
-      </Tabs>
-    </main>
+    <CommandPalette v-model:open="paletteOpen" :commands="commands" @run="runCommand" />
 
     <NewChatDialog v-model:open="showNewChat" v-model:context="context" :contexts="contexts" :sources="sources"
       @start="startNewChat" />
@@ -615,5 +693,5 @@ function startNewChat() {
     <!-- Human-in-the-loop extraction review -->
     <ExtractionReview v-if="reviewDoc" :doc="reviewDoc" :model="model"
       @close="reviewDoc = null" @confirmed="onReviewConfirmed" />
-  </div>
+  </Tabs>
 </template>
