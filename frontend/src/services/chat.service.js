@@ -1,30 +1,32 @@
 import { http } from './http.js'
+import { listModels } from './model.service.js'
 
-// Embedding models are installed alongside chat models but can't answer chat
-// requests ("does not support chat"), so they never belong in the model picker.
-const EMBEDDING_MODELS = /embed|bge-|gte-|e5-/i
-
-/** List installed Ollama chat model names (proxied through the backend). */
+/**
+ * Chat model names for the simple (flat) picker.
+ *
+ * The backend now filters embedding models and returns tagged entries, so this
+ * just flattens the merged list. Use listModelsGrouped() when the picker needs
+ * the local/cloud split.
+ */
 export async function getModels() {
-  const data = await http.get('/models')
-  return (data.models || [])
-    .map((m) => m.name)
-    .filter((name) => !EMBEDDING_MODELS.test(name))
+  const models = await listModels()
+  return models.map((m) => m.name)
 }
 
 /**
  * Send a message and stream the reply.
- * @param {object} args - { conversationId, model, message, webSearch }
+ * @param {object} args - { conversationId, source, model, message, webSearch }
+ *   source selects which backend answers ("local" | "cloud"); omitted means local.
  *   webSearch grounds this one turn on live web results (per-message opt-in).
  * @param {(chunk: string) => void} onToken - called for each streamed token
  * @param {AbortSignal} signal
  * @returns {Promise<number>} the conversation id (new or existing)
  */
 export async function streamChat(
-  { conversationId, model, message, webSearch = false }, onToken, signal,
+  { conversationId, source, model, message, webSearch = false }, onToken, signal,
 ) {
   const res = await http.stream(
-    '/chat', { conversationId, model, message, webSearch }, onToken, signal,
+    '/chat', { conversationId, source, model, message, webSearch }, onToken, signal,
   )
   return Number(res.headers.get('X-Conversation-Id')) || conversationId
 }

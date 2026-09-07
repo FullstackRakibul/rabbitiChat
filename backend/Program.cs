@@ -33,9 +33,18 @@ builder.Services.AddHttpClient("ollama", c =>
 // /api/search proxy instead. A missing key is NOT fatal here: the endpoints answer
 // 503 at request time so the rest of the app still boots.
 var ollamaCloudKey = builder.Configuration["OllamaCloud:ApiKey"];
+// URL convention for every Ollama client, local and cloud:
+//   BaseAddress = origin ONLY ("https://ollama.com"), request paths carry "/api/…".
+//
+// A rooted request path ("/api/web_search") replaces the whole path of the base
+// address, so a BaseAddress of "https://ollama.com/api" silently discarded its
+// own "/api" segment and produced https://ollama.com/api/web_search only by
+// coincidence — any base path would have been thrown away the same way. Keeping
+// the base as a bare origin makes the resolved URL obvious at each call site.
 builder.Services.AddHttpClient("ollama-cloud", c =>
 {
-    c.BaseAddress = new Uri("https://ollama.com");
+    c.BaseAddress = new Uri(
+        builder.Configuration["OllamaCloud:BaseUrl"]?.TrimEnd('/') ?? "https://ollama.com");
     c.Timeout = TimeSpan.FromSeconds(30);
     if (!string.IsNullOrWhiteSpace(ollamaCloudKey))
         c.DefaultRequestHeaders.Authorization =
@@ -86,6 +95,28 @@ builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings cl
 // dispatcher routes to them by BuyerProfile.ParserKey and falls back to the LLM.
 builder.Services.AddScoped<RabbitIC.Api.Extraction.LlmPoFallback>();
 builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
+
+// ---- Model sources ----
+// Each source is registered against the shared IChatModelSource abstraction, so
+// the registry (and therefore ChatService and the endpoints) discovers them
+// without naming any concrete type. A third provider is one AddSingleton line.
+builder.Services.Configure<RabbitIC.Api.ModelSources.OllamaCloudOptions>(
+    builder.Configuration.GetSection(RabbitIC.Api.ModelSources.OllamaCloudOptions.SectionName));
+
+builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
+                              RabbitIC.Api.ModelSources.LocalOllamaSource>();
+builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
+                              RabbitIC.Api.ModelSources.CloudOllamaSource>();
+
+// Opt-in diagnostic source. Proof of the Open/Closed claim: this one line and a
+// new file were the entire cost of adding a third provider.
+if (builder.Configuration.GetValue<bool>("ModelSources:EnableEcho"))
+    builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
+                                  RabbitIC.Api.ModelSources.EchoModelSource>();
+
+builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IModelSourceRegistry,
+                              RabbitIC.Api.ModelSources.ModelSourceRegistry>();
+builder.Services.AddSingleton<RabbitIC.Api.Services.ChatService>();
 
 // ---- todorabbit (Kanban boards) ----
 builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,

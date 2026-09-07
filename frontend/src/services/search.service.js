@@ -23,3 +23,21 @@ export async function search(query, maxResults = 5, signal) {
 export async function fetchPage(url, signal) {
   return http.post('/search/fetch', { url }, { signal })
 }
+
+/**
+ * Whether web search is usable right now, as judged server-side.
+ * Never carries the key — only a status the UI can render.
+ * @returns {Promise<{ok: boolean, status: string, detail: string}>}
+ */
+export async function health() {
+  try {
+    return await http.get('/search/health')
+  } catch (e) {
+    // 503 = not configured; the backend answers with the same shape, but http.js
+    // throws on non-2xx, so map it back to a status the UI understands.
+    if (e.status === 503) {
+      return { ok: false, status: 'not_configured', detail: 'Web search is not configured on the server.' }
+    }
+    throw e
+  }
+}

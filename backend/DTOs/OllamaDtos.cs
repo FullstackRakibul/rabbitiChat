@@ -11,12 +11,24 @@
         public class ChatRequest
         {
             public int? ConversationId {  get; set; }
+
+            /// <summary>Which model source answers: "local" (private) or "cloud" (metered). Defaults to local.</summary>
+            public string? Source { get; set; }
+
             public string Model { get; set; } = string.Empty;
             public string Message { get; set; } = string.Empty;
 
             /// <summary>Per-message opt-in: ground this one turn on live web results.</summary>
             public bool WebSearch { get; set; }
         };
+
+        /// <summary>One model in the merged picker list.</summary>
+        public record ModelDto(
+            string Name,
+            string Source,
+            int? ContextLength,
+            IReadOnlyList<string> Capabilities,
+            bool Metered);
 
 
         /// <summary>Proxied web search. MaxResults is clamped to 1..10 server-side.</summary>

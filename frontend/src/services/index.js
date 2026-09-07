@@ -4,7 +4,7 @@ export { getToken, getUsername, setSession, clearSession } from './session.servi
 export { login, logout } from './auth.service.js'
 export { getModels, streamChat } from './chat.service.js'
 export { listConversations, getConversation, deleteConversation } from './conversation.service.js'
-export { search, fetchPage } from './search.service.js'
+export { search, fetchPage, health } from './search.service.js'
 export {
   uploadDocument, listDocuments, deleteDocument,
   extractDocument, getExtraction, workspaceChat,
@@ -15,3 +15,6 @@ export {
   addColumn, updateColumn, deleteColumn, reorderColumns,
   addCard, updateCard, deleteCard, moveCard,
 } from './todorabbit.service.js'
+export {
+  listModels, listModelsGrouped, saveModelChoice, loadModelChoice,
+} from './model.service.js'

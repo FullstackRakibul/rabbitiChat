@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>RabbitIC.Api</RootNamespace>
+    <UserSecretsId>1b452343-33e8-4e83-99bd-0014a8836328</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

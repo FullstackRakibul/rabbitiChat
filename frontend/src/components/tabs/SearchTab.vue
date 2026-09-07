@@ -3,7 +3,8 @@ import { computed, ref } from 'vue'
 import {
   BookOpen, ChevronUp, ExternalLink, Globe, MessageSquare, Search as SearchIcon,
 } from '@lucide/vue'
-import { search as runSearch, fetchPage } from '@/services/search.service.js'
+import { onMounted } from 'vue'
+import { search as runSearch, fetchPage, health } from '@/services/search.service.js'
 import { HttpError } from '@/services/http.js'
 import { renderMarkdown } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,54 @@ const history = ref([])
 const pages = ref({})
 
 const HISTORY_LIMIT = 10
+
+// ---- Provider health ----
+// Answers "is search usable right now", so a key/plan problem is visible before
+// the user spends a query on it. Never carries the key itself.
+const status = ref({ state: 'checking', label: 'Checking…', detail: '' })
+
+const STATUS_STYLE = {
+  checking: { dot: 'bg-muted-foreground/40', text: 'text-muted-foreground' },
+  ready: { dot: 'bg-emerald-500', text: 'text-muted-foreground' },
+  warn: { dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400' },
+  error: { dot: 'bg-destructive', text: 'text-destructive' },
+}
+
+/** Maps the backend's status vocabulary to the three-light indicator. */
+function toIndicator(res) {
+  if (res.ok) return { state: 'ready', label: 'Search ready', detail: res.detail }
+
+  switch (res.status) {
+    case 'not_configured':
+      return { state: 'warn', label: 'Not configured', detail: res.detail }
+    case 'rate_limited':
+      return { state: 'warn', label: 'Rate limited', detail: res.detail }
+    case 'provider_rejected':
+      return { state: 'error', label: 'Key or plan issue', detail: res.detail }
+    case 'not_found':
+    case 'provider_error':
+    case 'unreachable':
+    case 'timeout':
+      return { state: 'error', label: 'Provider issue', detail: res.detail }
+    default:
+      return { state: 'error', label: 'Unavailable', detail: res.detail || '' }
+  }
+}
+
+async function refreshHealth() {
+  status.value = { state: 'checking', label: 'Checking…', detail: '' }
+  try {
+    status.value = toIndicator(await health())
+  } catch (e) {
+    status.value = {
+      state: 'error',
+      label: 'Unavailable',
+      detail: e.message || 'Could not reach the server.',
+    }
+  }
+}
+
+onMounted(refreshHealth)
 
 function remember(q) {
   history.value = [q, ...history.value.filter((h) => h !== q)].slice(0, HISTORY_LIMIT)
@@ -142,6 +191,30 @@ const hasResults = computed(() => results.value.length > 0)
             {{ busy ? 'Searching…' : 'Search' }}
           </Button>
         </div>
+
+        <!-- Provider status + metered-usage note -->
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <button
+            type="button"
+            class="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-80"
+            :title="status.detail || 'Re-check search availability'"
+            @click="refreshHealth"
+          >
+            <span :class="cn('h-2 w-2 rounded-full', STATUS_STYLE[status.state].dot)" />
+            <span :class="STATUS_STYLE[status.state].text">{{ status.label }}</span>
+          </button>
+
+          <span class="text-xs text-muted-foreground">
+            Powered by Ollama cloud — usage is limited.
+          </span>
+        </div>
+
+        <p
+          v-if="status.detail && status.state !== 'ready' && status.state !== 'checking'"
+          class="text-xs text-muted-foreground"
+        >
+          {{ status.detail }}
+        </p>
 
         <!-- Recent queries (session only) -->
         <div v-if="history.length" class="flex flex-wrap items-center gap-1.5">

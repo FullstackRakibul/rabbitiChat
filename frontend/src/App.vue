@@ -88,6 +88,9 @@ function handleAuthError(e) {
 // ---- Chat state ----
 const models = ref([])
 const model = ref('')
+// Which source answers the next send. The picker owns the choice (and persists
+// it); App just carries it to the API.
+const modelSource = ref('local')
 const conversations = ref([])
 const currentId = ref(null)      // null = unsaved new chat
 const messages = ref([])         // { role, content }
@@ -238,6 +241,7 @@ async function send() {
     const id = await streamChat(
       {
         conversationId: currentId.value,
+        source: modelSource.value,
         model: model.value,
         message: text,
         webSearch: useWebSearch,
@@ -644,7 +648,7 @@ useShortcuts({
       </TabsContent>
 
       <TabsContent value="chat" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <ChatTab v-model:model="model" v-model:context="context" v-model:input="input"
+        <ChatTab v-model:model="model" v-model:source="modelSource" v-model:context="context" v-model:input="input"
           v-model:web-search="webSearch" :models="models" :messages="messages" :busy="busy" :error="error"
           :active-sources="activeSources" :topics-count="topicsCount" :ideas-count="ideasCount"
           :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { FileText, Lightbulb, Plus, ChartColumn } from '@lucide/vue'
+import ModelPicker from '@/components/ModelPicker.vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -12,6 +13,8 @@ import ChatComposer from '@/components/ChatComposer.vue'
 const props = defineProps({
   models: { type: Array, default: () => [] },
   model: { type: String, default: '' },
+  /** Which model source answers: "local" (private) or "cloud" (metered). */
+  source: { type: String, default: 'local' },
   contexts: { type: Array, default: () => [] },
   context: { type: String, default: '' },
   messages: { type: Array, default: () => [] },
@@ -26,7 +29,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:model', 'update:context', 'update:input', 'update:webSearch',
+  'update:model', 'update:source', 'update:context', 'update:input', 'update:webSearch',
   'send', 'new-chat', 'scroller',
 ])
 
@@ -45,16 +48,13 @@ const contextValue = computed({
     <!-- Controls + metrics -->
     <div class="shrink-0 border-b px-4 py-3">
       <div class="flex flex-wrap items-center gap-2">
-        <Select v-model="modelValue">
-          <SelectTrigger class="h-8 w-auto min-w-36 text-xs">
-            <SelectValue placeholder="Model" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="m in models" :key="m" :value="m">
-              {{ m }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <!-- Grouped by source: local models are private, cloud ones are metered. -->
+        <ModelPicker
+          v-model="modelValue"
+          :source="source"
+          class="w-56"
+          @update:source="emit('update:source', $event)"
+        />
 
         <Select v-model="contextValue">
           <SelectTrigger class="h-8 w-auto min-w-32 text-xs">

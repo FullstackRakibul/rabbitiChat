@@ -3,6 +3,8 @@ using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.DTOs;
+using RabbitIC.Api.ModelSources;
+using RabbitIC.Api.Services;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,21 +19,16 @@ namespace RabbitIC.Api.MinimalApis
             var group = app.MapGroup("/").WithTags("Ollama APIs");
 
 
-            // List installed Ollama models (proxied so the browser never touches Ollama directly).
-            group.MapGet("/models", async(IHttpClientFactory http, CancellationToken ct) =>{
+            // Merged model list: every registered source, each entry tagged with its
+            // source and a metered flag. Routed through ChatService so this endpoint
+            // never names a concrete source.
+            group.MapGet("/models", async (ChatService chat, CancellationToken ct) =>
+            {
+                var models = await chat.ListAllModelsAsync(ct);
 
-                
-                var client = http.CreateClient("ollama");
-                
-                try
-                {
-                    var json = await client.GetStringAsync("api/tags", ct);
-                    return Results.Content(json, "application/json");
-                }
-                catch (HttpRequestException)
-                {
-                    return Results.Problem("Cannot reach Ollama. Is it running?", statusCode: 502);
-                }
+                return Results.Ok(models
+                    .Select(m => new ModelDto(m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered))
+                    .ToList());
             });
 
 
@@ -124,7 +121,7 @@ namespace RabbitIC.Api.MinimalApis
 
             // Chat: save the user turn, stream the model reply token-by-token, then save the reply.
             app.MapPost("/chat", async (ChatRequest req, AppDbContext db, IHttpClientFactory http, HttpContext ctx,
-                                        IConfiguration config, ILoggerFactory logs) =>
+                                        IConfiguration config, ILoggerFactory logs, ChatService chat) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 var systemPrompt = Environment.GetEnvironmentVariable("Ollama:SystemPrompt");
@@ -205,24 +202,19 @@ namespace RabbitIC.Api.MinimalApis
                     }
                 }
 
-                var payload = new { model = req.Model, messages = history, stream = true };
+                // Route to the requested source through the registry. The endpoint
+                // knows only the key it was given — never a concrete source type.
+                var turns = history.Select(m => new ChatTurn(m.Role, m.Content)).ToList();
 
-                var client = http.CreateClient("ollama");
-                using var upstream = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
-                {
-                    Content = JsonContent.Create(payload)
-                };
-
-                HttpResponseMessage resp;
+                IAsyncEnumerable<string> tokens;
                 try
                 {
-                    resp = await client.SendAsync(upstream, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
-                    resp.EnsureSuccessStatusCode();
+                    tokens = chat.StreamAsync(req.Source, new ChatArgs(req.Model, turns), ctx.RequestAborted);
                 }
-                catch (HttpRequestException ex)
+                catch (ChatSourceException ex)
                 {
-                    ctx.Response.StatusCode = 502;
-                    await ctx.Response.WriteAsync("Ollama error: " + ex.Message);
+                    ctx.Response.StatusCode = 400;
+                    await ctx.Response.WriteAsync(ex.Message);
                     return;
                 }
 
@@ -240,34 +232,25 @@ namespace RabbitIC.Api.MinimalApis
                     await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                 }
 
-                await using var stream = await resp.Content.ReadAsStreamAsync(ctx.RequestAborted);
-                using var reader = new StreamReader(stream);
-
-                string? line;
-
-                while ((line = await reader.ReadLineAsync(ctx.RequestAborted)) is not null)
+                // The source yields content deltas; the transport detail (NDJSON) is
+                // its business, not this endpoint's.
+                try
                 {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-
-                    // Ollama streams newline-delimited JSON; pull the content delta out of each line.
-                    string? token = null;
-                    try
+                    await foreach (var token in tokens.WithCancellation(ctx.RequestAborted))
                     {
-                        using var doc = JsonDocument.Parse(line);
-                        if (doc.RootElement.TryGetProperty("message", out var msg) &&
-                            msg.TryGetProperty("content", out var content))
-                        {
-                            token = content.GetString();
-                        }
-                    }
-                    catch (JsonException) { continue; }
+                        if (string.IsNullOrEmpty(token)) continue;
 
-                    if (!string.IsNullOrEmpty(token))
-                    {
                         full.Append(token);
                         await ctx.Response.WriteAsync(token, ctx.RequestAborted);
                         await ctx.Response.Body.FlushAsync(ctx.RequestAborted); // push each token immediately
                     }
+                }
+                catch (ChatSourceException ex)
+                {
+                    // Headers are already sent, so the failure is reported in-band.
+                    var notice = $"\n\n_{ex.Message}_";
+                    full.Append(notice);
+                    await ctx.Response.WriteAsync(notice, ctx.RequestAborted);
                 }
 
                 // Persist the assistant reply once streaming completes.

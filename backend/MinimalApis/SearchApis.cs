@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
 using RabbitIC.Api.AuthHelper;
@@ -57,7 +57,7 @@ namespace RabbitIC.Api.MinimalApis
                 var payload = new { query = req.Query, max_results = maxResults };
 
                 return await ProxyAsync(client, "/api/web_search", payload, ctx.RequestAborted,
-                    transform: json => Results.Content(json, "application/json"));
+                    transform: json => Results.Content(json, "application/json"), log: log);
             });
 
             // POST /api/search/fetch — proxy a single page fetch, truncated for the UI.
@@ -93,7 +93,98 @@ namespace RabbitIC.Api.MinimalApis
                 var payload = new { url = uri.ToString() };
 
                 return await ProxyAsync(client, "/api/web_fetch", payload, ctx.RequestAborted,
-                    transform: json => Results.Json(Truncate(json)));
+                    transform: json => Results.Json(Truncate(json)), log: log);
+            });
+
+            // GET /api/search/health - is web search actually usable right now?
+            //
+            // Runs a trivial query server-side and reports the upstream verdict, so
+            // "the key/plan is wrong" is distinguishable from "our code is wrong".
+            // Reports the upstream STATUS only - never the key, never the body.
+            app.MapGet("/search/health", async (
+                HttpContext ctx,
+                AppDbContext db,
+                IHttpClientFactory http,
+                IConfiguration config,
+                ILoggerFactory logs) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                if (!IsConfigured(config))
+                {
+                    return Results.Json(new
+                    {
+                        ok = false,
+                        status = "not_configured",
+                        detail = "No OllamaCloud:ApiKey is set on the server.",
+                    }, statusCode: 503);
+                }
+
+                var log = logs.CreateLogger("SearchApis");
+                var client = http.CreateClient("ollama-cloud");
+
+                // Resolved for the log so the effective URL is verifiable in one line.
+                var resolved = new Uri(client.BaseAddress!, "/api/web_search");
+
+                try
+                {
+                    using var resp = await client.PostAsJsonAsync(
+                        "/api/web_search",
+                        new { query = "ping", max_results = 1 },
+                        ctx.RequestAborted);
+
+                    var code = (int)resp.StatusCode;
+
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        log.LogInformation("Search health OK via {Url} ({Code}).", resolved, code);
+                        return Results.Ok(new
+                        {
+                            ok = true,
+                            status = "ready",
+                            detail = "Web search responded normally.",
+                        });
+                    }
+
+                    // Warning level so a key/plan problem is visible in the server log
+                    // without the client learning which of the two it was.
+                    log.LogWarning(
+                        "Search health: upstream {Url} answered {Code} ({Reason}).",
+                        resolved, code, resp.ReasonPhrase);
+
+                    var (status, detail) = code switch
+                    {
+                        401 or 403 => ("provider_rejected",
+                            "The provider rejected the key, or this plan does not include web search."),
+                        429 => ("rate_limited", "The provider is rate-limiting this account."),
+                        404 => ("not_found",
+                            "The provider has no web_search endpoint at the configured URL."),
+                        _ => ("provider_error", $"The provider returned HTTP {code}."),
+                    };
+
+                    return Results.Json(new { ok = false, status, detail });
+                }
+                catch (TaskCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
+                {
+                    log.LogWarning("Search health: upstream {Url} timed out.", resolved);
+                    return Results.Json(new
+                    {
+                        ok = false,
+                        status = "timeout",
+                        detail = "The provider did not respond in time.",
+                    });
+                }
+                catch (HttpRequestException ex)
+                {
+                    log.LogWarning("Search health: cannot reach {Url}: {Message}", resolved, ex.Message);
+                    return Results.Json(new
+                    {
+                        ok = false,
+                        status = "unreachable",
+                        detail = "The provider could not be reached from this server.",
+                    });
+                }
             });
 
             return app;
@@ -115,24 +206,43 @@ namespace RabbitIC.Api.MinimalApis
             string path,
             object payload,
             CancellationToken ct,
-            Func<string, IResult> transform)
+            Func<string, IResult> transform,
+            ILogger? log = null)
         {
+            // Rooted path against a bare-origin BaseAddress - see Program.cs.
+            var resolved = client.BaseAddress is null
+                ? path
+                : new Uri(client.BaseAddress, path).ToString();
+
             try
             {
                 using var resp = await client.PostAsJsonAsync(path, payload, ct);
 
                 if (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized
                                     or System.Net.HttpStatusCode.Forbidden)
+                {
+                    // The client sees a generic 502; the real upstream status is logged
+                    // here so a key/plan problem stays diagnosable server-side.
+                    log?.LogWarning(
+                        "Web search upstream {Url} rejected the key: {Code}. "
+                        + "Check whether the plan includes web search.",
+                        resolved, (int)resp.StatusCode);
+
                     return Results.Json(
                         new { error = "Search provider rejected the key" }, statusCode: 502);
+                }
 
                 if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                     return Results.Json(
                         new { error = "Slow down — search is rate-limited." }, statusCode: 429);
 
                 if (!resp.IsSuccessStatusCode)
+                {
+                    log?.LogWarning("Web search upstream {Url} answered {Code}.",
+                        resolved, (int)resp.StatusCode);
                     return Results.Json(
                         new { error = "Search provider error." }, statusCode: 502);
+                }
 
                 var json = await resp.Content.ReadAsStringAsync(ct);
                 return transform(json);
