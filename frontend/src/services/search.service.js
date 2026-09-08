@@ -41,3 +41,38 @@ export async function health() {
     throw e
   }
 }
+
+// ---- History ----------------------------------------------------------------
+// Query text and usage metadata only. Results are never stored server-side, so
+// "reuse" is always a re-run through search() above, never a cache read.
+
+/**
+ * The current user's remembered queries, newest run first.
+ * @param {boolean} [deleted] - true lists soft-deleted rows instead of active ones
+ * @returns {Promise<Array<{id, query, title, maxResults, runCount, lastRunAt, createdAt, isDeleted}>>}
+ */
+export function listHistory(deleted = false) {
+  return http.get(deleted ? '/search/history?deleted=true' : '/search/history')
+}
+
+/**
+ * Rename one entry. An empty title clears it, so the row shows its query again.
+ * @param {number} id
+ * @param {string} title
+ */
+export function renameHistory(id, title) {
+  return http.put(`/search/history/${id}`, { title })
+}
+
+/**
+ * Soft-delete one entry — the row survives, so restoreHistory() is a real undo.
+ * @param {number} id
+ */
+export function deleteHistory(id) {
+  return http.raw(`/search/history/${id}`, { method: 'DELETE' }).then((r) => r.json())
+}
+
+/** @param {number} id */
+export function restoreHistory(id) {
+  return http.post(`/search/history/${id}/restore`)
+}

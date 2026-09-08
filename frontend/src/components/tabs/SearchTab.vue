@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import WorldMapBackdrop from '@/components/WorldMapBackdrop.vue'
+import SearchHistoryPanel from '@/components/SearchHistoryPanel.vue'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -26,13 +28,12 @@ const error = ref('')
 const searched = ref(false)           // separates "no results" from "not searched yet"
 const lastQuery = ref('')
 
-// Session-local only — deliberately not persisted.
-const history = ref([])
+// History is server-backed now: the backend records each successful search, so
+// the panel is the source of truth rather than a session-local array.
+const historyPanel = ref(null)
 
 // Per-result expansion state, keyed by url: { loading, content, error, title }
 const pages = ref({})
-
-const HISTORY_LIMIT = 10
 
 // ---- Provider health ----
 // Answers "is search usable right now", so a key/plan problem is visible before
@@ -82,10 +83,6 @@ async function refreshHealth() {
 
 onMounted(refreshHealth)
 
-function remember(q) {
-  history.value = [q, ...history.value.filter((h) => h !== q)].slice(0, HISTORY_LIMIT)
-}
-
 /** Map transport failures to something a user can act on. */
 function describe(e) {
   if (e instanceof HttpError) {
@@ -99,9 +96,15 @@ function describe(e) {
   return e.message || 'Search failed.'
 }
 
-async function submit(q = query.value) {
+/**
+ * Runs a search. `size` lets a history row re-run with the setting it was
+ * originally run at, rather than whatever the picker happens to show now.
+ */
+async function submit(q = query.value, size = null) {
   const text = (q || '').trim()
   if (!text || busy.value) return
+
+  if (size) maxResults.value = String(size)
 
   query.value = text
   error.value = ''
@@ -111,7 +114,10 @@ async function submit(q = query.value) {
     pages.value = {}
     lastQuery.value = text
     searched.value = true
-    remember(text)
+
+    // The server recorded this run; pull the updated counts rather than
+    // guessing at them client-side.
+    historyPanel.value?.refresh()
   } catch (e) {
     error.value = describe(e)
     results.value = []
@@ -155,9 +161,12 @@ const hasResults = computed(() => results.value.length > 0)
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <!-- Search bar -->
-    <div class="shrink-0 border-b px-4 py-3">
-      <div class="mx-auto flex w-full max-w-3xl flex-col gap-3">
+    <!-- Search bar. `relative` anchors the decorative backdrop; the inner
+         content sits above it on z-10 so contrast is unaffected. -->
+    <div class="relative shrink-0 overflow-hidden border-b px-4 py-3">
+      <WorldMapBackdrop />
+
+      <div class="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-3">
         <div class="flex flex-wrap items-center gap-2">
           <div class="relative min-w-0 flex-1">
             <SearchIcon
@@ -216,25 +225,13 @@ const hasResults = computed(() => results.value.length > 0)
           {{ status.detail }}
         </p>
 
-        <!-- Recent queries (session only) -->
-        <div v-if="history.length" class="flex flex-wrap items-center gap-1.5">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Recent
-          </span>
-          <button
-            v-for="h in history"
-            :key="h"
-            type="button"
-            :class="cn(
-              'rounded-md border px-2 py-0.5 text-xs transition-colors hover:bg-accent hover:text-accent-foreground',
-              h === lastQuery ? 'bg-accent text-accent-foreground' : 'text-muted-foreground',
-            )"
-            :disabled="busy"
-            @click="submit(h)"
-          >
-            {{ h }}
-          </button>
-        </div>
+        <!-- Recent searches (server-backed; click re-runs the query) -->
+        <SearchHistoryPanel
+          ref="historyPanel"
+          :busy="busy"
+          :active-query="lastQuery"
+          @run="submit($event.query, $event.maxResults)"
+        />
       </div>
     </div>
 

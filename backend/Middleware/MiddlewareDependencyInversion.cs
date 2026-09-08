@@ -62,6 +62,7 @@ namespace RabbitIC.Api.Middleware
             var searchApi = app.MapGroup("/api").WithTags("Web search");
 
             searchApi.MapSearchApis();
+            searchApi.MapSearchHistoryApis();
             return app;
         }
     }

@@ -4,6 +4,7 @@ using System.Text.Json;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.DTOs;
+using RabbitIC.Api.Services;
 
 namespace RabbitIC.Api.MinimalApis
 {
@@ -29,7 +30,8 @@ namespace RabbitIC.Api.MinimalApis
                 AppDbContext db,
                 IHttpClientFactory http,
                 IConfiguration config,
-                ILoggerFactory logs) =>
+                ILoggerFactory logs,
+                ISearchHistoryService historyService) =>
             {
                 var log = logs.CreateLogger("SearchApis");
 
@@ -56,8 +58,12 @@ namespace RabbitIC.Api.MinimalApis
                 var client = http.CreateClient("ollama-cloud");
                 var payload = new { query = req.Query, max_results = maxResults };
 
-                return await ProxyAsync(client, "/api/web_search", payload, ctx.RequestAborted,
-                    transform: json => Results.Content(json, "application/json"), log: log);
+                var result = await ProxyAsync(client, "/api/web_search", payload, ctx.RequestAborted,
+                    transform: json => Results.Content(json, "application/json"), log: log,
+                    onSuccess: () => historyService.RecordAsync(
+                        user.Id, req.Query, maxResults, ctx.RequestAborted));
+
+                return result;
             });
 
             // POST /api/search/fetch — proxy a single page fetch, truncated for the UI.
@@ -201,13 +207,18 @@ namespace RabbitIC.Api.MinimalApis
         /// POST to the upstream and map failures to our own status codes. Upstream
         /// auth failures collapse to a generic 502 so key problems never leak outward.
         /// </summary>
+        /// <param name="onSuccess">
+        /// Ran only after the upstream answered 2xx. Used to record history, which
+        /// must not happen for a failed, rate-limited or unconfigured search.
+        /// </param>
         private static async Task<IResult> ProxyAsync(
             HttpClient client,
             string path,
             object payload,
             CancellationToken ct,
             Func<string, IResult> transform,
-            ILogger? log = null)
+            ILogger? log = null,
+            Func<Task>? onSuccess = null)
         {
             // Rooted path against a bare-origin BaseAddress - see Program.cs.
             var resolved = client.BaseAddress is null
@@ -245,6 +256,22 @@ namespace RabbitIC.Api.MinimalApis
                 }
 
                 var json = await resp.Content.ReadAsStringAsync(ct);
+
+                // Awaited, not fire-and-forget: the DbContext is scoped to this
+                // request, and RunCount would race if two searches overlapped.
+                // A history failure must not fail the search the user asked for.
+                if (onSuccess is not null)
+                {
+                    try
+                    {
+                        await onSuccess();
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.LogWarning("Recording search history failed: {Message}", ex.Message);
+                    }
+                }
+
                 return transform(json);
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)

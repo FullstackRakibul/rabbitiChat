@@ -29,6 +29,7 @@ public static class SchemaUpgrade
         EnsureTodoRabbitTables(db);
         EnsureMessageWebSearchColumn(db);
         EnsureContextSourceTable(db);
+        EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
@@ -156,6 +157,33 @@ public static class SchemaUpgrade
             );");
         db.Database.ExecuteSqlRaw(
             @"CREATE INDEX ""IX_ContextSources_OwnerUserId_Kind"" ON ""ContextSources"" (""OwnerUserId"", ""Kind"");");
+    }
+
+    /// <summary>
+    /// Remembered search queries. Query text and usage counts only — result
+    /// payloads are never persisted, so there is no column here to hold one.
+    /// </summary>
+    private static void EnsureSearchHistoryTable(AppDbContext db)
+    {
+        if (TableExists(db, "SearchHistories")) return;
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE ""SearchHistories"" (
+                ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_SearchHistories"" PRIMARY KEY AUTOINCREMENT,
+                ""OwnerUserId"" INTEGER NOT NULL,
+                ""Query""       TEXT NOT NULL,
+                ""Title""       TEXT NULL,
+                ""MaxResults""  INTEGER NOT NULL,
+                ""RunCount""    INTEGER NOT NULL,
+                ""LastRunAt""   TEXT NOT NULL,
+                ""CreatedAt""   TEXT NOT NULL,
+                ""UpdatedAt""   TEXT NOT NULL,
+                ""IsDeleted""   INTEGER NOT NULL,
+                ""DeletedAt""   TEXT NULL
+            );");
+        db.Database.ExecuteSqlRaw(
+            @"CREATE INDEX ""IX_SearchHistories_OwnerUserId_IsDeleted_LastRunAt""
+              ON ""SearchHistories"" (""OwnerUserId"", ""IsDeleted"", ""LastRunAt"");");
     }
 
     /// <summary>

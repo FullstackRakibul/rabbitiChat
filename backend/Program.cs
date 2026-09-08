@@ -128,6 +128,11 @@ builder.Services.AddScoped<RabbitIC.Api.Services.IContextSourceService,
 // that knows how to reach the upstream search API.
 builder.Services.AddScoped<RabbitIC.Api.Services.WebSearchRunner>();
 
+// Search history — the dedupe rule and the never-hard-delete guarantee live
+// behind this interface, so no endpoint can work around either.
+builder.Services.AddScoped<RabbitIC.Api.Services.ISearchHistoryService,
+                           RabbitIC.Api.Services.SearchHistoryService>();
+
 // ---- todorabbit (Kanban boards) ----
 builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
                            RabbitIC.Api.Repositories.TodoRabbitRepository>();
