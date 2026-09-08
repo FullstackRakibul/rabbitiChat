@@ -21,4 +21,6 @@
     <Folder Include="Helper\" />
   </ItemGroup>
 
+  <ProjectExtensions><VisualStudio><UserProperties properties_4launchsettings_1json__JsonSchema="https://json.sdmx.org/2.1/sdmx-json-structure-schema.json" /></VisualStudio></ProjectExtensions>
+
 </Project>
