@@ -18,9 +18,26 @@ var ollamaUrl = builder.Configuration["Ollama:Url"] ?? "http://localhost:11434";
 
 
 
+// ---- SQLite path ----
+// The connection string holds a relative path, which SQLite resolves against the
+// *current working directory* — that is not the app folder under IIS, a Windows
+// service, or `dotnet run` from elsewhere, and the open then fails with
+// "SQLite Error 14: unable to open database file". Anchor it to the deployed
+// binaries instead and make sure the folder exists before EF opens the file.
+var sqliteBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(
+    builder.Configuration.GetConnectionString("Default") ?? "Data Source=Data/rabbitic.db");
+
+if (!Path.IsPathRooted(sqliteBuilder.DataSource))
+    sqliteBuilder.DataSource = Path.Combine(AppContext.BaseDirectory, sqliteBuilder.DataSource);
+
+var dbDirectory = Path.GetDirectoryName(sqliteBuilder.DataSource);
+if (!string.IsNullOrEmpty(dbDirectory))
+    Directory.CreateDirectory(dbDirectory);   // no-op when it already exists
+
+var sqliteConnectionString = sqliteBuilder.ToString();
+
 // ---- Services ----
-builder.Services.AddDbContext<AppDbContext>(o =>
-    o.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=rabbitic.db"));
+builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite(sqliteConnectionString));
 
 
 builder.Services.AddHttpClient("ollama", c =>
@@ -130,6 +147,7 @@ app.UseCors();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    app.Logger.LogInformation("SQLite database: {Path}", sqliteBuilder.DataSource);
     db.Database.EnsureCreated();   // creates everything fresh if the file is new
     SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
 
