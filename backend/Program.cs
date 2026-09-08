@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -118,6 +118,16 @@ builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IModelSourceRegistry,
                               RabbitIC.Api.ModelSources.ModelSourceRegistry>();
 builder.Services.AddSingleton<RabbitIC.Api.Services.ChatService>();
 
+// ---- Context sources ----
+// Connected sources and buyer profiles are one mechanism behind one interface,
+// so chat and workspace cannot drift apart in how they assemble context.
+builder.Services.AddScoped<RabbitIC.Api.Services.IContextSourceService,
+                           RabbitIC.Api.Services.ContextSourceService>();
+
+// Shared by the chat tool-call path and the /api/search proxy path — one place
+// that knows how to reach the upstream search API.
+builder.Services.AddScoped<RabbitIC.Api.Services.WebSearchRunner>();
+
 // ---- todorabbit (Kanban boards) ----
 builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
                            RabbitIC.Api.Repositories.TodoRabbitRepository>();
@@ -152,6 +162,7 @@ app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
 app.ApplicationBuyerProfileApis();
 app.ApplicationSearchApis();
+app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();
 
 

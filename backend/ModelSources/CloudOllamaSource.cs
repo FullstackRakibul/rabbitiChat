@@ -18,6 +18,14 @@ public class OllamaCloudOptions
     public string[] Models { get; set; } = Array.Empty<string>();
 
     /// <summary>
+    /// Capabilities to advertise for cloud models. The hosted catalogue publishes
+    /// no per-model capability list, so this is configuration rather than a guess:
+    /// leave it empty and the UI offers only plain chat. Set e.g.
+    /// [ "chat", "tools" ] once the account's models are known to support them.
+    /// </summary>
+    public string[] Capabilities { get; set; } = { "chat" };
+
+    /// <summary>
     /// Suffix the account uses to address a model's hosted copy — `ollama run
     /// gpt-oss:120b-cloud` runs the cloud build of `gpt-oss:120b`. Configurable
     /// rather than hard-coded: set it to "" to send names verbatim if the
@@ -53,6 +61,22 @@ public class CloudOllamaSource : IChatModelSource
 
     public string SourceKey => "cloud";
 
+    /// <summary>Configured capabilities, always including "chat".</summary>
+    private IReadOnlyList<string> NormalizedCapabilities
+    {
+        get
+        {
+            var list = _options.Capabilities
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!list.Contains("chat", StringComparer.OrdinalIgnoreCase)) list.Insert(0, "chat");
+            return list;
+        }
+    }
+
     public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken ct = default)
     {
         // No key means no cloud models — an empty half, not an error: the picker
@@ -69,14 +93,14 @@ public class CloudOllamaSource : IChatModelSource
                 Name: m.Trim(),
                 Source: SourceKey,
                 ContextLength: null,          // not published per-model; don't invent one
-                Capabilities: new[] { "chat" },
+                Capabilities: NormalizedCapabilities,
                 Metered: true))
             .ToList();
 
         return Task.FromResult(models);
     }
 
-    public IAsyncEnumerable<string> StreamChatAsync(ChatArgs args, CancellationToken ct = default)
+    public IAsyncEnumerable<ChatStreamEvent> StreamChatAsync(ChatArgs args, CancellationToken ct = default)
     {
         if (!_options.IsConfigured)
             throw new ChatSourceException("Ollama cloud is not configured on this server.");
@@ -86,7 +110,8 @@ public class CloudOllamaSource : IChatModelSource
             "Cloud chat: picker model {Picked} sent upstream as {Upstream}", args.Model, upstreamModel);
 
         return OllamaChatStream.StreamAsync(
-            _http.CreateClient("ollama-cloud"), "/api/chat", upstreamModel, args.Messages, _log, ct);
+            _http.CreateClient("ollama-cloud"), "/api/chat", upstreamModel, args.Messages, _log, ct,
+            args.Tools, args.Think);
     }
 
     /// <summary>

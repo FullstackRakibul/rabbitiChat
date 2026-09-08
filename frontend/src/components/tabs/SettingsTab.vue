@@ -22,11 +22,9 @@ const props = defineProps({
   apiBaseUrl: { type: String, default: '' },
   models: { type: Array, default: () => [] },
   model: { type: String, default: '' },
-  contexts: { type: Array, default: () => [] },
-  context: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:model', 'update:context', 'logout'])
+const emit = defineEmits(['update:model', 'logout'])
 
 const { theme, toggleTheme } = useTheme()
 const isDark = computed({
@@ -37,10 +35,6 @@ const isDark = computed({
 const modelValue = computed({
   get: () => props.model,
   set: (v) => emit('update:model', v),
-})
-const contextValue = computed({
-  get: () => props.context,
-  set: (v) => emit('update:context', v),
 })
 </script>
 
@@ -126,19 +120,6 @@ const contextValue = computed({
               </Select>
             </div>
 
-            <div class="flex min-w-40 flex-1 flex-col gap-2">
-              <Label>Context</Label>
-              <Select v-model="contextValue">
-                <SelectTrigger>
-                  <SelectValue placeholder="Context" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="c in contexts" :key="c" :value="c">
-                    {{ c }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </section>
       </CardContent>

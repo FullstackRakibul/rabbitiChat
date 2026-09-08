@@ -357,7 +357,8 @@ namespace RabbitIC.Api.MinimalApis
             // so the workspace thread (including extractions) survives a reload.
             app.MapPost("/documents/workspace-chat", async (
                 WorkspaceChatRequest req, HttpContext ctx, AppDbContext db,
-                EmbeddingService embedder, VectorIndex index, IHttpClientFactory http) =>
+                EmbeddingService embedder, VectorIndex index, IHttpClientFactory http,
+                RabbitIC.Api.Services.IContextSourceService contextSources) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) { ctx.Response.StatusCode = 401; return; }
@@ -390,9 +391,19 @@ namespace RabbitIC.Api.MinimalApis
                         .Select(h => (h.SourceRef, h.Text)).ToList();
                 }
 
-                var sb = new StringBuilder(
-                    "You are a purchase-order assistant for a garment merchandiser. Answer using ONLY the document " +
-                    "excerpts below. Cite the [source] you used. If the answer is not in the excerpts, say so.\n\n");
+                // Buyer profiles are context sources with Kind="buyer" — assembled by
+                // the same service and the same method the chat tab uses, so there is
+                // one implementation of "how context becomes a system prompt".
+                var persona = await contextSources.BuildSystemPromptAsync(
+                    user.Id,
+                    activeIds: null,   // no per-turn toggles here; each profile's own switch decides
+                    basePersona:
+                        "You are a purchase-order assistant for a garment merchandiser. Answer using ONLY the document " +
+                        "excerpts below. Cite the [source] you used. If the answer is not in the excerpts, say so.",
+                    kind: RabbitIC.Api.Models.ContextSource.KindBuyer,
+                    ct: ct);
+
+                var sb = new StringBuilder(persona).Append("\n\n");
                 if (contextChunks.Count == 0)
                     sb.Append("(No document excerpts matched — tell the user to upload or pin a document.)\n");
                 foreach (var (sourceRef, text) in contextChunks)

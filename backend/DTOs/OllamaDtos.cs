@@ -20,6 +20,20 @@
 
             /// <summary>Per-message opt-in: ground this one turn on live web results.</summary>
             public bool WebSearch { get; set; }
+
+            /// <summary>
+            /// Ask a reasoning-capable model to expose its reasoning. Ignored for
+            /// models that don't declare a thinking capability — sending it to one
+            /// that can't reason is an upstream 400.
+            /// </summary>
+            public bool Think { get; set; }
+
+            /// <summary>
+            /// Which ContextSource rows to prepend to the system prompt for this
+            /// turn. Null means "fall back to whatever the conversation last used";
+            /// an empty array explicitly means no context.
+            /// </summary>
+            public List<int>? ActiveSourceIds { get; set; }
         };
 
         /// <summary>One model in the merged picker list.</summary>

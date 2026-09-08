@@ -26,7 +26,7 @@ public class EchoModelSource : IChatModelSource
         return Task.FromResult(models);
     }
 
-    public async IAsyncEnumerable<string> StreamChatAsync(
+    public async IAsyncEnumerable<ChatStreamEvent> StreamChatAsync(
         ChatArgs args,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -36,7 +36,7 @@ public class EchoModelSource : IChatModelSource
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(10, ct);
-            yield return word + " ";
+            yield return ChatStreamEvent.Content(word + " ");
         }
     }
 }

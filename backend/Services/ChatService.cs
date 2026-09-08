@@ -47,7 +47,7 @@ public class ChatService
     /// <see cref="ChatSourceException"/> for an unknown source, a rejected model,
     /// or an upstream failure — the endpoint maps that to a status code.
     /// </summary>
-    public IAsyncEnumerable<string> StreamAsync(
+    public IAsyncEnumerable<ChatStreamEvent> StreamAsync(
         string? sourceKey, ChatArgs args, CancellationToken ct = default)
     {
         var source = _registry.Resolve(sourceKey)

@@ -1,4 +1,4 @@
-namespace RabbitIC.Api.ModelSources;
+﻿namespace RabbitIC.Api.ModelSources;
 
 /// <summary>One model a source can serve, as the picker sees it.</summary>
 /// <param name="Name">Display/selection name, as the client sends it back.</param>
@@ -16,10 +16,28 @@ public record ModelInfo(
 /// <summary>A chat turn to stream, independent of which backend answers it.</summary>
 /// <param name="Model">Model name as chosen in the picker (pre-suffix mapping).</param>
 /// <param name="Messages">Full history, oldest first, system messages included.</param>
-public record ChatArgs(string Model, IReadOnlyList<ChatTurn> Messages);
+/// <param name="Tools">
+/// Tools the model may call. Empty means none are offered — the caller decides
+/// that from the model's declared capabilities, so a model without tool support
+/// is never sent a tools array.
+/// </param>
+/// <param name="Think">
+/// Ask the model to expose its reasoning. The caller sets this only for models
+/// that declare the capability, so a source can pass it straight through.
+/// </param>
+public record ChatArgs(
+    string Model,
+    IReadOnlyList<ChatTurn> Messages,
+    IReadOnlyList<ToolDefinition>? Tools = null,
+    bool Think = false);
 
-/// <summary>One message in a chat history.</summary>
-public record ChatTurn(string Role, string Content);
+/// <summary>
+/// One message in a chat history.
+/// </summary>
+/// <param name="Role">"system" | "user" | "assistant" | "tool".</param>
+/// <param name="Content">Message text, or a tool's result payload when Role is "tool".</param>
+/// <param name="ToolName">Set on a "tool" turn so the model can match the result to its call.</param>
+public record ChatTurn(string Role, string Content, string? ToolName = null);
 
 /// <summary>
 /// A place chat models can be listed and streamed from.
@@ -41,8 +59,11 @@ public interface IChatModelSource
     /// </summary>
     Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken ct = default);
 
-    /// <summary>Streams the reply token by token. Throws <see cref="ChatSourceException"/> on upstream failure.</summary>
-    IAsyncEnumerable<string> StreamChatAsync(ChatArgs args, CancellationToken ct = default);
+    /// <summary>
+    /// Streams the reply as typed deltas — visible content, reasoning, and tool
+    /// calls. Throws <see cref="ChatSourceException"/> on upstream failure.
+    /// </summary>
+    IAsyncEnumerable<ChatStreamEvent> StreamChatAsync(ChatArgs args, CancellationToken ct = default);
 }
 
 /// <summary>Upstream failure a source wants surfaced to the caller as a clean status.</summary>

@@ -1,12 +1,9 @@
 <script setup>
 import { computed } from 'vue'
-import { FileText, Lightbulb, Plus, ChartColumn } from '@lucide/vue'
+import { Plus } from '@lucide/vue'
 import ModelPicker from '@/components/ModelPicker.vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatComposer from '@/components/ChatComposer.vue'
 
@@ -15,37 +12,39 @@ const props = defineProps({
   model: { type: String, default: '' },
   /** Which model source answers: "local" (private) or "cloud" (metered). */
   source: { type: String, default: 'local' },
-  contexts: { type: Array, default: () => [] },
-  context: { type: String, default: '' },
+  /** The selected model's own record, for capability gating and the context bar. */
+  selectedModel: { type: Object, default: null },
   messages: { type: Array, default: () => [] },
   input: { type: String, default: '' },
   busy: { type: Boolean, default: false },
   error: { type: String, default: '' },
-  activeSources: { type: Array, default: () => [] },
-  topicsCount: { type: Number, default: 0 },
-  ideasCount: { type: Number, default: 0 },
-  docsCount: { type: Number, default: 0 },
+
+  /** Every context source of kind "source", plus which are on for this chat. */
+  sources: { type: Array, default: () => [] },
+  activeSourceIds: { type: Array, default: () => [] },
+
   webSearch: { type: Boolean, default: false },
+  think: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
-  'update:model', 'update:source', 'update:context', 'update:input', 'update:webSearch',
-  'send', 'new-chat', 'scroller',
+  'update:model', 'update:source', 'update:input', 'update:webSearch', 'update:think',
+  'update:activeSourceIds', 'send', 'new-chat', 'manage-sources', 'scroller',
 ])
 
 const modelValue = computed({
   get: () => props.model,
   set: (v) => emit('update:model', v),
 })
-const contextValue = computed({
-  get: () => props.context,
-  set: (v) => emit('update:context', v),
-})
+
+/** The sources switched on for this conversation, for the footer chips. */
+const activeSources = computed(() =>
+  props.sources.filter((s) => props.activeSourceIds.includes(s.id)))
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <!-- Controls + metrics -->
+    <!-- Controls -->
     <div class="shrink-0 border-b px-4 py-3">
       <div class="flex flex-wrap items-center gap-2">
         <!-- Grouped by source: local models are private, cloud ones are metered. -->
@@ -56,36 +55,10 @@ const contextValue = computed({
           @update:source="emit('update:source', $event)"
         />
 
-        <Select v-model="contextValue">
-          <SelectTrigger class="h-8 w-auto min-w-32 text-xs">
-            <SelectValue placeholder="Context" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="c in contexts" :key="c" :value="c">
-              {{ c }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-
         <Button variant="outline" size="sm" class="h-8" @click="emit('new-chat')">
           <Plus />
           New Chat
         </Button>
-
-        <div class="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span class="flex items-center gap-1.5">
-            <ChartColumn class="h-3.5 w-3.5" />
-            Topics <b class="text-foreground">{{ topicsCount }}</b>
-          </span>
-          <span class="flex items-center gap-1.5">
-            <Lightbulb class="h-3.5 w-3.5" />
-            Ideas <b class="text-foreground">{{ ideasCount }}</b>
-          </span>
-          <span class="flex items-center gap-1.5">
-            <FileText class="h-3.5 w-3.5" />
-            Documents <b class="text-foreground">{{ docsCount }}</b>
-          </span>
-        </div>
       </div>
     </div>
 
@@ -99,14 +72,14 @@ const contextValue = computed({
           Pick a model and say hi 👋
         </p>
 
-        <ChatMessages :messages="messages" :busy="busy" assistant-label="RabbitiC" />
+        <ChatMessages :messages="messages" :busy="busy" assistant-label="মস্তিস্ক" />
 
         <div
           v-if="messages.length && !busy && activeSources.length"
           class="mt-6 flex flex-wrap items-center gap-2 border-t pt-4"
         >
           <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Sources
+            Context
           </span>
           <Badge v-for="s in activeSources" :key="s.id" variant="secondary">
             {{ s.name }}
@@ -123,10 +96,18 @@ const contextValue = computed({
       :model-value="input"
       :busy="busy"
       show-web-search
+      show-sources
       :web-search="webSearch"
+      :think="think"
+      :selected-model="selectedModel"
+      :sources="sources"
+      :active-source-ids="activeSourceIds"
       class="shrink-0"
       @update:model-value="emit('update:input', $event)"
       @update:web-search="emit('update:webSearch', $event)"
+      @update:think="emit('update:think', $event)"
+      @update:active-source-ids="emit('update:activeSourceIds', $event)"
+      @manage-sources="emit('manage-sources')"
       @send="emit('send')"
     />
   </div>

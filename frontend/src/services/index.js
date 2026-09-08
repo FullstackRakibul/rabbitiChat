@@ -18,3 +18,7 @@ export {
 export {
   listModels, listModelsGrouped, saveModelChoice, loadModelChoice,
 } from './model.service.js'
+export {
+  listContextSources, createContextSource, updateContextSource,
+  deleteContextSource, reorderContextSources,
+} from './context-source.service.js'

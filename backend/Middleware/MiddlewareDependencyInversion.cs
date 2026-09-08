@@ -1,4 +1,4 @@
-﻿using RabbitIC.Api.MinimalApis;
+using RabbitIC.Api.MinimalApis;
 
 namespace RabbitIC.Api.Middleware
 {
@@ -46,6 +46,14 @@ namespace RabbitIC.Api.Middleware
             var todoRabbitApi = app.MapGroup("/api").WithTags("todorabbit");
 
             todoRabbitApi.MapTodoRabbitApis();
+            return app;
+        }
+
+        public static WebApplication ApplicationContextSourceApis(this WebApplication app)
+        {
+            var contextApi = app.MapGroup("/api").WithTags("Context sources");
+
+            contextApi.MapContextSourceApis();
             return app;
         }
 

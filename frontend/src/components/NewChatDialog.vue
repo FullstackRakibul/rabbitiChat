@@ -6,27 +6,37 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 
+/**
+ * Pick the context set for a new conversation.
+ *
+ * The old "Context" dropdown (General / Code / Research…) is gone: it was a
+ * label that changed nothing about the request. Context is now the sources
+ * themselves, which really are prepended to the system prompt.
+ */
 const props = defineProps({
   open: { type: Boolean, default: false },
-  contexts: { type: Array, default: () => [] },
-  context: { type: String, default: '' },
   sources: { type: Array, default: () => [] },
+  /** Ids that will be switched on for the new chat. */
+  activeSourceIds: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['update:open', 'update:context', 'start'])
+const emit = defineEmits(['update:open', 'update:activeSourceIds', 'start'])
 
 const openValue = computed({
   get: () => props.open,
   set: (v) => emit('update:open', v),
 })
-const contextValue = computed({
-  get: () => props.context,
-  set: (v) => emit('update:context', v),
-})
+
+function isOn(id) {
+  return props.activeSourceIds.includes(id)
+}
+
+function toggle(id, on) {
+  emit('update:activeSourceIds', on
+    ? [...new Set([...props.activeSourceIds, id])]
+    : props.activeSourceIds.filter((x) => x !== id))
+}
 </script>
 
 <template>
@@ -35,38 +45,29 @@ const contextValue = computed({
       <DialogHeader>
         <DialogTitle>Start a new chat</DialogTitle>
         <DialogDescription>
-          Choose a context and which sources should feed this conversation.
+          Pick the sources this conversation should have in mind. Each one is prepended
+          to the system prompt.
         </DialogDescription>
       </DialogHeader>
 
-      <div class="flex flex-col gap-4">
-        <div class="flex flex-col gap-2">
-          <Label>Context</Label>
-          <Select v-model="contextValue">
-            <SelectTrigger>
-              <SelectValue placeholder="Context" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="c in contexts" :key="c" :value="c">
-                {{ c }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+      <div class="flex flex-col gap-2">
+        <Label>Sources</Label>
+        <div
+          v-if="sources.length"
+          class="flex max-h-48 flex-col gap-0.5 overflow-y-auto rounded-md border p-1"
+        >
+          <label
+            v-for="s in sources"
+            :key="s.id"
+            class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+          >
+            <Checkbox :model-value="isOn(s.id)" @update:model-value="toggle(s.id, $event)" />
+            <span class="flex-1 truncate">{{ s.name }}</span>
+          </label>
         </div>
-
-        <div class="flex flex-col gap-2">
-          <Label>Sources</Label>
-          <div class="flex max-h-48 flex-col gap-0.5 overflow-y-auto rounded-md border p-1">
-            <label
-              v-for="s in sources"
-              :key="s.id"
-              class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-            >
-              <Checkbox v-model="s.active" />
-              <span class="flex-1 truncate">{{ s.name }}</span>
-            </label>
-          </div>
-        </div>
+        <p v-else class="rounded-md border px-3 py-4 text-center text-xs text-muted-foreground">
+          No sources yet — add one in the Sources tab to give chats standing context.
+        </p>
       </div>
 
       <DialogFooter>
