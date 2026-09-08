@@ -26,7 +26,10 @@ const loading = ref(true)
 const error = ref('')
 const open = ref(false)
 
-const GROUP_ICON = { local: HardDrive, cloud: Cloud }
+// Anything that isn't the local daemon is remote, so Cloud is the safe default:
+// a HardDrive glyph beside a metered provider would imply it runs privately.
+const GROUP_ICON = { local: HardDrive }
+const iconFor = (key) => GROUP_ICON[key] || Cloud
 
 const selected = computed(() => {
   for (const g of groups.value) {
@@ -54,7 +57,10 @@ onMounted(async () => {
     const match = remembered
       && all.find((m) => m.name === remembered.model && m.source === remembered.source)
 
-    const pick = match || all[0]
+    // Never auto-select a metered model: spending someone's quota has to be a
+    // deliberate act. With no local model available the picker stays empty and
+    // the user opts in explicitly.
+    const pick = match || all.find((m) => m.source === 'local' && !m.metered)
     if (pick && !props.modelValue) choose(pick)
   } catch (e) {
     error.value = e.message || 'Could not load models.'
@@ -75,7 +81,7 @@ onMounted(async () => {
       )"
       @click="open = !open"
     >
-      <component :is="GROUP_ICON[source] || HardDrive" class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <component :is="iconFor(source)" class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1 truncate text-left">
         {{ loading ? 'Loading models…' : (modelValue || 'Select a model') }}
       </span>
@@ -97,7 +103,7 @@ onMounted(async () => {
 
         <template v-for="g in groups" :key="g.key">
           <p class="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            <component :is="GROUP_ICON[g.key] || HardDrive" class="h-3 w-3" />
+            <component :is="iconFor(g.key)" class="h-3 w-3" />
             {{ g.label }}
           </p>
 

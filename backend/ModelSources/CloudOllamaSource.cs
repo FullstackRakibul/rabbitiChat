@@ -11,7 +11,12 @@ public class OllamaCloudOptions
 {
     public const string SectionName = "OllamaCloud";
 
-    public string ApiKey { get; set; } = "6a922123b6c640a288298ac82c4e8478.NU-gbG-AgbhJEnOw-ayB8bfR";
+    /// <summary>
+    /// Empty by default and deliberately so: a credential baked in here would
+    /// survive an empty config and ship inside the binary. It comes from
+    /// user-secrets or OllamaCloud__ApiKey at runtime, or the source lists nothing.
+    /// </summary>
+    public string ApiKey { get; set; } = "";
     public string BaseUrl { get; set; } = "https://ollama.com";
 
     /// <summary>Curated free-plan model names, as shown in the picker.</summary>

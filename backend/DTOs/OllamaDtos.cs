@@ -42,7 +42,14 @@
             string Source,
             int? ContextLength,
             IReadOnlyList<string> Capabilities,
-            bool Metered);
+            bool Metered,
+            /// <summary>
+            /// Human group heading for the picker, e.g. "OpenRouter (free)".
+            /// Null for the built-in sources, whose labels the client already
+            /// knows; configured providers supply their own so a new one needs
+            /// no frontend edit.
+            /// </summary>
+            string? SourceLabel = null);
 
 
         /// <summary>Proxied web search. MaxResults is clamped to 1..10 server-side.</summary>

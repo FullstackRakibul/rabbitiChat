@@ -22,12 +22,21 @@ namespace RabbitIC.Api.MinimalApis
             // Merged model list: every registered source, each entry tagged with its
             // source and a metered flag. Routed through ChatService so this endpoint
             // never names a concrete source.
-            group.MapGet("/models", async (ChatService chat, CancellationToken ct) =>
+            group.MapGet("/models", async (
+                ChatService chat, IModelSourceRegistry registry, CancellationToken ct) =>
             {
                 var models = await chat.ListAllModelsAsync(ct);
 
+                // A configured provider names its own picker group; the built-in
+                // sources return null and keep the labels the client already has.
+                var labels = registry.All
+                    .OfType<OpenAiCompatibleSource>()
+                    .ToDictionary(s => s.SourceKey, s => s.DisplayName, StringComparer.OrdinalIgnoreCase);
+
                 return Results.Ok(models
-                    .Select(m => new ModelDto(m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered))
+                    .Select(m => new ModelDto(
+                        m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered,
+                        labels.TryGetValue(m.Source, out var label) ? label : null))
                     .ToList());
             });
 

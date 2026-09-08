@@ -114,6 +114,47 @@ if (builder.Configuration.GetValue<bool>("ModelSources:EnableEcho"))
     builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
                                   RabbitIC.Api.ModelSources.EchoModelSource>();
 
+// ---- OpenAI-compatible providers (OpenRouter, Groq, …) ----
+// One adapter class serves them all; each configured provider becomes its own
+// registry entry with its own named HttpClient. A provider without a key is
+// skipped silently — the same "unconfigured is not an error" rule the web-search
+// proxy uses — so a shared appsettings.json can list providers this machine
+// hasn't got credentials for.
+var openAiProviders = builder.Configuration
+    .GetSection(RabbitIC.Api.ModelSources.OpenAiCompatibleOptions.SectionName)
+    .Get<RabbitIC.Api.ModelSources.OpenAiCompatibleOptions>()
+    ?? new RabbitIC.Api.ModelSources.OpenAiCompatibleOptions();
+
+foreach (var provider in openAiProviders.Providers)
+{
+    if (!provider.IsConfigured) continue;
+
+    builder.Services.AddHttpClient(provider.HttpClientName, c =>
+    {
+        // Trailing slash matters: the stream appends the relative path
+        // "chat/completions", and without it the last URL segment (".../v1")
+        // would be replaced instead of extended.
+        c.BaseAddress = new Uri(provider.BaseUrl.TrimEnd('/') + "/");
+        c.Timeout = TimeSpan.FromSeconds(60);
+        c.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", provider.ApiKey);
+
+        foreach (var (name, value) in provider.ExtraHeaders)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+                c.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+        }
+    });
+
+    // Captured per iteration so each source keeps its own provider config.
+    var captured = provider;
+    builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource>(sp =>
+        new RabbitIC.Api.ModelSources.OpenAiCompatibleSource(
+            captured,
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<ILogger<RabbitIC.Api.ModelSources.OpenAiCompatibleSource>>()));
+}
+
 builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IModelSourceRegistry,
                               RabbitIC.Api.ModelSources.ModelSourceRegistry>();
 builder.Services.AddSingleton<RabbitIC.Api.Services.ChatService>();
