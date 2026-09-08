@@ -1,4 +1,4 @@
-namespace RabbitIC.Api.Models;
+﻿namespace RabbitIC.Api.Models;
 
 public class User
 {
@@ -17,6 +17,15 @@ public class Conversation
     public int Id { get; set; }
     public int UserId { get; set; }                   // owner — every query is scoped to this
     public string Title { get; set; } = "New chat";
+
+    /// <summary>
+    /// Comma-separated ContextSource ids that were active for this conversation,
+    /// so reopening it restores the same context set. A list rather than a join
+    /// table: it is read and written whole, never queried across.
+    /// Empty string = no sources; null = never set (pre-feature conversations).
+    /// </summary>
+    public string? ActiveSourceIds { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public User? User { get; set; }

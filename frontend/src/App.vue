@@ -5,10 +5,11 @@ import {
   Plug, Plus, Settings, Brain, Upload,
 } from '@lucide/vue'
 import {
-  getModels, listConversations, getConversation,
+  listModels, listConversations, getConversation,
   deleteConversation, streamChat,
   uploadDocument, listDocuments, deleteDocument, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
+  listContextSources,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
 import { useTheme } from '@/composables/useTheme'
@@ -86,8 +87,12 @@ function handleAuthError(e) {
 }
 
 // ---- Chat state ----
-const models = ref([])
+const models = ref([])          // names, for the pickers
+const modelRecords = ref([])    // full records, for capabilities + context length
 const model = ref('')
+// Which source answers the next send. The picker owns the choice (and persists
+// it); App just carries it to the API.
+const modelSource = ref('local')
 const conversations = ref([])
 const currentId = ref(null)      // null = unsaved new chat
 const messages = ref([])         // { role, content }
@@ -98,6 +103,15 @@ const connected = computed(() => status.value === 'connected')
 const error = ref('')
 let controller = null
 
+/**
+ * The chosen model's own record. Everything capability-gated reads from here,
+ * so an unknown model simply offers no extra controls rather than guessing.
+ */
+const selectedModel = computed(() =>
+  modelRecords.value.find(
+    (m) => m.name === model.value && m.source === modelSource.value,
+  ) ?? modelRecords.value.find((m) => m.name === model.value) ?? null)
+
 const scroller = ref(null)
 function scrollDown() {
   nextTick(() => {
@@ -107,9 +121,13 @@ function scrollDown() {
 
 async function refreshModels() {
   try {
-    models.value = await getModels()
+    // The full records, not just names: the composer gates Think and Search on
+    // each model's declared capabilities, and shows its real context window.
+    modelRecords.value = await listModels()
+    models.value = modelRecords.value.map((m) => m.name)
+
     if (models.value.length) {
-      model.value = models.value[0]
+      if (!models.value.includes(model.value)) model.value = models.value[0]
       status.value = 'connected'
     } else {
       status.value = 'no models — run: ollama pull llama3'
@@ -134,6 +152,11 @@ async function openConversation(id) {
     messages.value = convo.messages.map((m) => ({
       role: m.role, content: m.content, webSearchUsed: m.webSearchUsed,
     }))
+
+    // Restore the context set this chat was last used with, so reopening it
+    // resumes with the same sources switched on rather than silently none.
+    activeSourceIds.value = parseSourceIds(convo.activeSourceIds)
+
     activeTab.value = 'chat'
     closeSidebar()
     scrollDown()
@@ -146,6 +169,17 @@ function newChat() {
   currentId.value = null
   messages.value = []
   error.value = ''
+  // A new chat starts from each source's own default switch.
+  activeSourceIds.value = sources.value.filter((s) => s.isActive).map((s) => s.id)
+}
+
+/** The server stores the set as a comma list; drop anything unparsable. */
+function parseSourceIds(csv) {
+  if (!csv) return []
+  return String(csv)
+    .split(',')
+    .map((x) => Number(x.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0)
 }
 
 async function removeConversation(id) {
@@ -229,7 +263,12 @@ async function send() {
   const useWebSearch = webSearch.value
   webSearch.value = false
 
-  const reply = { role: 'assistant', content: '', webSearchUsed: useWebSearch }
+  // webSearchUsed starts false and is set only if the server actually grounded
+  // the answer — the toggle is a request, not a result.
+  const reply = {
+    role: 'assistant', content: '', thinking: '', thinkingDone: false,
+    tools: [], webSearchUsed: false,
+  }
   messages.value.push(reply)
 
   busy.value = true
@@ -238,11 +277,32 @@ async function send() {
     const id = await streamChat(
       {
         conversationId: currentId.value,
+        source: modelSource.value,
         model: model.value,
         message: text,
         webSearch: useWebSearch,
+        think: think.value,
+        activeSourceIds: activeSourceIds.value,
       },
-      (chunk) => { reply.content += chunk; scrollDown() },
+      {
+        onContent: (chunk) => {
+          // The first content token ends the reasoning phase, which is what
+          // collapses the thinking block.
+          if (reply.thinking && !reply.thinkingDone) reply.thinkingDone = true
+          reply.content += chunk
+          scrollDown()
+        },
+        onThinking: (chunk) => { reply.thinking += chunk; scrollDown() },
+        onTool: (t) => {
+          // One card per tool, updated in place as its status changes.
+          const existing = reply.tools.find((x) => x.tool === t.tool && x.detail === t.detail)
+          if (existing) existing.status = t.status
+          else reply.tools.push({ tool: t.tool, status: t.status, detail: t.detail })
+          if (t.tool === 'web_search' && t.status === 'done') reply.webSearchUsed = true
+          scrollDown()
+        },
+        onError: (message) => { error.value = message },
+      },
       controller.signal,
     )
     if (currentId.value == null) {       // first turn just created a conversation
@@ -256,6 +316,9 @@ async function send() {
       reply.content = reply.content || '⚠ ' + e.message
     }
   } finally {
+    // Whatever streamed before a Stop is kept — the partial reply is still the
+    // model's answer, and the server persisted it too.
+    reply.thinkingDone = true
     busy.value = false
     controller = null
   }
@@ -263,7 +326,9 @@ async function send() {
 
 // Load everything that requires a session.
 async function bootstrap() {
-  await Promise.all([refreshModels(), refreshConversations(), refreshDocuments()])
+  await Promise.all([
+    refreshModels(), refreshConversations(), refreshDocuments(), refreshSources(),
+  ])
 }
 
 onMounted(() => {
@@ -290,6 +355,10 @@ const tabs = [
 // Per-message web grounding for the next chat send. Resets after each send —
 // it is never sticky for a conversation or profile.
 const webSearch = ref(false)
+
+// Ask reasoning-capable models to show their work. Sticky, unlike webSearch:
+// it is a display preference, not a per-message action.
+const think = ref(false)
 
 // "Ask about these results" hands the query to the composer with search armed.
 function askFromSearch(query) {
@@ -493,37 +562,62 @@ function wsNewChat() {
   wsTab.value?.reset()
 }
 
-// Context selector (local only)
-const context = ref('General')
-const contexts = ['General', 'Code', 'Research', 'Creative', 'Custom']
-
-// Connected sources (local only)
-const sources = ref([
-  { id: 1, name: 'Seekingalpha', active: true },
-  { id: 2, name: 'CNBC', active: true },
-  { id: 3, name: 'Calbudgetcenter', active: false },
-])
+// ---- Connected sources ----
+// Server-backed: the same ContextSource rows the Sources tab edits and the
+// backend prepends to the system prompt. `activeSourceIds` is per-conversation.
+const sources = ref([])
+const activeSourceIds = ref([])
 const sourceSearch = ref('')
+const sourcesTab = ref(null)
+
 const filteredSources = computed(() => {
   const q = sourceSearch.value.trim().toLowerCase()
   return q ? sources.value.filter(s => s.name.toLowerCase().includes(q)) : sources.value
 })
-const activeSources = computed(() => sources.value.filter(s => s.active))
+const activeSources = computed(() =>
+  sources.value.filter(s => activeSourceIds.value.includes(s.id)))
 const activeSourcesCount = computed(() => activeSources.value.length)
 
-// Metrics (derived placeholders)
-const topicsCount = computed(() => messages.value.filter(m => m.role === 'user').length)
-const ideasCount = computed(() => messages.value.filter(m => m.role === 'assistant').length)
-const docsCount = computed(() => conversations.value.length)
+async function refreshSources() {
+  try {
+    sources.value = await listContextSources('source')
+
+    // A source deleted elsewhere must not linger in this chat's active set.
+    const live = new Set(sources.value.map((s) => s.id))
+    activeSourceIds.value = activeSourceIds.value.filter((id) => live.has(id))
+
+    // An untouched new chat follows each source's own default switch.
+    if (currentId.value == null && !activeSourceIds.value.length) {
+      activeSourceIds.value = sources.value.filter((s) => s.isActive).map((s) => s.id)
+    }
+  } catch (e) {
+    if (!handleAuthError(e)) { /* keep whatever list we have */ }
+  }
+}
+
+/** The Sources tab saved something — take its list rather than re-fetching. */
+function onSourcesChanged(list) {
+  sources.value = list
+  const live = new Set(list.map((s) => s.id))
+  activeSourceIds.value = activeSourceIds.value.filter((id) => live.has(id))
+}
 
 // Chat creation flow: pick context + sources, then start a fresh chat.
 const showNewChat = ref(false)
 function openNewChat() {
+  // Reset to each source's own default before the dialog shows them, so the
+  // checkboxes describe the chat about to be started, not the previous one.
+  newChat()
+  refreshSources()
   showNewChat.value = true
   closeSidebar()
 }
 function startNewChat() {
-  newChat()
+  // newChat() already ran when the dialog opened; re-running it would discard
+  // the source choices just made in it.
+  currentId.value = null
+  messages.value = []
+  error.value = ''
   showNewChat.value = false
   activeTab.value = 'chat'
 }
@@ -624,7 +718,8 @@ useShortcuts({
       @toggle-theme="toggleTheme" @open-palette="paletteOpen = true">
       <!-- Sidebar slot: filled only by the tabs that have one. -->
       <template v-if="tabHasSidebar" #sidebar>
-        <ChatSidebar v-show="activeTab === 'chat'" v-model:source-search="sourceSearch" :username="username"
+        <ChatSidebar v-show="activeTab === 'chat'" v-model:source-search="sourceSearch"
+          v-model:active-source-ids="activeSourceIds" :username="username"
           :initials="initials" :sources="sources" :filtered-sources="filteredSources"
           :active-sources-count="activeSourcesCount" :grouped-conversations="groupedConversations"
           :conversation-count="conversations.length" :current-id="currentId" @new-chat="openNewChat"
@@ -644,11 +739,11 @@ useShortcuts({
       </TabsContent>
 
       <TabsContent value="chat" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <ChatTab v-model:model="model" v-model:context="context" v-model:input="input"
-          v-model:web-search="webSearch" :models="models" :messages="messages" :busy="busy" :error="error"
-          :active-sources="activeSources" :topics-count="topicsCount" :ideas-count="ideasCount"
-          :docs-count="docsCount" :contexts="contexts" @send="send" @new-chat="openNewChat"
-          @scroller="el => scroller = el" />
+        <ChatTab v-model:model="model" v-model:source="modelSource" v-model:input="input"
+          v-model:web-search="webSearch" v-model:think="think" v-model:active-source-ids="activeSourceIds"
+          :models="models" :selected-model="selectedModel" :messages="messages" :busy="busy" :error="error"
+          :sources="sources" @send="send" @new-chat="openNewChat"
+          @manage-sources="goTab('sources')" @scroller="el => scroller = el" />
       </TabsContent>
 
       <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
@@ -674,21 +769,20 @@ useShortcuts({
       </TabsContent>
 
       <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <SourcesTab v-model:search="sourceSearch" :sources="sources" :filtered-sources="filteredSources"
-          :active-count="activeSourcesCount" />
+        <SourcesTab ref="sourcesTab" @changed="onSourcesChanged" />
       </TabsContent>
 
       <TabsContent value="settings" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <SettingsTab v-model:model="model" v-model:context="context" :username="username" :initials="initials"
+        <SettingsTab v-model:model="model" :username="username" :initials="initials"
           :status="status" :connected="connected" :api-base-url="environment.apiBaseUrl" :models="models"
-          :contexts="contexts" @logout="logout" />
+          @logout="logout" />
       </TabsContent>
     </AppShell>
 
     <CommandPalette v-model:open="paletteOpen" :commands="commands" @run="runCommand" />
 
-    <NewChatDialog v-model:open="showNewChat" v-model:context="context" :contexts="contexts" :sources="sources"
-      @start="startNewChat" />
+    <NewChatDialog v-model:open="showNewChat" v-model:active-source-ids="activeSourceIds"
+      :sources="sources" @start="startNewChat" />
 
     <!-- Human-in-the-loop extraction review -->
     <ExtractionReview v-if="reviewDoc" :doc="reviewDoc" :model="model"

@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -50,9 +50,18 @@ builder.Services.AddHttpClient("ollama", c =>
 // /api/search proxy instead. A missing key is NOT fatal here: the endpoints answer
 // 503 at request time so the rest of the app still boots.
 var ollamaCloudKey = builder.Configuration["OllamaCloud:ApiKey"];
+// URL convention for every Ollama client, local and cloud:
+//   BaseAddress = origin ONLY ("https://ollama.com"), request paths carry "/api/…".
+//
+// A rooted request path ("/api/web_search") replaces the whole path of the base
+// address, so a BaseAddress of "https://ollama.com/api" silently discarded its
+// own "/api" segment and produced https://ollama.com/api/web_search only by
+// coincidence — any base path would have been thrown away the same way. Keeping
+// the base as a bare origin makes the resolved URL obvious at each call site.
 builder.Services.AddHttpClient("ollama-cloud", c =>
 {
-    c.BaseAddress = new Uri("https://ollama.com");
+    c.BaseAddress = new Uri(
+        builder.Configuration["OllamaCloud:BaseUrl"]?.TrimEnd('/') ?? "https://ollama.com");
     c.Timeout = TimeSpan.FromSeconds(30);
     if (!string.IsNullOrWhiteSpace(ollamaCloudKey))
         c.DefaultRequestHeaders.Authorization =
@@ -104,6 +113,84 @@ builder.Services.AddScoped<EmbeddingService>();     // Ollama /api/embeddings cl
 builder.Services.AddScoped<RabbitIC.Api.Extraction.LlmPoFallback>();
 builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
 
+// ---- Model sources ----
+// Each source is registered against the shared IChatModelSource abstraction, so
+// the registry (and therefore ChatService and the endpoints) discovers them
+// without naming any concrete type. A third provider is one AddSingleton line.
+builder.Services.Configure<RabbitIC.Api.ModelSources.OllamaCloudOptions>(
+    builder.Configuration.GetSection(RabbitIC.Api.ModelSources.OllamaCloudOptions.SectionName));
+
+builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
+                              RabbitIC.Api.ModelSources.LocalOllamaSource>();
+builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
+                              RabbitIC.Api.ModelSources.CloudOllamaSource>();
+
+// Opt-in diagnostic source. Proof of the Open/Closed claim: this one line and a
+// new file were the entire cost of adding a third provider.
+if (builder.Configuration.GetValue<bool>("ModelSources:EnableEcho"))
+    builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource,
+                                  RabbitIC.Api.ModelSources.EchoModelSource>();
+
+// ---- OpenAI-compatible providers (OpenRouter, Groq, …) ----
+// One adapter class serves them all; each configured provider becomes its own
+// registry entry with its own named HttpClient. A provider without a key is
+// skipped silently — the same "unconfigured is not an error" rule the web-search
+// proxy uses — so a shared appsettings.json can list providers this machine
+// hasn't got credentials for.
+var openAiProviders = builder.Configuration
+    .GetSection(RabbitIC.Api.ModelSources.OpenAiCompatibleOptions.SectionName)
+    .Get<RabbitIC.Api.ModelSources.OpenAiCompatibleOptions>()
+    ?? new RabbitIC.Api.ModelSources.OpenAiCompatibleOptions();
+
+foreach (var provider in openAiProviders.Providers)
+{
+    if (!provider.IsConfigured) continue;
+
+    builder.Services.AddHttpClient(provider.HttpClientName, c =>
+    {
+        // Trailing slash matters: the stream appends the relative path
+        // "chat/completions", and without it the last URL segment (".../v1")
+        // would be replaced instead of extended.
+        c.BaseAddress = new Uri(provider.BaseUrl.TrimEnd('/') + "/");
+        c.Timeout = TimeSpan.FromSeconds(60);
+        c.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", provider.ApiKey);
+
+        foreach (var (name, value) in provider.ExtraHeaders)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+                c.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+        }
+    });
+
+    // Captured per iteration so each source keeps its own provider config.
+    var captured = provider;
+    builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IChatModelSource>(sp =>
+        new RabbitIC.Api.ModelSources.OpenAiCompatibleSource(
+            captured,
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<ILogger<RabbitIC.Api.ModelSources.OpenAiCompatibleSource>>()));
+}
+
+builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IModelSourceRegistry,
+                              RabbitIC.Api.ModelSources.ModelSourceRegistry>();
+builder.Services.AddSingleton<RabbitIC.Api.Services.ChatService>();
+
+// ---- Context sources ----
+// Connected sources and buyer profiles are one mechanism behind one interface,
+// so chat and workspace cannot drift apart in how they assemble context.
+builder.Services.AddScoped<RabbitIC.Api.Services.IContextSourceService,
+                           RabbitIC.Api.Services.ContextSourceService>();
+
+// Shared by the chat tool-call path and the /api/search proxy path — one place
+// that knows how to reach the upstream search API.
+builder.Services.AddScoped<RabbitIC.Api.Services.WebSearchRunner>();
+
+// Search history — the dedupe rule and the never-hard-delete guarantee live
+// behind this interface, so no endpoint can work around either.
+builder.Services.AddScoped<RabbitIC.Api.Services.ISearchHistoryService,
+                           RabbitIC.Api.Services.SearchHistoryService>();
+
 // ---- todorabbit (Kanban boards) ----
 builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
                            RabbitIC.Api.Repositories.TodoRabbitRepository>();
@@ -138,6 +225,7 @@ app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
 app.ApplicationBuyerProfileApis();
 app.ApplicationSearchApis();
+app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();
 
 

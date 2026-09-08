@@ -16,6 +16,12 @@ public class AppDbContext : DbContext
     public DbSet<BuyerProfile> BuyerProfiles => Set<BuyerProfile>();
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
+    /// <summary>Connected sources and buyer profiles — one table, split by Kind.</summary>
+    public DbSet<ContextSource> ContextSources => Set<ContextSource>();
+
+    /// <summary>Queries the user has run. Never holds result payloads.</summary>
+    public DbSet<SearchHistory> SearchHistories => Set<SearchHistory>();
+
     // todorabbit — Kanban boards (a creation of Mostisko, the AI).
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<BoardColumn> Columns => Set<BoardColumn>();
@@ -73,6 +79,14 @@ public class AppDbContext : DbContext
             .HasForeignKey(c => c.ColumnId)
             .OnDelete(DeleteBehavior.Cascade);
         b.Entity<Card>().HasIndex(c => c.ColumnId);
+
+        // Every context-source query filters on owner first, then kind.
+        b.Entity<ContextSource>().HasIndex(s => new { s.OwnerUserId, s.Kind });
+
+        // The history list is always "my active rows, newest run first" — this
+        // index covers the filter and the sort in one.
+        b.Entity<SearchHistory>()
+            .HasIndex(h => new { h.OwnerUserId, h.IsDeleted, h.LastRunAt });
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);

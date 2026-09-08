@@ -1,8 +1,10 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.DTOs;
+using RabbitIC.Api.ModelSources;
+using RabbitIC.Api.Services;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,21 +19,25 @@ namespace RabbitIC.Api.MinimalApis
             var group = app.MapGroup("/").WithTags("Ollama APIs");
 
 
-            // List installed Ollama models (proxied so the browser never touches Ollama directly).
-            group.MapGet("/models", async(IHttpClientFactory http, CancellationToken ct) =>{
+            // Merged model list: every registered source, each entry tagged with its
+            // source and a metered flag. Routed through ChatService so this endpoint
+            // never names a concrete source.
+            group.MapGet("/models", async (
+                ChatService chat, IModelSourceRegistry registry, CancellationToken ct) =>
+            {
+                var models = await chat.ListAllModelsAsync(ct);
 
-                
-                var client = http.CreateClient("ollama");
-                
-                try
-                {
-                    var json = await client.GetStringAsync("api/tags", ct);
-                    return Results.Content(json, "application/json");
-                }
-                catch (HttpRequestException)
-                {
-                    return Results.Problem("Cannot reach Ollama. Is it running?", statusCode: 502);
-                }
+                // A configured provider names its own picker group; the built-in
+                // sources return null and keep the labels the client already has.
+                var labels = registry.All
+                    .OfType<OpenAiCompatibleSource>()
+                    .ToDictionary(s => s.SourceKey, s => s.DisplayName, StringComparer.OrdinalIgnoreCase);
+
+                return Results.Ok(models
+                    .Select(m => new ModelDto(
+                        m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered,
+                        labels.TryGetValue(m.Source, out var label) ? label : null))
+                    .ToList());
             });
 
 
@@ -98,6 +104,7 @@ namespace RabbitIC.Api.MinimalApis
                         c.Id,
                         c.Title,
                         c.CreatedAt,
+                        c.ActiveSourceIds,
                         Messages = c.Messages
                             .OrderBy(m => m.Id)
                             .Select(m => new { m.Role, m.Content, m.WebSearchUsed, m.CreatedAt })
@@ -122,165 +129,10 @@ namespace RabbitIC.Api.MinimalApis
             });
 
 
-            // Chat: save the user turn, stream the model reply token-by-token, then save the reply.
-            app.MapPost("/chat", async (ChatRequest req, AppDbContext db, IHttpClientFactory http, HttpContext ctx,
-                                        IConfiguration config, ILoggerFactory logs) =>
-            {
-                var user = await Authorization.ResolveUser(ctx, db);
-                var systemPrompt = Environment.GetEnvironmentVariable("Ollama:SystemPrompt");
-
-
-                if (user is null)
-                {
-                    ctx.Response.StatusCode = 401;
-                    await ctx.Response.WriteAsync("Unauthorized.");
-                    return;
-                }
-
-                if (string.IsNullOrWhiteSpace(req.Message) || string.IsNullOrWhiteSpace(req.Model))
-                {
-                    ctx.Response.StatusCode = 400;
-                    await ctx.Response.WriteAsync("model and message are required.");
-                    return;
-                }
-
-                // Resolve or create the conversation — scoped to this user so you can't post into someone else's.
-                Conversation convo;
-                if (req.ConversationId is int cid &&
-                    await db.Conversations.FirstOrDefaultAsync(c => c.Id == cid && c.UserId == user.Id) is { } existing)
-                {
-                    convo = existing;
-                }
-                else
-                {
-                    convo = new Conversation { UserId = user.Id, Title = Authorization.Truncate(req.Message, 40) };
-                    db.Conversations.Add(convo);
-                    await db.SaveChangesAsync();
-                }
-
-                // Persist the user message.
-                db.Messages.Add(new Message { ConversationId = convo.Id, Role = "user", Content = req.Message });
-                await db.SaveChangesAsync();
-
-                // Build the full message list for context (this is the "memory").
-                var history = await db.Messages
-                    .Where(m => m.ConversationId == convo.Id)
-                    .OrderBy(m => m.Id)
-                    .Select(m => new ChatMsg { Role = m.Role, Content = m.Content })
-                    .ToListAsync();
-
-                if (!string.IsNullOrWhiteSpace(systemPrompt))
-                    history.Insert(0, new ChatMsg {
-                        Role = "system",
-                        Content = systemPrompt!
-                    });
-
-                // Per-message web grounding. One search, prepended as a system message.
-                // If search is unconfigured or fails we still answer — just without it.
-                var webSearchUsed = false;
-                string? searchNotice = null;
-                if (req.WebSearch)
-                {
-                    if (SearchApis.IsConfigured(config))
-                    {
-                        var context = await WebSearchContext.BuildAsync(
-                            http.CreateClient("ollama-cloud"),
-                            req.Message,
-                            logs.CreateLogger("ChatWebSearch"),
-                            ctx.RequestAborted);
-
-                        if (context is not null)
-                        {
-                            history.Insert(0, new ChatMsg { Role = "system", Content = context });
-                            webSearchUsed = true;
-                        }
-                        else
-                        {
-                            searchNotice = "_Web search returned no usable results — answering without it._\n\n";
-                        }
-                    }
-                    else
-                    {
-                        searchNotice = "_Web search is not configured on this server — answering without it._\n\n";
-                    }
-                }
-
-                var payload = new { model = req.Model, messages = history, stream = true };
-
-                var client = http.CreateClient("ollama");
-                using var upstream = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
-                {
-                    Content = JsonContent.Create(payload)
-                };
-
-                HttpResponseMessage resp;
-                try
-                {
-                    resp = await client.SendAsync(upstream, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
-                    resp.EnsureSuccessStatusCode();
-                }
-                catch (HttpRequestException ex)
-                {
-                    ctx.Response.StatusCode = 502;
-                    await ctx.Response.WriteAsync("Ollama error: " + ex.Message);
-                    return;
-                }
-
-                // Tell the client which conversation this is (must be set before the body is written).
-                ctx.Response.Headers["X-Conversation-Id"] = convo.Id.ToString();
-                ctx.Response.ContentType = "text/plain; charset=utf-8";
-
-                var full = new StringBuilder();
-
-                // Tell the user up-front that the reply is ungrounded despite the toggle.
-                if (searchNotice is not null)
-                {
-                    full.Append(searchNotice);
-                    await ctx.Response.WriteAsync(searchNotice, ctx.RequestAborted);
-                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
-                }
-
-                await using var stream = await resp.Content.ReadAsStreamAsync(ctx.RequestAborted);
-                using var reader = new StreamReader(stream);
-
-                string? line;
-
-                while ((line = await reader.ReadLineAsync(ctx.RequestAborted)) is not null)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-
-                    // Ollama streams newline-delimited JSON; pull the content delta out of each line.
-                    string? token = null;
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(line);
-                        if (doc.RootElement.TryGetProperty("message", out var msg) &&
-                            msg.TryGetProperty("content", out var content))
-                        {
-                            token = content.GetString();
-                        }
-                    }
-                    catch (JsonException) { continue; }
-
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        full.Append(token);
-                        await ctx.Response.WriteAsync(token, ctx.RequestAborted);
-                        await ctx.Response.Body.FlushAsync(ctx.RequestAborted); // push each token immediately
-                    }
-                }
-
-                // Persist the assistant reply once streaming completes.
-                db.Messages.Add(new Message
-                {
-                    ConversationId = convo.Id,
-                    Role = "assistant",
-                    Content = full.ToString(),
-                    WebSearchUsed = webSearchUsed,
-                });
-                await db.SaveChangesAsync();
-            });
-
+            // Chat: save the user turn, stream the model reply, then save the reply.
+            // The orchestration (context assembly, tool calls, persistence) lives in
+            // ChatEndpoint so this file stays a routing table.
+            app.MapPost("/chat", ChatEndpoint.HandleAsync);
 
 
             group.MapGet("/version", () => Results.Ok())

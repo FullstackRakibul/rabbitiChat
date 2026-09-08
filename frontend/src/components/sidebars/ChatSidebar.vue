@@ -22,15 +22,32 @@ const props = defineProps({
   sourceSearch: { type: String, default: '' },
   filteredSources: { type: Array, default: () => [] },
   activeSourcesCount: { type: Number, default: 0 },
+  /** Ids switched on for the current conversation. */
+  activeSourceIds: { type: Array, default: () => [] },
   groupedConversations: { type: Array, default: () => [] },
   conversationCount: { type: Number, default: 0 },
   currentId: { type: [String, Number], default: null },
 })
 
 const emit = defineEmits([
-  'update:sourceSearch', 'new-chat', 'open-conversation',
+  'update:sourceSearch', 'update:activeSourceIds', 'new-chat', 'open-conversation',
   'delete-conversation', 'clear-all', 'logout', 'open-settings',
 ])
+
+/**
+ * Whether a source applies to the current chat. The row's own `isActive` is its
+ * default for NEW chats; what is on right now lives in activeSourceIds, which
+ * is per-conversation.
+ */
+function isOn(id) {
+  return props.activeSourceIds.includes(id)
+}
+
+function toggle(id, on) {
+  emit('update:activeSourceIds', on
+    ? [...new Set([...props.activeSourceIds, id])]
+    : props.activeSourceIds.filter((x) => x !== id))
+}
 
 const searchModel = computed({
   get: () => props.sourceSearch,
@@ -65,17 +82,17 @@ const searchModel = computed({
       <div class="max-h-36 space-y-0.5 overflow-y-auto">
         <label v-for="s in filteredSources" :key="s.id"
           class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
-          <Checkbox v-model="s.active" />
+          <Checkbox :model-value="isOn(s.id)" @update:model-value="toggle(s.id, $event)" />
           <span class="flex-1 truncate">{{ s.name }}</span>
-          <span :class="cn('h-1.5 w-1.5 rounded-full', s.active ? 'bg-foreground' : 'bg-muted-foreground/30')" />
+          <span :class="cn('h-1.5 w-1.5 rounded-full', isOn(s.id) ? 'bg-foreground' : 'bg-muted-foreground/30')" />
         </label>
         <p v-if="!filteredSources.length" class="px-2 py-1.5 text-xs text-muted-foreground">
-          No sources match.
+          {{ sources.length ? 'No sources match.' : 'No sources yet.' }}
         </p>
       </div>
 
       <p class="mt-2 text-[11px] text-muted-foreground">
-        {{ activeSourcesCount }} of {{ sources.length }} active
+        {{ activeSourcesCount }} of {{ sources.length }} active in this chat
       </p>
     </div>
 

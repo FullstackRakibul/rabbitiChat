@@ -28,6 +28,9 @@ public static class SchemaUpgrade
         EnsureExtractionTables(db);
         EnsureTodoRabbitTables(db);
         EnsureMessageWebSearchColumn(db);
+        EnsureContextSourceTable(db);
+        EnsureSearchHistoryTable(db);
+        EnsureConversationActiveSourcesColumn(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -130,6 +133,67 @@ public static class SchemaUpgrade
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_Buyer""       ON ""EmbeddingChunks"" (""Buyer"");");
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_EmbeddingChunks_StyleNumber"" ON ""EmbeddingChunks"" (""StyleNumber"");");
         }
+    }
+
+    /// <summary>
+    /// Connected sources / buyer profiles. One table for both — Kind separates
+    /// them — so the chat and workspace tabs share a single context mechanism.
+    /// </summary>
+    private static void EnsureContextSourceTable(AppDbContext db)
+    {
+        if (TableExists(db, "ContextSources")) return;
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE ""ContextSources"" (
+                ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_ContextSources"" PRIMARY KEY AUTOINCREMENT,
+                ""OwnerUserId"" INTEGER NOT NULL,
+                ""Name""        TEXT NOT NULL,
+                ""Kind""        TEXT NOT NULL,
+                ""Content""     TEXT NOT NULL,
+                ""IsActive""    INTEGER NOT NULL,
+                ""SortOrder""   INTEGER NOT NULL,
+                ""CreatedAt""   TEXT NOT NULL,
+                ""UpdatedAt""   TEXT NOT NULL
+            );");
+        db.Database.ExecuteSqlRaw(
+            @"CREATE INDEX ""IX_ContextSources_OwnerUserId_Kind"" ON ""ContextSources"" (""OwnerUserId"", ""Kind"");");
+    }
+
+    /// <summary>
+    /// Remembered search queries. Query text and usage counts only — result
+    /// payloads are never persisted, so there is no column here to hold one.
+    /// </summary>
+    private static void EnsureSearchHistoryTable(AppDbContext db)
+    {
+        if (TableExists(db, "SearchHistories")) return;
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE ""SearchHistories"" (
+                ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_SearchHistories"" PRIMARY KEY AUTOINCREMENT,
+                ""OwnerUserId"" INTEGER NOT NULL,
+                ""Query""       TEXT NOT NULL,
+                ""Title""       TEXT NULL,
+                ""MaxResults""  INTEGER NOT NULL,
+                ""RunCount""    INTEGER NOT NULL,
+                ""LastRunAt""   TEXT NOT NULL,
+                ""CreatedAt""   TEXT NOT NULL,
+                ""UpdatedAt""   TEXT NOT NULL,
+                ""IsDeleted""   INTEGER NOT NULL,
+                ""DeletedAt""   TEXT NULL
+            );");
+        db.Database.ExecuteSqlRaw(
+            @"CREATE INDEX ""IX_SearchHistories_OwnerUserId_IsDeleted_LastRunAt""
+              ON ""SearchHistories"" (""OwnerUserId"", ""IsDeleted"", ""LastRunAt"");");
+    }
+
+    /// <summary>
+    /// Which sources were switched on for a conversation, so reopening it restores
+    /// the same context set. Null on older rows — read as "none recorded".
+    /// </summary>
+    private static void EnsureConversationActiveSourcesColumn(AppDbContext db)
+    {
+        if (ColumnExists(db, "Conversations", "ActiveSourceIds")) return;
+        db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Conversations"" ADD COLUMN ""ActiveSourceIds"" TEXT NULL;");
     }
 
     private static void EnsureExtractionTables(AppDbContext db)
