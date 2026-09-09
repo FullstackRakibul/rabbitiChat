@@ -148,13 +148,28 @@ const isFiltering = computed(() => Boolean(search.value.trim()) || hasFilters.va
 // Merged cells and filtering are incompatible: a rowspan asserts "these rows
 // belong to one record", which stops being true once rows are removed. So an
 // active filter forces the flat view rather than rendering a lie.
+// Remembers that the flat view was imposed rather than chosen, so clearing the
+// filters can put the report back — without overriding a deliberate switch to
+// Data view, which must survive filtering and un-filtering alike.
+const forcedFlat = ref(false)
+
 watch(isFiltering, (on) => {
-  if (on && view.value === 'report') view.value = 'data'
+  if (on) {
+    if (view.value === 'report') {
+      view.value = 'data'
+      forcedFlat.value = true
+    }
+  } else if (forcedFlat.value) {
+    view.value = 'report'
+    forcedFlat.value = false
+  }
 })
 
 function setView(next) {
   if (next === 'report' && isFiltering.value) return   // guarded in the UI too
   view.value = next
+  // Picking a view by hand takes ownership of it from the auto-switch.
+  if (next === 'data') forcedFlat.value = false
 }
 
 const visibleSchema = computed(() => ({

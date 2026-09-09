@@ -14,6 +14,8 @@
  *              max(length of each of its groups, 1)
  */
 
+import { formatDateValue, dateSortKey } from './jsondate.js'
+
 /** UTF-8 BOM. Files exported from Excel and many Windows tools start with it. */
 const BOM = '﻿'
 
@@ -122,14 +124,47 @@ export function buildSchema(records) {
   const scalarKeys = new Map()   // path -> insertion order
   const groupKeys = new Map()    // name -> Map(subPath -> order)
 
+  // Pass 1: which keys are nested arrays anywhere in the data?
+  //
+  // This has to be decided across the whole set before any record is classified.
+  // Nested arrays are frequently null or empty on individual records, and judging
+  // a key record-by-record would classify the same field as a group on one record
+  // and as a scalar on another — which is how a raw JSON blob ends up in a cell.
+  const groupNames = new Set()
+  for (const record of records) {
+    if (!isPlainObject(record)) continue
+    for (const [key, value] of Object.entries(record)) {
+      if (Array.isArray(value) && value.length > 0) groupNames.add(key)
+    }
+  }
+
+  // A key that is null or [] on every record is still an array field, not a
+  // scalar. Registering it keeps the column present (and blank) rather than
+  // letting a stray value fall through to the scalar branch later.
+  for (const record of records) {
+    if (!isPlainObject(record)) continue
+    for (const [key, value] of Object.entries(record)) {
+      if (Array.isArray(value)) groupNames.add(key)
+    }
+  }
+
+  for (const name of groupNames) {
+    if (!groupKeys.has(name)) groupKeys.set(name, new Map())
+  }
+
+  // Pass 2: collect the columns.
   for (const record of records) {
     if (!isPlainObject(record)) continue
 
     for (const [key, value] of Object.entries(record)) {
-      if (isGroupValue(value)) {
-        if (!groupKeys.has(key)) groupKeys.set(key, new Map())
+      // Group membership is decided by the key, not by this record's value, so a
+      // null Education here cannot turn Education into a scalar column.
+      if (groupNames.has(key)) {
         const sub = groupKeys.get(key)
-        for (const item of value) {
+        // Sub-columns are the UNION of keys across every record's rows, so a
+        // ragged array (Department present on some rows only) still yields one
+        // aligned column, blank where the key is absent.
+        for (const item of (Array.isArray(value) ? value : [])) {
           if (!isPlainObject(item)) {
             // An array of bare values still deserves a column.
             if (!sub.has('value')) sub.set('value', sub.size)
@@ -163,7 +198,9 @@ export function buildSchema(records) {
     kind: 'scalar',
   }))
 
-  const groups = [...groupKeys.entries()].map(([name, sub]) => ({
+  const groups = [...groupKeys.entries()]
+    .filter(([, sub]) => sub.size > 0)   // null on every record → nothing to show
+    .map(([name, sub]) => ({
     id: `g:${name}`,
     name,
     label: humanize(name),
@@ -177,11 +214,6 @@ export function buildSchema(records) {
   }))
 
   return { scalars, groups }
-}
-
-/** An array that should become its own column group: non-empty, and not of scalars only. */
-function isGroupValue(value) {
-  return Array.isArray(value) && value.length > 0
 }
 
 /** All leaf paths of a plain object, dotted. Arrays inside are stringified, not expanded. */
@@ -216,6 +248,8 @@ export function buildRows(records, schema) {
     let rowHeight = 1
 
     for (const group of schema.groups) {
+      // null, undefined and [] all mean "no rows here" — the group's cells render
+      // blank for this record rather than the column vanishing or shifting.
       const items = Array.isArray(record?.[group.name]) ? record[group.name] : []
       // Each group contributes its own rows; the record is as tall as its
       // tallest group. A record with no groups is still one row.
@@ -258,19 +292,45 @@ export function readPath(obj, path) {
 }
 
 /**
- * A cell's display text. Objects and arrays are JSON-stringified rather than
- * rendered as "[object Object]", and null/undefined become empty so blank cells
- * read as blank instead of as the word "null".
+ * A cell's display text.
+ *
+ * A table cell is for reading, so a structured value is summarised rather than
+ * dumped: an object becomes "key: val; key: val" and an array becomes a short
+ * joined list. Raw JSON and "[object Object]" are both unreadable, and neither
+ * ever reaches a cell. null/undefined render as empty so a blank looks blank
+ * instead of saying "null".
  */
 export function toText(value) {
   if (value == null) return ''
-  if (typeof value === 'string') return value
+
+  // Date-shaped strings become house style here, at the single point every
+  // surface reads through — table, HTML export and CSV alike. Anything that is
+  // not a date passes through untouched; nothing is ever coerced.
+  if (typeof value === 'string') return formatDateValue(value)
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return ''
+    // An array reaching a cell means it was not modelled as a column group —
+    // summarise it rather than printing its JSON.
+    return value.map((v) => toText(v)).filter(Boolean).join('; ')
   }
+
+  if (typeof value === 'object') {
+    const parts = []
+    for (const [k, v] of Object.entries(value)) {
+      if (v == null || v === '') continue
+      // One level deep only: a nested object inside a cell is summarised by its
+      // own values, never expanded into more "key: {…}" noise.
+      const text = isPlainObject(v) || Array.isArray(v)
+        ? Object.values(v).map((x) => toText(x)).filter(Boolean).join(' ')
+        : toText(v)
+      if (text) parts.push(`${humanize(k)}: ${text}`)
+    }
+    return parts.join('; ')
+  }
+
+  return String(value)
 }
 
 /** "EmpCode" → "Emp Code", "joining_date" → "Joining Date", "a.b" → "A › B". */
@@ -356,6 +416,12 @@ function compareValues(a, b) {
   if (aEmpty) return 1          // blanks sink, in both directions
   if (bEmpty) return -1
 
+  // Dates sort by their own Y/M/D/H/M, never by the formatted string — "02 Jul
+  // 2011" sorts alphabetically nowhere near chronologically.
+  const ka = dateSortKey(a)
+  const kb = dateSortKey(b)
+  if (ka !== null && kb !== null) return ka - kb
+
   if (typeof a === 'number' && typeof b === 'number') return a - b
 
   const na = Number(a)
@@ -364,15 +430,7 @@ function compareValues(a, b) {
     return na - nb
   }
 
-  const da = Date.parse(a)
-  const db = Date.parse(b)
-  if (!Number.isNaN(da) && !Number.isNaN(db) && looksLikeDate(a) && looksLikeDate(b)) return da - db
-
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
-}
-
-function looksLikeDate(v) {
-  return typeof v === 'string' && /\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)
 }
 
 /**
