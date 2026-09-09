@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
-  Plug, Plus, Settings, Brain, Upload,
+  Plug, Plus, Settings, Brain, Upload, Table,
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -28,6 +28,7 @@ import WorkspaceTab from '@/components/tabs/WorkspaceTab.vue'
 import DocumentsTab from '@/components/tabs/DocumentsTab.vue'
 import TodoTab from '@/components/tabs/TodoTab.vue'
 import SourcesTab from '@/components/tabs/SourcesTab.vue'
+import TableTab from '@/components/tabs/TableTab.vue'
 import SearchTab from '@/components/tabs/SearchTab.vue'
 import SettingsTab from '@/components/tabs/SettingsTab.vue'
 
@@ -348,6 +349,7 @@ const tabs = [
   { id: 'docs', label: 'Documents', icon: FileText },
   { id: 'todo', label: 'To-Do', icon: ListTodo },
   { id: 'search', label: 'Search', icon: Globe },
+  { id: 'jsonto', label: 'JSON to ...', icon: Table },
   { id: 'sources', label: 'Sources', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -766,6 +768,10 @@ useShortcuts({
 
       <TabsContent value="search" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <SearchTab @ask="askFromSearch" />
+      </TabsContent>
+
+      <TabsContent value="jsonto" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <TableTab />
       </TabsContent>
 
       <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
