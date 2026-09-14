@@ -7,9 +7,18 @@ public class User
     public string SecretHash { get; set; } = "";      // PBKDF2 hash (base64)
     public string SecretSalt { get; set; } = "";      // per-user salt (base64)
     public string Token { get; set; } = "";           // current bearer token (base64url)
+
+    /// <summary>
+    /// "General" | "System" | "SystemAdmin" — see <see cref="UserRoles"/>. Decides
+    /// the baseline tab set; UserTabPermission rows add to it. Rows written before
+    /// RBAC existed read as General, so an upgrade grants nobody new access.
+    /// </summary>
+    public string Role { get; set; } = UserRoles.General;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public List<Conversation> Conversations { get; set; } = new();
+    public List<UserTabPermission> TabPermissions { get; set; } = new();
 }
 
 public class Conversation

@@ -57,6 +57,18 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        /// <summary>
+        /// RBAC. Both groups mount under /api: /api/me/tabs for the caller's own
+        /// tabs and /api/admin/rbac/* for administering other users.
+        /// </summary>
+        public static WebApplication ApplicationRbacApis(this WebApplication app)
+        {
+            var rbacApi = app.MapGroup("/api").WithTags("RBAC");
+
+            rbacApi.MapRbacApis();
+            return app;
+        }
+
         public static WebApplication ApplicationSearchApis(this WebApplication app)
         {
             var searchApi = app.MapGroup("/api").WithTags("Web search");

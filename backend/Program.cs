@@ -191,6 +191,13 @@ builder.Services.AddScoped<RabbitIC.Api.Services.WebSearchRunner>();
 builder.Services.AddScoped<RabbitIC.Api.Services.ISearchHistoryService,
                            RabbitIC.Api.Services.SearchHistoryService>();
 
+// ---- RBAC (roles + per-tab permissions) ----
+// Layered on the existing username+secret auth: the service adds who-may-do-what
+// on top of ResolveUser, which still answers who-is-this.
+builder.Services.AddScoped<RabbitIC.Api.Repositories.IRbacRepository,
+                           RabbitIC.Api.Repositories.RbacRepository>();
+builder.Services.AddScoped<RabbitIC.Api.Services.RbacService>();
+
 // ---- todorabbit (Kanban boards) ----
 builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
                            RabbitIC.Api.Repositories.TodoRabbitRepository>();
@@ -220,6 +227,10 @@ app.UseSwaggerUI(o =>
     o.SwaggerEndpoint("/swagger/v1/swagger.json", "RabbitIC API v1");
 });
 
+// RBAC enforcement — runs ahead of every endpoint below, so a user without a
+// tab is refused there regardless of what the UI chose to render.
+app.UseTabAccess();
+
 app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
@@ -227,6 +238,7 @@ app.ApplicationBuyerProfileApis();
 app.ApplicationSearchApis();
 app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();
+app.ApplicationRbacApis();
 
 
 app.UseCors();
@@ -238,6 +250,12 @@ using (var scope = app.Services.CreateScope())
     app.Logger.LogInformation("SQLite database: {Path}", sqliteBuilder.DataSource);
     db.Database.EnsureCreated();   // creates everything fresh if the file is new
     SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
+
+    // RBAC. Both steps are idempotent, and the order matters: give every existing
+    // row a role before seeding, so the admin count the guardrails read is right
+    // from the first request. The seed secret is never logged.
+    RbacSeeder.NormalizeExistingRoles(db);
+    RbacSeeder.Run(db, app.Logger);
 
     // Warm the vector index from SQLite so retrieval works from the first request.
     var vectorIndex = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Retrieval.VectorIndex>();

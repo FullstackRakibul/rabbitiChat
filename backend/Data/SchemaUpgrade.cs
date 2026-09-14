@@ -31,6 +31,7 @@ public static class SchemaUpgrade
         EnsureContextSourceTable(db);
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
+        EnsureRbacSchema(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -194,6 +195,39 @@ public static class SchemaUpgrade
     {
         if (ColumnExists(db, "Conversations", "ActiveSourceIds")) return;
         db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Conversations"" ADD COLUMN ""ActiveSourceIds"" TEXT NULL;");
+    }
+
+    /// <summary>
+    /// RBAC — the Role column and the tab-grant table.
+    ///
+    /// The column is added with DEFAULT 'General', which SQLite applies to every
+    /// existing row in place: each pre-RBAC account becomes a General user with no
+    /// grants, i.e. exactly the everyday tab set and nothing more. No user data is
+    /// read or rewritten, so conversations, documents and boards are untouched.
+    /// </summary>
+    private static void EnsureRbacSchema(AppDbContext db)
+    {
+        if (TableExists(db, "Users") && !ColumnExists(db, "Users", "Role"))
+        {
+            db.Database.ExecuteSqlRaw(
+                @"ALTER TABLE ""Users"" ADD COLUMN ""Role"" TEXT NOT NULL DEFAULT 'General';");
+        }
+
+        if (!TableExists(db, "UserTabPermissions"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""UserTabPermissions"" (
+                    ""Id""        INTEGER NOT NULL CONSTRAINT ""PK_UserTabPermissions"" PRIMARY KEY AUTOINCREMENT,
+                    ""UserId""    INTEGER NOT NULL,
+                    ""TabKey""    TEXT NOT NULL,
+                    ""CreatedAt"" TEXT NOT NULL,
+                    CONSTRAINT ""FK_UserTabPermissions_Users_UserId""
+                        FOREIGN KEY (""UserId"") REFERENCES ""Users"" (""Id"") ON DELETE CASCADE
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE UNIQUE INDEX ""IX_UserTabPermissions_UserId_TabKey""
+                  ON ""UserTabPermissions"" (""UserId"", ""TabKey"");");
+        }
     }
 
     private static void EnsureExtractionTables(AppDbContext db)

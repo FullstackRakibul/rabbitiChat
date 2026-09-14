@@ -2,14 +2,14 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
-  Plug, Plus, Settings, Brain, Upload, Table,
+  Plug, Plus, Settings, Brain, Upload, Table, ShieldCheck,
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
   deleteConversation, streamChat,
   uploadDocument, listDocuments, deleteDocument, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
-  listContextSources,
+  listContextSources, myTabs,
 } from './services/index.js'
 import { environment } from './environments/environment.js'
 import { useTheme } from '@/composables/useTheme'
@@ -31,6 +31,7 @@ import SourcesTab from '@/components/tabs/SourcesTab.vue'
 import TableTab from '@/components/tabs/TableTab.vue'
 import SearchTab from '@/components/tabs/SearchTab.vue'
 import SettingsTab from '@/components/tabs/SettingsTab.vue'
+import RbacTab from '@/components/tabs/RbacTab.vue'
 
 const { theme, toggleTheme } = useTheme()
 
@@ -75,6 +76,13 @@ function logout() {
   conversations.value = []
   messages.value = []
   currentId.value = null
+
+  // Drop the permission set too, so the next account never inherits the previous
+  // one's tabs for even a frame.
+  allowedTabs.value = null
+  myRole.value = ''
+  isSystemAdmin.value = false
+  myUserId.value = 0
 }
 
 // If the server rejects our token mid-session, drop to the login gate.
@@ -326,9 +334,20 @@ async function send() {
 }
 
 // Load everything that requires a session.
+//
+// Permissions come first and alone: the calls below belong to tabs this user may
+// not have, and the server answers 403 for those. Knowing the tab set first lets
+// us skip exactly those calls instead of firing them and swallowing the refusals.
 async function bootstrap() {
+  await refreshPermissions()
+
+  const may = (tab) => allowedTabs.value?.includes(tab)
+
   await Promise.all([
-    refreshModels(), refreshConversations(), refreshDocuments(), refreshSources(),
+    refreshModels(),
+    refreshConversations(),
+    may('docs') || may('workspace') ? refreshDocuments() : Promise.resolve(),
+    may('sources') ? refreshSources() : Promise.resolve(),
   ])
 }
 
@@ -341,8 +360,15 @@ onMounted(() => {
 // ─────────────────────────────────────────────────────────────
 
 // Tab state
-const activeTab = ref('dashboard') // dashboard | chat | workspace | docs | todo | search | sources | settings
-const tabs = [
+const activeTab = ref('dashboard') // dashboard | chat | workspace | docs | todo | search | jsonto | sources | settings | rbac
+
+/**
+ * Every tab this build can render, with the id the backend knows it by. Which of
+ * these a given user actually sees is decided by the server (see `allowedTabs`),
+ * never here — there is deliberately no per-role list in the frontend, so
+ * changing someone's access needs no release.
+ */
+const ALL_TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'workspace', label: 'Workspace', icon: Brain },
@@ -352,7 +378,44 @@ const tabs = [
   { id: 'jsonto', label: 'JSON to ...', icon: Table },
   { id: 'sources', label: 'Sources', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'rbac', label: 'Access', icon: ShieldCheck },
 ]
+
+// ---- Permissions ----
+// What /api/me/tabs said this user may see. Null until it answers: the tab bar
+// stays empty for that moment rather than flashing tabs the user may not have.
+const allowedTabs = ref(null)
+const myRole = ref('')
+const isSystemAdmin = ref(false)
+const myUserId = ref(0)
+
+/** The tabs actually rendered — the catalogue filtered by the server's answer. */
+const tabs = computed(() => {
+  if (allowedTabs.value === null) return []
+  return ALL_TABS.filter((t) => allowedTabs.value.includes(t.id))
+})
+
+async function refreshPermissions() {
+  try {
+    const me = await myTabs()
+    allowedTabs.value = me.tabs
+    myRole.value = me.role
+    isSystemAdmin.value = me.isSystemAdmin
+    myUserId.value = me.id
+
+    // If the current tab is no longer permitted — a revoked grant, or a stale
+    // tab restored from a previous session — fall back to the first one that is.
+    if (!me.tabs.includes(activeTab.value)) {
+      activeTab.value = me.tabs.includes('dashboard') ? 'dashboard' : (me.tabs[0] ?? 'dashboard')
+    }
+  } catch (e) {
+    if (!handleAuthError(e)) {
+      // Permissions unknown: show nothing rather than guessing a tab set. The
+      // APIs would refuse anyway, so a guess could only mislead.
+      allowedTabs.value = []
+    }
+  }
+}
 
 // Per-message web grounding for the next chat send. Resets after each send —
 // it is never sticky for a conversation or profile.
@@ -654,6 +717,9 @@ function primaryAction() {
 }
 
 function goTab(id) {
+  // Keyboard jumps (g-then-c, and friends) bypass the tab bar, so the permission
+  // check has to live here too rather than only in what gets rendered.
+  if (allowedTabs.value && !allowedTabs.value.includes(id)) return
   activeTab.value = id
   closeSidebar()
 }
@@ -776,6 +842,13 @@ useShortcuts({
 
       <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <SourcesTab ref="sourcesTab" @changed="onSourcesChanged" />
+      </TabsContent>
+
+      <!-- Access control. Rendered only for a SystemAdmin — and the admin APIs
+           refuse anyone else regardless, so this is convenience, not the control. -->
+      <TabsContent v-if="isSystemAdmin" value="rbac"
+        class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <RbacTab :current-user-id="myUserId" />
       </TabsContent>
 
       <TabsContent value="settings" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

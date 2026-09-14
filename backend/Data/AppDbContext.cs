@@ -14,6 +14,10 @@ public class AppDbContext : DbContext
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<EmbeddingChunk> EmbeddingChunks => Set<EmbeddingChunk>();
     public DbSet<BuyerProfile> BuyerProfiles => Set<BuyerProfile>();
+
+    /// <summary>RBAC — explicit per-tab grants that add to a user's role baseline.</summary>
+    public DbSet<UserTabPermission> UserTabPermissions => Set<UserTabPermission>();
+
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
     /// <summary>Connected sources and buyer profiles — one table, split by Kind.</summary>
@@ -35,6 +39,19 @@ public class AppDbContext : DbContext
 
         b.Entity<User>()
             .HasIndex(u => u.Token);
+
+        // RBAC — one row per granted tab. The unique index is the guarantee that a
+        // grant is a set membership, not a count: granting the same tab twice is
+        // impossible rather than merely harmless.
+        b.Entity<UserTabPermission>()
+            .HasOne(p => p.User)
+            .WithMany(u => u.TabPermissions)
+            .HasForeignKey(p => p.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.Entity<UserTabPermission>()
+            .HasIndex(p => new { p.UserId, p.TabKey })
+            .IsUnique();
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)

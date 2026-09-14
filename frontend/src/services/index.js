@@ -25,3 +25,6 @@ export {
   listContextSources, createContextSource, updateContextSource,
   deleteContextSource, reorderContextSources,
 } from './context-source.service.js'
+export {
+  myTabs, searchUsers, getUser, setRole, setTabs, listTabs,
+} from './rbac.service.js'
