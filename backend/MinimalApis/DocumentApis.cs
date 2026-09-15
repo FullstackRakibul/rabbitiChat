@@ -271,7 +271,7 @@ namespace RabbitIC.Api.MinimalApis
                 if (outcome.Result is not null)
                 {
                     doc.ExtractedJson = resultJson;
-                    doc.ExtractedAt = DateTime.UtcNow;
+                    doc.ExtractedAt = DateTime.Now;
                 }
 
                 var run = new ExtractionRun
@@ -331,7 +331,7 @@ namespace RabbitIC.Api.MinimalApis
 
                 run.ConfirmedJson = JsonSerializer.Serialize(req.ResultJson);
                 run.ConfirmedByUserId = user.Id;
-                run.ConfirmedAt = DateTime.UtcNow;
+                run.ConfirmedAt = DateTime.Now;
                 run.EditsJson = req.Edits.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
                     ? "[]"
                     : JsonSerializer.Serialize(req.Edits);

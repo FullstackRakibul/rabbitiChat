@@ -30,7 +30,7 @@ public class SearchHistoryService : ISearchHistoryService
         int userId, string query, int maxResults, CancellationToken ct = default)
     {
         var text = Normalize(query);
-        var now = DateTime.UtcNow;
+        var now = DateTime.Now;
 
         // Dedupe on the query itself, ignoring case and surrounding whitespace, and
         // deliberately including soft-deleted rows: running a deleted query again
@@ -100,7 +100,7 @@ public class SearchHistoryService : ISearchHistoryService
             ? null
             : Truncate(trimmed, MaxTitleChars);
 
-        row.UpdatedAt = DateTime.UtcNow;
+        row.UpdatedAt = DateTime.Now;
         await _db.SaveChangesAsync(ct);
         return Project(row);
     }
@@ -115,7 +115,7 @@ public class SearchHistoryService : ISearchHistoryService
         if (!row.IsDeleted)
         {
             row.IsDeleted = true;
-            row.DeletedAt = DateTime.UtcNow;
+            row.DeletedAt = DateTime.Now;
             row.UpdatedAt = row.DeletedAt.Value;
             await _db.SaveChangesAsync(ct);
         }
@@ -132,7 +132,7 @@ public class SearchHistoryService : ISearchHistoryService
         {
             row.IsDeleted = false;
             row.DeletedAt = null;
-            row.UpdatedAt = DateTime.UtcNow;
+            row.UpdatedAt = DateTime.Now;
             await _db.SaveChangesAsync(ct);
         }
 

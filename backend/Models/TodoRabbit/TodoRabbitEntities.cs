@@ -12,7 +12,7 @@ public class Board
     public int Id { get; set; }
     public int OwnerUserId { get; set; }              // owner — every query is scoped to this
     public string Name { get; set; } = "New board";
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public List<BoardColumn> Columns { get; set; } = new();
 }
@@ -30,7 +30,7 @@ public class BoardColumn
     public int SortOrder { get; set; }
     /// <summary>Palette key the UI maps to a dot colour (e.g. "blue"). Never a raw CSS value.</summary>
     public string ColorKey { get; set; } = "slate";
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public Board? Board { get; set; }
     public List<Card> Cards { get; set; } = new();
@@ -48,8 +48,8 @@ public class Card
     public string? Priority { get; set; }
     /// <summary>Position within its column. Normalised to 0,1,2,… after every move.</summary>
     public int SortOrder { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
     public BoardColumn? Column { get; set; }
 }

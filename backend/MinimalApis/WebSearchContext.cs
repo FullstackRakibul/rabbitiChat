@@ -53,7 +53,7 @@ namespace RabbitIC.Api.MinimalApis
 
                 var sb = new StringBuilder();
                 sb.Append("Web results retrieved ")
-                  .Append(DateTime.UtcNow.ToString("o"))
+                  .Append(DateTime.Now.ToString("o"))
                   .AppendLine(". Answer using these results where relevant and cite the source URL inline after each claim, e.g. (ollama.com). If results don't cover the question, say so rather than guessing.")
                   .AppendLine();
 

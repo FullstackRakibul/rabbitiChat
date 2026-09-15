@@ -30,8 +30,8 @@ public class ContextSource
     /// <summary>Ascending. Decides the order blocks are concatenated in.</summary>
     public int SortOrder { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
     public const string KindSource = "source";
     public const string KindBuyer = "buyer";

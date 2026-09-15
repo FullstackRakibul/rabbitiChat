@@ -76,7 +76,7 @@ public class ContextSourceService : IContextSourceService
         if (input.IsActive is bool active) entity.IsActive = active;
         if (input.SortOrder is int order) entity.SortOrder = order;
 
-        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedAt = DateTime.Now;
         await _db.SaveChangesAsync(ct);
         return Project(entity);
     }
@@ -105,7 +105,7 @@ public class ContextSourceService : IContextSourceService
             .Select((id, index) => (id, index))
             .ToDictionary(x => x.id, x => x.index);
 
-        var now = DateTime.UtcNow;
+        var now = DateTime.Now;
         foreach (var row in mine)
         {
             row.SortOrder = position[row.Id];
