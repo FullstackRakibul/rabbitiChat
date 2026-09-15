@@ -2,14 +2,14 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
-  Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign,
+  Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
   deleteConversation, streamChat,
   uploadDocument, listDocuments, deleteDocument, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
-  listContextSources, myTabs,
+  listContextSources, myTabs
 } from './services/index.js'
 import { environment } from './environments/environment.js'
 import { useTheme } from '@/composables/useTheme'
@@ -727,8 +727,13 @@ function goTab(id) {
 }
 
 // Palette rows. Tab navigation first, then the actions worth reaching by name.
+//
+// `tabs` is a computed, so script scope needs .value — the template gets auto
+// unwrapping, script scope does not. Iterating the permission-filtered list is
+// deliberate: the palette offers only tabs this user may actually open, which
+// matches the guard in goTab().
 const commands = computed(() => [
-  ...tabs.map(t => ({
+  ...tabs.value.map(t => ({
     id: `tab:${t.id}`,
     label: t.label,
     group: 'Go to',

@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Middleware;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Retrieval;
 
 var builder = WebApplication.CreateBuilder(args);

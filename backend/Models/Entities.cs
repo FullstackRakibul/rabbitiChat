@@ -7,6 +7,14 @@ public class User
     public string SecretHash { get; set; } = "";      // PBKDF2 hash (base64)
     public string SecretSalt { get; set; } = "";      // per-user salt (base64)
     public string Token { get; set; } = "";           // current bearer token (base64url)
+
+    /// <summary>
+    /// RBAC role: General | System | SystemAdmin. A string so the column reads
+    /// plainly in SQLite, and so an unknown value degrades to General via
+    /// <see cref="UserRoles.Normalize"/> rather than becoming another role.
+    /// </summary>
+    public string Role { get; set; } = UserRoles.General;
+
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public List<Conversation> Conversations { get; set; } = new();
