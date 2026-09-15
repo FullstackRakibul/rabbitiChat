@@ -333,7 +333,7 @@ namespace RabbitIC.Api.MinimalApis
         /// <summary>Consumes one call for the user; false once the window's budget is spent.</summary>
         public static bool TryTake(int userId)
         {
-            var now = DateTime.UtcNow;
+            var now = DateTime.Now;
             var bucket = Buckets.GetOrAdd(userId, _ => new Counter { WindowStart = now });
 
             lock (bucket)

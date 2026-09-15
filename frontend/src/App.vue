@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
-  Plug, Plus, Settings, Brain, Upload, Table, ShieldCheck,
+  Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign,
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -29,6 +29,7 @@ import DocumentsTab from '@/components/tabs/DocumentsTab.vue'
 import TodoTab from '@/components/tabs/TodoTab.vue'
 import SourcesTab from '@/components/tabs/SourcesTab.vue'
 import TableTab from '@/components/tabs/TableTab.vue'
+import CheckGenerator from '@/components/fivelakhs/CheckGenerator.vue'
 import SearchTab from '@/components/tabs/SearchTab.vue'
 import SettingsTab from '@/components/tabs/SettingsTab.vue'
 import RbacTab from '@/components/tabs/RbacTab.vue'
@@ -376,6 +377,7 @@ const ALL_TABS = [
   { id: 'todo', label: 'To-Do', icon: ListTodo },
   { id: 'search', label: 'Search', icon: Globe },
   { id: 'jsonto', label: 'JSON to ...', icon: Table },
+  { id: 'fivelakhs', label: '5Lakhs', icon: BadgeDollarSign },
   { id: 'sources', label: 'Sources', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'rbac', label: 'Access', icon: ShieldCheck },
@@ -838,6 +840,10 @@ useShortcuts({
 
       <TabsContent value="jsonto" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <TableTab />
+      </TabsContent>
+
+      <TabsContent value="fivelakhs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <CheckGenerator />
       </TabsContent>
 
       <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

@@ -220,7 +220,7 @@ public class TodoRabbitService
         if (input.Priority is not null)
             card.Priority = input.Priority.Length == 0 ? null : NormalisePriority(input.Priority);
 
-        card.UpdatedAt = DateTime.UtcNow;
+        card.UpdatedAt = DateTime.Now;
         await _repo.SaveChangesAsync(ct);
 
         return ToDto(card);
@@ -267,7 +267,7 @@ public class TodoRabbitService
         destination.Insert(index, card);
 
         card.ColumnId = toColumnId;
-        card.UpdatedAt = DateTime.UtcNow;
+        card.UpdatedAt = DateTime.Now;
 
         for (var i = 0; i < destination.Count; i++)
             destination[i].SortOrder = i;

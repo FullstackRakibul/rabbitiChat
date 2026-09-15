@@ -291,7 +291,7 @@ public static class SchemaUpgrade
                     (""Name"", ""DetectPattern"", ""ParserKey"", ""ChunkingStrategy"", ""IsActive"", ""CreatedAt"")
                 VALUES
                     ('Kohls', 'SPS Commerce|Kohls|Order #:|Vendors Style', 'KohlsSps', 'none', 1, {0});",
-                DateTime.UtcNow.ToString("o"));
+                DateTime.Now.ToString("o"));
         }
     }
 

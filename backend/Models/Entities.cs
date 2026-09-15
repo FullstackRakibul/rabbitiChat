@@ -7,15 +7,7 @@ public class User
     public string SecretHash { get; set; } = "";      // PBKDF2 hash (base64)
     public string SecretSalt { get; set; } = "";      // per-user salt (base64)
     public string Token { get; set; } = "";           // current bearer token (base64url)
-
-    /// <summary>
-    /// "General" | "System" | "SystemAdmin" — see <see cref="UserRoles"/>. Decides
-    /// the baseline tab set; UserTabPermission rows add to it. Rows written before
-    /// RBAC existed read as General, so an upgrade grants nobody new access.
-    /// </summary>
-    public string Role { get; set; } = UserRoles.General;
-
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public List<Conversation> Conversations { get; set; } = new();
     public List<UserTabPermission> TabPermissions { get; set; } = new();
@@ -35,7 +27,7 @@ public class Conversation
     /// </summary>
     public string? ActiveSourceIds { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public User? User { get; set; }
     public List<Message> Messages { get; set; } = new();
@@ -63,7 +55,7 @@ public class Document
     public DateTime? ExtractedAt { get; set; }
     /// <summary>Workspace thread this document belongs to — extractions are appended here.</summary>
     public int? ConversationId { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public List<EmbeddingChunk> Chunks { get; set; } = new();
 }
@@ -87,7 +79,7 @@ public class EmbeddingChunk
     /// <summary>L2-normalised float32 vector, raw little-endian bytes.</summary>
     public byte[] Vector { get; set; } = Array.Empty<byte>();
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public Document? Document { get; set; }
 }
@@ -100,7 +92,7 @@ public class Message
     public string Content { get; set; } = "";
     /// <summary>True when this reply was grounded on live web results, so history can show the badge.</summary>
     public bool WebSearchUsed { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public Conversation? Conversation { get; set; }
 }

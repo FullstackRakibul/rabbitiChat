@@ -27,9 +27,9 @@ public class SearchHistory
     /// <summary>How many times this query has been run. Starts at 1.</summary>
     public int RunCount { get; set; } = 1;
 
-    public DateTime LastRunAt { get; set; } = DateTime.UtcNow;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastRunAt { get; set; } = DateTime.Now;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
     /// <summary>
     /// Soft delete. Rows are never removed: the undo affordance in the UI is a

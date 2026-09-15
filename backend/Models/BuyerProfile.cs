@@ -26,7 +26,7 @@ public class BuyerProfile
     public string ChunkingStrategy { get; set; } = "none";
 
     public bool IsActive { get; set; } = true;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 }
 
 /// <summary>Audit trail — every extraction run is recorded, clean or not.</summary>
@@ -51,5 +51,5 @@ public class ExtractionRun
     public DateTime? ConfirmedAt { get; set; }
     public string? EditsJson { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 }
