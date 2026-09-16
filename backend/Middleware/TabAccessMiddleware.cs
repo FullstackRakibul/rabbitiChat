@@ -29,11 +29,17 @@ public class TabAccessMiddleware
     /// specific prefix can carve an exception out of a broader one.
     ///
     /// Only feature APIs appear here. Deliberately absent: /api/auth (you must be
-    /// able to log in), /api/models and /api/chat and /api/conversations (chat is
-    /// in every role's baseline), and /api/me/tabs (it only describes the caller).
+    /// able to log in), /api/me/tabs (it only describes the caller), and
+    /// /api/models (Settings shows the model list to every role).
+    ///
+    /// /api/chat and /api/conversations ARE gated: chat is no longer part of the
+    /// General baseline, so the tab and its API have to move together — hiding
+    /// the tab while leaving the endpoint open would be no control at all.
     /// </summary>
     private static readonly (string Prefix, string Tab)[] GatedPrefixes =
     {
+        ("/api/chat", "chat"),
+        ("/api/conversations", "chat"),
         ("/api/documents", "docs"),
         ("/api/buyer-profiles", "docs"),
         ("/api/search", "search"),

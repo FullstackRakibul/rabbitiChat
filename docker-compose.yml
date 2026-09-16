@@ -1,0 +1,76 @@
+# Mostisko — a creation of Mostisko, the AI.
+#
+#   docker compose up --build        start (first run builds the image)
+#   docker compose restart           data survives — that is the point of the volume
+#   docker compose down              stops; the NAMED VOLUME and its database remain
+#   docker compose down -v           DESTROYS the volume and the database with it
+#
+# Everything secret comes from the environment. Put real values in a .env file
+# beside this one (see .env.example); .env is git-ignored, and none of it is
+# baked into the image.
+
+services:
+  mostisko:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mostisko:latest
+    container_name: mostisko
+
+    # One port for both the SPA and the API — same origin, so no CORS.
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+
+    environment:
+      # ---- Database ----
+      # The path MUST be inside the mounted volume below. SQLite writes a -wal
+      # and a -shm file next to the database, so the volume holds the directory
+      # rather than the single file.
+      ConnectionStrings__Default: "Data Source=/data/rabbitic.db"
+
+      # ---- Ollama ----
+      # host.docker.internal reaches an Ollama running on the host machine.
+      # For a LAN box use its address; on Linux add the extra_hosts entry below.
+      Ollama__Url: "${OLLAMA_URL:-http://host.docker.internal:11434}"
+      Ollama__EmbeddingModel: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
+
+      # ---- Secrets: supplied at RUN time, never in the image ----
+      # Unset is not an error: the search endpoints answer 503 and the rest of
+      # the app boots normally.
+      OllamaCloud__ApiKey: "${OLLAMA_CLOUD_API_KEY:-}"
+      OllamaCloud__BaseUrl: "${OLLAMA_CLOUD_BASE_URL:-https://ollama.com}"
+
+      # OpenAI-compatible providers are an array in config; the double
+      # underscore plus the index addresses one element's key, so provider 0
+      # (OpenRouter) and provider 1 (Groq) are configured without touching
+      # appsettings.json.
+      OpenAiCompatible__Providers__0__ApiKey: "${OPENROUTER_API_KEY:-}"
+      OpenAiCompatible__Providers__1__ApiKey: "${GROQ_API_KEY:-}"
+
+      ASPNETCORE_ENVIRONMENT: "Production"
+
+    volumes:
+      # THE PERSISTENCE GUARANTEE.
+      # Named volume → the database lives outside the container's writable
+      # layer, so `restart`, `up --build` and a new image all keep the data.
+      - mostisko-data:/data
+
+    # Linux needs this for host.docker.internal; Docker Desktop provides it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/public/server/status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  mostisko-data:
+    # A named volume managed by Docker. `docker volume inspect mostisko-data`
+    # shows where it lives on the host; `docker compose down -v` is the only
+    # command here that deletes it.
+    name: mostisko-data

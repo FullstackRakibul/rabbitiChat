@@ -1,0 +1,44 @@
+# What must never enter the build context.
+#
+# Two jobs: keep the image small, and make it impossible for a local secret or a
+# local database to be copied into a layer by accident. Anything listed here is
+# invisible to COPY, so it cannot ship even if a Dockerfile line is careless.
+
+# ---- Secrets: never in an image ----
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets.json
+*.pem
+*.key
+*.pfx
+
+# ---- Local databases: the image must start with an empty volume ----
+**/*.db
+**/*.db-shm
+**/*.db-wal
+backend/Data/uploads/
+
+# ---- Build output and dependencies (rebuilt inside the image) ----
+**/bin/
+**/obj/
+**/node_modules/
+frontend/dist/
+**/.vs/
+**/.vscode/
+**/.idea/
+
+# ---- VCS and tooling ----
+.git/
+.github/
+.gitignore
+.dockerignore
+**/.DS_Store
+
+# ---- Docs and local-only files ----
+*.md
+!DEPLOY.md
+docker-compose*.yml
+Dockerfile

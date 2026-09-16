@@ -78,22 +78,39 @@ public static class TabCatalog
         ["todos"] = "todo",
         ["to-do"] = "todo",
         ["admin"] = RbacTab,
+        // The 5Lakhs module is spelled "fivelakhs" in folder and storage-key
+        // names; accept that spelling on input so the two can never drift into
+        // a grant that silently matches nothing.
+        ["fivelakhs"] = "5lakhs",
+        ["5lakh"] = "5lakhs",
     };
 
     // ---- Role baselines ----
     // Additive by construction: each tier is the previous tier plus more, so a
     // promotion can never remove a tab.
 
-    /// <summary>The everyday tabs — what a plain account gets with no grants at all.</summary>
+    /// <summary>
+    /// What a plain account gets with no grants at all: the self-service tools
+    /// that need no model access and expose nobody else's data.
+    ///
+    /// Chat, workspace, documents, search and IELTS are deliberately NOT here —
+    /// they are the model-backed and knowledge-base modules, so they start at
+    /// System. An admin can still grant any of them to one General user without
+    /// promoting them, which is what the additive grant table is for.
+    /// </summary>
     private static readonly string[] GeneralTabs =
     {
-        "chat", "dashboard", "todo", "jsonto", "5lakhs", "ielts", "settings",
+        "dashboard", "todo", "jsonto", "5lakhs", "sources", "settings",
     };
 
-    /// <summary>General plus the document/knowledge tooling.</summary>
+    /// <summary>
+    /// General plus the model-backed and knowledge tooling. Additive by
+    /// construction — System is a superset of General, so a promotion never
+    /// removes a tab.
+    /// </summary>
     private static readonly string[] SystemExtraTabs =
     {
-        "workspace", "docs", "search", "sources",
+        "chat", "workspace", "docs", "search", "ielts",
     };
 
     /// <summary>

@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap
@@ -361,8 +363,26 @@ onMounted(() => {
 // WORKSPACE ADDITIONS (UI-only local state — no API changes)
 // ─────────────────────────────────────────────────────────────
 
-// Tab state
-const activeTab = ref('dashboard') // dashboard | chat | workspace | docs | todo | search | jsonto | sources | settings | rbac
+// ---- Tab state: the URL owns it ----
+//
+// `activeTab` is a computed view over the route rather than a ref, so there is
+// exactly one source of truth. Setting it pushes a navigation; the router
+// guard may refuse or redirect that, and because the value is derived, the bar
+// then reflects where we actually landed instead of where we asked to go.
+//
+// Every module stays mounted regardless (see the panels below), so routing
+// changes which panel is visible — it never tears one down. That is what keeps
+// a streaming chat reply alive across navigation.
+const route = useRoute()
+const router = useRouter()
+
+const activeTab = computed({
+  get: () => tabForPath(route.path) ?? 'dashboard',
+  set: (id) => {
+    const target = pathForTab(id)
+    if (route.path !== target) router.push(target)
+  },
+})
 
 /**
  * Every tab this build can render, with the id the backend knows it by. Which of
@@ -399,6 +419,20 @@ const tabs = computed(() => {
   return ALL_TABS.filter((t) => allowedTabs.value.includes(t.id))
 })
 
+/** Where a user with no access to the requested module should land. */
+const defaultTab = computed(() => {
+  const allowed = allowedTabs.value
+  if (!allowed?.length) return 'dashboard'
+  return allowed.includes('dashboard') ? 'dashboard' : allowed[0]
+})
+
+// Let the router's guard read the permission set. Installed once; it reads the
+// refs live, so a later permission change takes effect without re-installing.
+useRoutePermissions(() => ({
+  tabs: allowedTabs.value,
+  fallback: defaultTab.value,
+}))
+
 async function refreshPermissions() {
   try {
     const me = await myTabs()
@@ -407,10 +441,12 @@ async function refreshPermissions() {
     isSystemAdmin.value = me.isSystemAdmin
     myUserId.value = me.id
 
-    // If the current tab is no longer permitted — a revoked grant, or a stale
-    // tab restored from a previous session — fall back to the first one that is.
+    // The guard only runs on navigation, so a deep link that was already
+    // resolved before permissions arrived is re-checked here: if the URL names
+    // a module this user cannot see, replace it (not push — the forbidden URL
+    // should not sit in the back history).
     if (!me.tabs.includes(activeTab.value)) {
-      activeTab.value = me.tabs.includes('dashboard') ? 'dashboard' : (me.tabs[0] ?? 'dashboard')
+      router.replace(pathForTab(defaultTab.value))
     }
   } catch (e) {
     if (!handleAuthError(e)) {
@@ -721,8 +757,10 @@ function primaryAction() {
 }
 
 function goTab(id) {
-  // Keyboard jumps (g-then-c, and friends) bypass the tab bar, so the permission
-  // check has to live here too rather than only in what gets rendered.
+  // Keyboard jumps (g-then-c, and friends) bypass the tab bar. The router guard
+  // would redirect a forbidden id anyway; refusing here as well means the URL
+  // never changes at all, so the back button doesn't collect entries the user
+  // never actually visited.
   if (allowedTabs.value && !allowedTabs.value.includes(id)) return
   activeTab.value = id
   closeSidebar()
@@ -789,7 +827,7 @@ useShortcuts({
        panels below share one root; unmount-on-hide=false keeps every panel
        alive across switches, so a streaming reply survives navigating away. -->
   <Tabs v-else v-model="activeTab" :unmount-on-hide="false" class="contents">
-    <AppShell :tabs="tabs" :theme="theme" :connected="connected" :status="status"
+    <AppShell :tabs="tabs" :active-tab="activeTab" :theme="theme" :connected="connected" :status="status"
       :has-sidebar="tabHasSidebar" :sidebar-open="!sidebarCollapsed"
       v-model:mobile-open="mobileSidebarOpen"
       @toggle-theme="toggleTheme" @open-palette="paletteOpen = true">

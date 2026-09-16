@@ -18,6 +18,11 @@ dist/
 .env.local
 .env.*.local
 
+# Runtime secrets for docker compose — real keys live here, never in git.
+# .env.example is the committed template.
+.env
+!.env.example
+
 # Logs                     
 *.log
 logs/

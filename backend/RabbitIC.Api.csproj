@@ -21,6 +21,21 @@
     <Folder Include="Helper\" />
   </ItemGroup>
 
+  <!--
+    Never publish developer-local configuration. appsettings.Development.json
+    holds real API keys on a developer machine (it is git-ignored for that
+    reason), and `dotnet publish` would otherwise copy it into the output and
+    from there into a container image.
+
+    .dockerignore already keeps it out of the Docker build context; this is the
+    second lock, covering every other publish path — a manual `dotnet publish`,
+    a CI artefact, an IIS deploy.
+  -->
+  <ItemGroup>
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+    <Content Update="appsettings.*.local.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
   <ProjectExtensions><VisualStudio><UserProperties properties_4launchsettings_1json__JsonSchema="https://json.sdmx.org/2.1/sdmx-json-structure-schema.json" /></VisualStudio></ProjectExtensions>
 
 </Project>

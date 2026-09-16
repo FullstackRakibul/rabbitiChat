@@ -1,0 +1,63 @@
+# Mostisko on Fly.io — the container host example.
+#
+# Fly is chosen here because it gives a real persistent VOLUME, which is what
+# SQLite needs. Vercel cannot host this backend at all: its filesystem is
+# read-only and ephemeral, so a SQLite file written there is lost on every
+# invocation. See DEPLOY.md.
+#
+# First deploy:
+#
+#   fly launch --no-deploy --name mostisko          # creates the app
+#   fly volumes create mostisko_data --size 1 --region sin
+#   fly secrets set OLLAMA_CLOUD_API_KEY=...        # secrets, never in the image
+#   fly secrets set OPENROUTER_API_KEY=...
+#   fly deploy
+#
+# `fly secrets set` stores values encrypted and injects them as environment
+# variables at run time — the same mechanism as the compose .env file, so the
+# image stays identical between local and production.
+
+app = "mostisko"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # The mount below is at /data, so the database sits on the volume and
+  # survives deploys, restarts and machine moves.
+  ConnectionStrings__Default = "Data Source=/data/rabbitic.db"
+  ASPNETCORE_ENVIRONMENT = "Production"
+  ASPNETCORE_URLS = "http://+:8080"
+
+# THE PERSISTENCE GUARANTEE on Fly: a volume attached to the machine.
+# Without this block the database would live in the machine's ephemeral
+# filesystem and be wiped on every deploy.
+[[mounts]]
+  source = "mostisko_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # SQLite is a single-writer file database. Two machines writing the same
+  # volume would corrupt it, and a volume cannot be shared anyway — so this app
+  # runs exactly one machine. Scale vertically, not horizontally.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/public/server/status"
+
+[[vm]]
+  # Document ingestion and the vector index are memory-hungry; 1GB is the
+  # practical floor once embeddings are loaded.
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

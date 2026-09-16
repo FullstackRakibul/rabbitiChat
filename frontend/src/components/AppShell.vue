@@ -13,10 +13,12 @@ import { Menu, Moon, Sun, X } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
-import { TabsList, TabsTrigger } from '@/components/ui/tabs'
+import ModuleTabBar from '@/components/ModuleTabBar.vue'
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
+  /** The active tab id — the tab bar needs it to place its indicator. */
+  activeTab: { type: String, default: '' },
   theme: { type: String, default: 'light' },
   connected: { type: Boolean, default: false },
   status: { type: String, default: '' },
@@ -54,18 +56,13 @@ const showSidebar = computed(() => props.hasSidebar)
         <Menu />
       </Button>
 
-      <span class="mr-1 hidden truncate text-lg font-semibold tracking-tight sm:inline">
+      <span class="mr-1 hidden shrink-0 truncate text-lg font-semibold tracking-tight lg:inline">
         মস্তিস্ক the ai
       </span>
 
-      <TabsList class="h-9 overflow-x-auto">
-        <TabsTrigger v-for="t in tabs" :key="t.id" :value="t.id">
-          <component :is="t.icon" />
-          <span class="hidden sm:inline">{{ t.label }}</span>
-        </TabsTrigger>
-      </TabsList>
+      <ModuleTabBar :tabs="tabs" :model-value="activeTab" />
 
-      <div class="ml-auto flex items-center gap-2">
+      <div class="ml-auto flex shrink-0 items-center gap-2">
         <button
           class="hidden items-center gap-2 rounded-md border px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:flex"
           title="Open command palette"
