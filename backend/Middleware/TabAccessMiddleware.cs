@@ -1,4 +1,4 @@
-// RBAC — API-level tab enforcement.
+﻿// RBAC — API-level tab enforcement.
 //
 // The frontend hides tabs a user lacks, but hiding is not a control: anyone can
 // call the API directly. This middleware is the actual boundary. It maps request
@@ -39,6 +39,7 @@ public class TabAccessMiddleware
         ("/api/search", "search"),
         ("/api/context-sources", "sources"),
         ("/api/todorabbit", "todo"),
+        ("/api/ielts", "ielts"),
     };
 
     /// <summary>

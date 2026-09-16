@@ -26,6 +26,13 @@ public class AppDbContext : DbContext
     /// <summary>Queries the user has run. Never holds result payloads.</summary>
     public DbSet<SearchHistory> SearchHistories => Set<SearchHistory>();
 
+    // IELTS — the mistake spine plus the Reading engine.
+    public DbSet<Mistake> Mistakes => Set<Mistake>();
+    public DbSet<ReadingTest> ReadingTests => Set<ReadingTest>();
+    public DbSet<ReadingQuestion> ReadingQuestions => Set<ReadingQuestion>();
+    public DbSet<ReadingAttempt> ReadingAttempts => Set<ReadingAttempt>();
+    public DbSet<ReadingAttemptAnswer> ReadingAttemptAnswers => Set<ReadingAttemptAnswer>();
+
     // todorabbit — Kanban boards (a creation of Mostisko, the AI).
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<BoardColumn> Columns => Set<BoardColumn>();
@@ -104,6 +111,37 @@ public class AppDbContext : DbContext
         // index covers the filter and the sort in one.
         b.Entity<SearchHistory>()
             .HasIndex(h => new { h.OwnerUserId, h.IsDeleted, h.LastRunAt });
+
+        // IELTS — the review queue is always "my mistakes, this module, due
+        // first", so one composite index covers the filter and the ordering.
+        b.Entity<Mistake>().HasIndex(m => new { m.OwnerUserId, m.Module, m.NextReviewAt });
+
+        b.Entity<ReadingTest>().HasIndex(t => t.OwnerUserId);
+
+        // Unique only where a SeedKey exists: user-authored tests all leave it
+        // null, and SQLite treats each NULL as distinct, so they never collide.
+        // This index is what makes re-seeding an update rather than a duplicate.
+        b.Entity<ReadingTest>()
+            .HasIndex(t => t.SeedKey)
+            .IsUnique()
+            .HasFilter("\"SeedKey\" IS NOT NULL");
+
+        // A test is a cascade tree: deleting it takes its questions with it.
+        b.Entity<ReadingQuestion>()
+            .HasOne(q => q.Test)
+            .WithMany(t => t.Questions)
+            .HasForeignKey(q => q.ReadingTestId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<ReadingQuestion>().HasIndex(q => q.ReadingTestId);
+
+        b.Entity<ReadingAttempt>().HasIndex(a => new { a.OwnerUserId, a.StartedAt });
+
+        b.Entity<ReadingAttemptAnswer>()
+            .HasOne(a => a.Attempt)
+            .WithMany(x => x.Answers)
+            .HasForeignKey(a => a.ReadingAttemptId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<ReadingAttemptAnswer>().HasIndex(a => a.ReadingAttemptId);
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);

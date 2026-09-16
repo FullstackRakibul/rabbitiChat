@@ -32,6 +32,7 @@ public static class SchemaUpgrade
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
+        EnsureIeltsTables(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -227,6 +228,142 @@ public static class SchemaUpgrade
             db.Database.ExecuteSqlRaw(
                 @"CREATE UNIQUE INDEX ""IX_UserTabPermissions_UserId_TabKey""
                   ON ""UserTabPermissions"" (""UserId"", ""TabKey"");");
+        }
+    }
+
+    /// <summary>
+    /// IELTS — the mistake spine and the Reading engine.
+    ///
+    /// Five tables, each guarded independently: a database that already has some
+    /// of them (a partially applied earlier run) gains only what it is missing.
+    /// </summary>
+    private static void EnsureIeltsTables(AppDbContext db)
+    {
+        if (!TableExists(db, "Mistakes"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""Mistakes"" (
+                    ""Id""            INTEGER NOT NULL CONSTRAINT ""PK_Mistakes"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId""   INTEGER NOT NULL,
+                    ""Module""        TEXT NOT NULL,
+                    ""SourceType""    TEXT NOT NULL,
+                    ""SourceId""      INTEGER NOT NULL,
+                    ""QuestionType""  TEXT NOT NULL,
+                    ""Skill""         TEXT NULL,
+                    ""Topic""         TEXT NULL,
+                    ""YourAnswer""    TEXT NOT NULL,
+                    ""CorrectAnswer"" TEXT NOT NULL,
+                    ""MistakeType""   TEXT NULL,
+                    ""Severity""      INTEGER NOT NULL,
+                    ""FirstSeenAt""   TEXT NOT NULL,
+                    ""LastSeenAt""    TEXT NOT NULL,
+                    ""TimesSeen""     INTEGER NOT NULL,
+                    ""TimesResolved"" INTEGER NOT NULL,
+                    ""NextReviewAt""  TEXT NULL,
+                    ""Resolved""      INTEGER NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE INDEX ""IX_Mistakes_OwnerUserId_Module_NextReviewAt""
+                  ON ""Mistakes"" (""OwnerUserId"", ""Module"", ""NextReviewAt"");");
+        }
+
+        if (!TableExists(db, "ReadingTests"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""ReadingTests"" (
+                    ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_ReadingTests"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId"" INTEGER NOT NULL,
+                    ""IsSystem""    INTEGER NOT NULL DEFAULT 0,
+                    ""SeedKey""     TEXT NULL,
+                    ""Title""       TEXT NOT NULL,
+                    ""Passage""     TEXT NOT NULL,
+                    ""Source""      TEXT NOT NULL,
+                    ""CreatedAt""   TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE INDEX ""IX_ReadingTests_OwnerUserId"" ON ""ReadingTests"" (""OwnerUserId"");");
+        }
+
+        // Shared demo content. Both columns are additive, so an existing database
+        // gains them in place: every pre-existing test stays user-authored
+        // (IsSystem = 0, SeedKey NULL) and no row is read or rewritten.
+        if (TableExists(db, "ReadingTests"))
+        {
+            if (!ColumnExists(db, "ReadingTests", "IsSystem"))
+            {
+                db.Database.ExecuteSqlRaw(
+                    @"ALTER TABLE ""ReadingTests"" ADD COLUMN ""IsSystem"" INTEGER NOT NULL DEFAULT 0;");
+            }
+
+            if (!ColumnExists(db, "ReadingTests", "SeedKey"))
+            {
+                db.Database.ExecuteSqlRaw(
+                    @"ALTER TABLE ""ReadingTests"" ADD COLUMN ""SeedKey"" TEXT NULL;");
+            }
+
+            // Partial index: user tests all leave SeedKey null and SQLite counts
+            // each NULL as distinct, so only seeded rows are constrained. This is
+            // what makes a re-seed an update rather than a duplicate.
+            db.Database.ExecuteSqlRaw(
+                @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ReadingTests_SeedKey""
+                  ON ""ReadingTests"" (""SeedKey"") WHERE ""SeedKey"" IS NOT NULL;");
+        }
+
+        if (!TableExists(db, "ReadingQuestions"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""ReadingQuestions"" (
+                    ""Id""            INTEGER NOT NULL CONSTRAINT ""PK_ReadingQuestions"" PRIMARY KEY AUTOINCREMENT,
+                    ""ReadingTestId"" INTEGER NOT NULL,
+                    ""Order""         INTEGER NOT NULL,
+                    ""QuestionType""  TEXT NOT NULL,
+                    ""Prompt""        TEXT NOT NULL,
+                    ""OptionsJson""   TEXT NULL,
+                    ""CorrectAnswer"" TEXT NOT NULL,
+                    ""Skill""         TEXT NULL,
+                    ""Topic""         TEXT NULL,
+                    ""Difficulty""    TEXT NULL,
+                    CONSTRAINT ""FK_ReadingQuestions_ReadingTests_ReadingTestId""
+                        FOREIGN KEY (""ReadingTestId"") REFERENCES ""ReadingTests"" (""Id"") ON DELETE CASCADE
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE INDEX ""IX_ReadingQuestions_ReadingTestId"" ON ""ReadingQuestions"" (""ReadingTestId"");");
+        }
+
+        if (!TableExists(db, "ReadingAttempts"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""ReadingAttempts"" (
+                    ""Id""              INTEGER NOT NULL CONSTRAINT ""PK_ReadingAttempts"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId""     INTEGER NOT NULL,
+                    ""ReadingTestId""   INTEGER NOT NULL,
+                    ""StartedAt""       TEXT NOT NULL,
+                    ""SubmittedAt""     TEXT NULL,
+                    ""DurationSeconds"" INTEGER NOT NULL,
+                    ""RawScore""        INTEGER NOT NULL,
+                    ""TotalQuestions""  INTEGER NOT NULL,
+                    ""BandEstimate""    REAL NULL
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE INDEX ""IX_ReadingAttempts_OwnerUserId_StartedAt""
+                  ON ""ReadingAttempts"" (""OwnerUserId"", ""StartedAt"");");
+        }
+
+        if (!TableExists(db, "ReadingAttemptAnswers"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""ReadingAttemptAnswers"" (
+                    ""Id""                INTEGER NOT NULL CONSTRAINT ""PK_ReadingAttemptAnswers"" PRIMARY KEY AUTOINCREMENT,
+                    ""ReadingAttemptId""  INTEGER NOT NULL,
+                    ""ReadingQuestionId"" INTEGER NOT NULL,
+                    ""GivenAnswer""       TEXT NOT NULL,
+                    ""IsCorrect""         INTEGER NOT NULL,
+                    CONSTRAINT ""FK_ReadingAttemptAnswers_ReadingAttempts_ReadingAttemptId""
+                        FOREIGN KEY (""ReadingAttemptId"") REFERENCES ""ReadingAttempts"" (""Id"") ON DELETE CASCADE
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE INDEX ""IX_ReadingAttemptAnswers_ReadingAttemptId""
+                  ON ""ReadingAttemptAnswers"" (""ReadingAttemptId"");");
         }
     }
 

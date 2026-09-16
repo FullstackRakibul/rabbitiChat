@@ -106,7 +106,7 @@ watch(draftRole, (role) => {
  * the user has not saved yet. The saved state always comes from the server.
  */
 function predictBaseline(role) {
-  const general = ['chat', 'dashboard', 'todo', 'jsonto', '5lakhs', 'settings']
+  const general = ['chat', 'dashboard', 'todo', 'jsonto', '5lakhs', 'ielts', 'settings']
   const system = [...general, 'workspace', 'docs', 'search', 'sources']
   if (role === 'SystemAdmin') return tabCatalog.value.map((t) => t.key)
   if (role === 'System') return system

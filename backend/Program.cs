@@ -199,6 +199,14 @@ builder.Services.AddScoped<RabbitIC.Api.Repositories.IRbacRepository,
                            RabbitIC.Api.Repositories.RbacRepository>();
 builder.Services.AddScoped<RabbitIC.Api.Services.RbacService>();
 
+// ---- IELTS ----
+// The mistake spine is registered first because the Reading engine depends on
+// it: every wrong answer a sitting produces is logged through IMistakeService.
+builder.Services.AddScoped<RabbitIC.Api.Services.IMistakeService,
+                           RabbitIC.Api.Services.MistakeService>();
+builder.Services.AddScoped<RabbitIC.Api.Services.IReadingService,
+                           RabbitIC.Api.Services.ReadingService>();
+
 // ---- todorabbit (Kanban boards) ----
 builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
                            RabbitIC.Api.Repositories.TodoRabbitRepository>();
@@ -240,6 +248,7 @@ app.ApplicationSearchApis();
 app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();
 app.ApplicationRbacApis();
+app.ApplicationIeltsApis();
 
 
 app.UseCors();
@@ -257,6 +266,11 @@ using (var scope = app.Services.CreateScope())
     // from the first request. The seed secret is never logged.
     RbacSeeder.NormalizeExistingRoles(db);
     RbacSeeder.Run(db, app.Logger);
+
+    // Shared IELTS demo content. After RBAC so roles exist first, and idempotent
+    // by SeedKey: restarting never duplicates, and editing a seed in code
+    // updates the stored test in place.
+    RabbitIC.Api.Ielts.IeltsReadingSeeder.Run(db, app.Logger);
 
     // Warm the vector index from SQLite so retrieval works from the first request.
     var vectorIndex = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Retrieval.VectorIndex>();

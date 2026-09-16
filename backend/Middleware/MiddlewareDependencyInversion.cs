@@ -1,4 +1,4 @@
-using RabbitIC.Api.MinimalApis;
+﻿using RabbitIC.Api.MinimalApis;
 
 namespace RabbitIC.Api.Middleware
 {
@@ -61,6 +61,14 @@ namespace RabbitIC.Api.Middleware
         /// RBAC. Both groups mount under /api: /api/me/tabs for the caller's own
         /// tabs and /api/admin/rbac/* for administering other users.
         /// </summary>
+        public static WebApplication ApplicationIeltsApis(this WebApplication app)
+        {
+            var ieltsApi = app.MapGroup("/api").WithTags("IELTS");
+
+            ieltsApi.MapIeltsApis();
+            return app;
+        }
+
         public static WebApplication ApplicationRbacApis(this WebApplication app)
         {
             var rbacApi = app.MapGroup("/api").WithTags("RBAC");

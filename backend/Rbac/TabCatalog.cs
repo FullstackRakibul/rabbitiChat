@@ -1,4 +1,4 @@
-// RBAC — the tab catalogue and the role → default-tabs map.
+﻿// RBAC — the tab catalogue and the role → default-tabs map.
 //
 // Deliberately a constant map rather than a table: role baselines change when
 // the SHIPPED TAB SET changes, which is a code change anyway. Keeping it here
@@ -37,6 +37,7 @@ public static class TabCatalog
         "search",
         "jsonto",
         "5lakhs",
+        "ielts",
         "sources",
         "settings",
         RbacTab,
@@ -56,6 +57,7 @@ public static class TabCatalog
         ["search"] = "Search",
         ["jsonto"] = "JSON to ...",
         ["5lakhs"] = "5 Lakhs",
+        ["ielts"] = "IELTS",
         ["sources"] = "Sources",
         ["settings"] = "Settings",
         [RbacTab] = "Access control",
@@ -85,7 +87,7 @@ public static class TabCatalog
     /// <summary>The everyday tabs — what a plain account gets with no grants at all.</summary>
     private static readonly string[] GeneralTabs =
     {
-        "chat", "dashboard", "todo", "jsonto", "5lakhs", "settings",
+        "chat", "dashboard", "todo", "jsonto", "5lakhs", "ielts", "settings",
     };
 
     /// <summary>General plus the document/knowledge tooling.</summary>
