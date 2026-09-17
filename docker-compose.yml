@@ -16,6 +16,7 @@ services:
       dockerfile: Dockerfile
     image: mostisko:latest
     container_name: mostisko
+    user: root
 
     # One port for both the SPA and the API — same origin, so no CORS.
     ports:
@@ -31,13 +32,15 @@ services:
       # ---- Ollama ----
       # host.docker.internal reaches an Ollama running on the host machine.
       # For a LAN box use its address; on Linux add the extra_hosts entry below.
-      Ollama__Url: "${OLLAMA_URL:-http://host.docker.internal:11434}"
+      # "${OLLAMA_URL:-http://host.docker.internal:11434}" , The default is the Ollama URL for a host machine running Ollama Desktop. If you are running Ollama in a different environment, you can set the OLLAMA_URL environment variable to point to the correct URL.
+      # Ollama__Url: "${OLLAMA_URL:-http://host.docker.internal:11434}"
+      Ollama__Url: "${OLLAMA_URL:-http://192.168.61.41:11434}"
       Ollama__EmbeddingModel: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
 
       # ---- Secrets: supplied at RUN time, never in the image ----
       # Unset is not an error: the search endpoints answer 503 and the rest of
       # the app boots normally.
-      OllamaCloud__ApiKey: "${OLLAMA_CLOUD_API_KEY:-}"
+      OllamaCloud__ApiKey: "${OLLAMA_CLOUD_API_KEY:-8101000b2f304cd69aa86b394a252e7b.hzTUyMci6cVM3_EJhLfrRjw-}"
       OllamaCloud__BaseUrl: "${OLLAMA_CLOUD_BASE_URL:-https://ollama.com}"
 
       # OpenAI-compatible providers are an array in config; the double

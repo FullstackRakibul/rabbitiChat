@@ -130,7 +130,7 @@ const canSend = computed(() => props.busy || props.modelValue.trim().length > 0)
           :placeholder="placeholder"
           :disabled="disabled"
           rows="1"
-          class="max-h-[200px] w-full resize-none bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          class="max-h-50 w-full resize-none bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
           @input="onInput"
           @keydown="onKeydown"
         />
