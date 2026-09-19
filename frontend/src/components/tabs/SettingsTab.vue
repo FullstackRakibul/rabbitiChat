@@ -1,6 +1,6 @@
 <script setup>
-import { computed } from 'vue'
-import { Moon, Sun } from '@lucide/vue'
+import { ref, computed } from 'vue'
+import { Moon, Sun, Settings, BookOpen } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -13,6 +13,7 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import { useTheme } from '@/composables/useTheme'
+import MostiskoDocsPage from '@/components/mostisko-docs/MostiskoDocsPage.vue'
 
 const props = defineProps({
   username: { type: String, default: '' },
@@ -36,93 +37,129 @@ const modelValue = computed({
   get: () => props.model,
   set: (v) => emit('update:model', v),
 })
+
+/** @type {import('vue').Ref<'settings' | 'docs'>} */
+const settingsView = ref('settings')
+
+/** @type {{ id: 'settings' | 'docs', label: string, icon: object }[]} */
+const viewTabs = [
+  { id: 'settings', label: 'General',       icon: Settings },
+  { id: 'docs',     label: 'Documentation', icon: BookOpen },
+]
 </script>
 
 <template>
-  <div class="h-full overflow-y-auto p-4 sm:p-6">
-    <Card class="mx-auto w-full max-w-2xl">
-      <CardHeader>
-        <CardTitle>Settings</CardTitle>
-        <CardDescription>Session and workspace defaults.</CardDescription>
-      </CardHeader>
+  <div class="flex h-full flex-col">
+    <!-- Sub-navigation — switches between General Settings and Documentation -->
+    <div
+      class="flex shrink-0 items-center gap-1 border-b bg-background/95 px-4 py-2 backdrop-blur sm:px-6"
+    >
+      <button
+        v-for="tab in viewTabs"
+        :key="tab.id"
+        :class="[
+          'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+          'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          settingsView === tab.id
+            ? 'bg-primary text-primary-foreground shadow-sm'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        ]"
+        @click="settingsView = tab.id"
+      >
+        <component :is="tab.icon" class="h-3.5 w-3.5" />
+        {{ tab.label }}
+      </button>
+    </div>
 
-      <CardContent class="flex flex-col gap-6">
-        <!-- Account -->
-        <section class="flex flex-col gap-3">
-          <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Account
-          </p>
-          <div class="flex items-center gap-3 rounded-lg border p-3">
-            <span
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
-            >
-              {{ initials }}
-            </span>
-            <span class="flex-1 truncate text-sm font-medium">{{ username }}</span>
-            <Button variant="destructive" size="sm" @click="emit('logout')">
-              Log out
-            </Button>
-          </div>
-        </section>
+    <!-- General Settings view -->
+    <div v-if="settingsView === 'settings'" class="flex-1 overflow-y-auto p-4 sm:p-6">
+      <Card class="mx-auto w-full max-w-2xl">
+        <CardHeader>
+          <CardTitle>Settings</CardTitle>
+          <CardDescription>Session and workspace defaults.</CardDescription>
+        </CardHeader>
 
-        <Separator />
-
-        <!-- Appearance -->
-        <section class="flex flex-col gap-3">
-          <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Appearance
-          </p>
-          <div class="flex items-center gap-3 rounded-lg border p-3">
-            <component :is="isDark ? Moon : Sun" class="h-4 w-4 shrink-0 text-muted-foreground" />
-            <Label for="dark-mode" class="flex-1 cursor-pointer">Dark mode</Label>
-            <Switch id="dark-mode" v-model="isDark" />
-          </div>
-        </section>
-
-        <Separator />
-
-        <!-- Connection -->
-        <section class="flex flex-col gap-3">
-          <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Connection
-          </p>
-          <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3">
-            <span
-              :class="cn(
-                'h-2 w-2 shrink-0 rounded-full',
-                connected ? 'bg-emerald-500' : 'bg-muted-foreground/40',
-              )"
-            />
-            <span class="flex-1 text-sm">{{ status }}</span>
-            <span class="truncate text-xs text-muted-foreground">API: {{ apiBaseUrl }}</span>
-          </div>
-        </section>
-
-        <Separator />
-
-        <!-- Defaults -->
-        <section class="flex flex-col gap-3">
-          <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Defaults
-          </p>
-          <div class="flex flex-wrap gap-4">
-            <div class="flex min-w-40 flex-1 flex-col gap-2">
-              <Label>Model</Label>
-              <Select v-model="modelValue">
-                <SelectTrigger>
-                  <SelectValue placeholder="Model" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="m in models" :key="m" :value="m">
-                    {{ m }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+        <CardContent class="flex flex-col gap-6">
+          <!-- Account -->
+          <section class="flex flex-col gap-3">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Account
+            </p>
+            <div class="flex items-center gap-3 rounded-lg border p-3">
+              <span
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+              >
+                {{ initials }}
+              </span>
+              <span class="flex-1 truncate text-sm font-medium">{{ username }}</span>
+              <Button variant="destructive" size="sm" @click="emit('logout')">
+                Log out
+              </Button>
             </div>
+          </section>
 
-          </div>
-        </section>
-      </CardContent>
-    </Card>
+          <Separator />
+
+          <!-- Appearance -->
+          <section class="flex flex-col gap-3">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Appearance
+            </p>
+            <div class="flex items-center gap-3 rounded-lg border p-3">
+              <component :is="isDark ? Moon : Sun" class="h-4 w-4 shrink-0 text-muted-foreground" />
+              <Label for="dark-mode" class="flex-1 cursor-pointer">Dark mode</Label>
+              <Switch id="dark-mode" v-model="isDark" />
+            </div>
+          </section>
+
+          <Separator />
+
+          <!-- Connection -->
+          <section class="flex flex-col gap-3">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Connection
+            </p>
+            <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+              <span
+                :class="cn(
+                  'h-2 w-2 shrink-0 rounded-full',
+                  connected ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+                )"
+              />
+              <span class="flex-1 text-sm">{{ status }}</span>
+              <span class="truncate text-xs text-muted-foreground">API: {{ apiBaseUrl }}</span>
+            </div>
+          </section>
+
+          <Separator />
+
+          <!-- Defaults -->
+          <section class="flex flex-col gap-3">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Defaults
+            </p>
+            <div class="flex flex-wrap gap-4">
+              <div class="flex min-w-40 flex-1 flex-col gap-2">
+                <Label>Model</Label>
+                <Select v-model="modelValue">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="m in models" :key="m" :value="m">
+                      {{ m }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+            </div>
+          </section>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Documentation view — fills remaining space, manages its own scrolling -->
+    <MostiskoDocsPage v-else class="min-h-0 flex-1" />
   </div>
 </template>

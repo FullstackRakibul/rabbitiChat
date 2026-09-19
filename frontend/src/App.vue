@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
-  Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap
+  Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
+  Scissors
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -35,6 +36,7 @@ import IeltsTab from '@/components/tabs/IeltsTab.vue'
 import CheckGenerator from '@/components/fivelakhs/CheckGenerator.vue'
 import SearchTab from '@/components/tabs/SearchTab.vue'
 import SettingsTab from '@/components/tabs/SettingsTab.vue'
+import ComponentSplitterTab from '@/components/tabs/ComponentSplitterTab.vue'
 import RbacTab from '@/components/tabs/RbacTab.vue'
 
 const { theme, toggleTheme } = useTheme()
@@ -400,6 +402,7 @@ const ALL_TABS = [
   { id: 'jsonto', label: 'JSON to ...', icon: Table },
   { id: '5lakhs', label: '5Lakhs', icon: BadgeDollarSign },
   { id: 'ielts', label: 'IELTS', icon: GraduationCap },
+  { id: 'component-splitter', label: 'Splitter', icon: Scissors },
   { id: 'sources', label: 'Sources', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'rbac', label: 'Access', icon: ShieldCheck },
@@ -893,6 +896,10 @@ useShortcuts({
 
       <TabsContent value="ielts" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <IeltsTab />
+      </TabsContent>
+
+      <TabsContent value="component-splitter" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <ComponentSplitterTab />
       </TabsContent>
 
       <TabsContent value="sources" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

@@ -36,6 +36,7 @@ export const MODULE_ROUTES = [
   { key: 'jsonto', path: '/json-converter' },
   { key: '5lakhs', path: '/5lakhs' },
   { key: 'ielts', path: '/ielts' },
+  { key: 'component-splitter', path: '/component-splitter' },
   { key: 'sources', path: '/sources' },
   { key: 'settings', path: '/settings' },
   { key: 'rbac', path: '/access' },

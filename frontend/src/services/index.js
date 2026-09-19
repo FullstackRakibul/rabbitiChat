@@ -28,3 +28,7 @@ export {
 export {
   myTabs, searchUsers, getUser, setRole, setTabs, listTabs,
 } from './rbac.service.js'
+export {
+  parseComponent, deriveFacts, analyse as analyseComponentSplit,
+  generate as generateSplit, toPlan as splitPlanFrom,
+} from './component-splitter.service.js'
