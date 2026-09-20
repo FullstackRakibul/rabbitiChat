@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <!-- If a version fails to restore, run: dotnet add package <name> -->
+    <PackageReference Include="AngleSharp" Version="1.8.2" />
     <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
     <PackageReference Include="PdfPig" Version="0.1.15" />

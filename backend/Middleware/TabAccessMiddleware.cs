@@ -46,6 +46,7 @@ public class TabAccessMiddleware
         ("/api/context-sources", "sources"),
         ("/api/todorabbit", "todo"),
         ("/api/ielts", "ielts"),
+        ("/api/component-splitter", "component-splitter"),
     };
 
     /// <summary>

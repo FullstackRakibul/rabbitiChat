@@ -69,6 +69,18 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        /// <summary>
+        /// The Angular component splitter. Mounts under /api, which puts it
+        /// behind the "component-splitter" gate in TabAccessMiddleware.
+        /// </summary>
+        public static WebApplication ApplicationComponentSplitterApis(this WebApplication app)
+        {
+            var splitterApi = app.MapGroup("/api").WithTags("Component splitter");
+
+            splitterApi.MapComponentSplitterApis();
+            return app;
+        }
+
         public static WebApplication ApplicationRbacApis(this WebApplication app)
         {
             var rbacApi = app.MapGroup("/api").WithTags("RBAC");

@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -177,6 +177,12 @@ builder.Services.AddSingleton<RabbitIC.Api.ModelSources.IModelSourceRegistry,
 								RabbitIC.Api.ModelSources.ModelSourceRegistry>();
 builder.Services.AddSingleton<RabbitIC.Api.Services.ChatService>();
 
+// ---- Angular component splitter ----
+// The reasoner depends on ChatService only, so the splitter works with every
+// registered model source and names none of them. Both are stateless per call.
+builder.Services.AddSingleton<RabbitIC.Api.ComponentSplitter.Reasoning.SplitReasoner>();
+builder.Services.AddSingleton<RabbitIC.Api.ComponentSplitter.SplitterService>();
+
 // ---- Context sources ----
 // Connected sources and buyer profiles are one mechanism behind one interface,
 // so chat and workspace cannot drift apart in how they assemble context.
@@ -259,6 +265,7 @@ app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();
 app.ApplicationRbacApis();
 app.ApplicationIeltsApis();
+app.ApplicationComponentSplitterApis();
 
 // SPA fallback — declared AFTER every API route so it can never swallow one.
 // vue-router uses real paths (/ielts, /5lakhs), so a refresh or a deep link
