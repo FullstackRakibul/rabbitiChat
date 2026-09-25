@@ -27,6 +27,7 @@ public static class SchemaUpgrade
         EnsureDocumentTables(db);
         EnsureExtractionTables(db);
         EnsureTodoRabbitTables(db);
+        EnsureNotesTable(db);
         EnsureMessageWebSearchColumn(db);
         EnsureContextSourceTable(db);
         EnsureSearchHistoryTable(db);
@@ -484,6 +485,33 @@ public static class SchemaUpgrade
                 );");
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Cards_ColumnId"" ON ""Cards"" (""ColumnId"");");
         }
+    }
+
+    private static void EnsureNotesTable(AppDbContext db)
+    {
+        if (TableExists(db, "Notes")) return;
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE ""Notes"" (
+                ""Id""          INTEGER NOT NULL CONSTRAINT ""PK_Notes"" PRIMARY KEY AUTOINCREMENT,
+                ""OwnerUserId"" INTEGER NOT NULL,
+                ""Content""     TEXT NOT NULL,
+                ""Title""       TEXT NOT NULL,
+                ""IsPinned""    INTEGER NOT NULL,
+                ""FolderName""  TEXT NULL,
+                ""IsShared""    INTEGER NOT NULL,
+                ""ShareToken""  TEXT NULL,
+                ""SharedAt""    TEXT NULL,
+                ""CreatedAt""   TEXT NOT NULL,
+                ""UpdatedAt""   TEXT NOT NULL,
+                ""IsDeleted""   INTEGER NOT NULL,
+                ""DeletedAt""   TEXT NULL,
+                CONSTRAINT ""FK_Notes_Users_OwnerUserId""
+                    FOREIGN KEY (""OwnerUserId"") REFERENCES ""Users"" (""Id"") ON DELETE CASCADE
+            );");
+            
+        db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Notes_OwnerUserId_IsDeleted_IsPinned_UpdatedAt"" ON ""Notes"" (""OwnerUserId"", ""IsDeleted"", ""IsPinned"", ""UpdatedAt"");");
+        db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_Notes_ShareToken"" ON ""Notes"" (""ShareToken"") WHERE ""ShareToken"" IS NOT NULL;");
     }
 
     /// <summary>Flags replies that were grounded on live web results. Older files predate it.</summary>

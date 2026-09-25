@@ -218,6 +218,10 @@ builder.Services.AddScoped<RabbitIC.Api.Repositories.ITodoRabbitRepository,
 							 RabbitIC.Api.Repositories.TodoRabbitRepository>();
 builder.Services.AddScoped<RabbitIC.Api.Services.TodoRabbitService>();
 
+// ---- Notes ----
+builder.Services.AddScoped<RabbitIC.Api.Services.INoteService,
+							 RabbitIC.Api.Services.NoteService>();
+
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 	p.WithOrigins("http://localhost:5173", "http://192.168.61.41:4200",
@@ -266,6 +270,7 @@ app.ApplicationTodoRabbitApis();
 app.ApplicationRbacApis();
 app.ApplicationIeltsApis();
 app.ApplicationComponentSplitterApis();
+app.ApplicationNoteApis();
 
 // SPA fallback — declared AFTER every API route so it can never swallow one.
 // vue-router uses real paths (/ielts, /5lakhs), so a refresh or a deep link
@@ -317,6 +322,10 @@ using (var scope = app.Services.CreateScope())
 	var vectorIndex = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Retrieval.VectorIndex>();
 	vectorIndex.Load(db.EmbeddingChunks.AsNoTracking());
 	app.Logger.LogInformation("VectorIndex loaded with {Count} chunks.", vectorIndex.Count);
+	
+	// Purge old deleted notes
+	var noteService = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Services.INoteService>();
+	noteService.PurgeOldDeletedNotesAsync().GetAwaiter().GetResult();
 }
 
 

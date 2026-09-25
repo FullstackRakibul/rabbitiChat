@@ -40,6 +40,7 @@ export const MODULE_ROUTES = [
   { key: 'sources', path: '/sources' },
   { key: 'settings', path: '/settings' },
   { key: 'rbac', path: '/access' },
+  { key: 'notes', path: '/notes' },
 ]
 
 /** Tab key → URL path. */
@@ -71,6 +72,8 @@ export const router = createRouter({
       component: Passthrough,
       meta: { tab: r.key },
     })),
+    { path: '/notes/:id', name: 'notes-detail', component: Passthrough, meta: { tab: 'notes' } },
+    { path: '/n/:token', name: 'public-note', component: Passthrough },
     // Anything else lands on the dashboard rather than showing a dead screen.
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
@@ -104,6 +107,9 @@ router.beforeEach((to) => {
 
   const { tabs, fallback } = resolvePermissions()
   if (!tabs) return true                       // permissions not loaded yet
+
+  // Allow public note endpoint to pass without checking tabs
+  if (to.name === 'public-note') return true
 
   const wanted = to.meta?.tab
   if (!wanted) return true                     // redirects and the catch-all

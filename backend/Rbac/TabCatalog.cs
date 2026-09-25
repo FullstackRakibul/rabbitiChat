@@ -41,6 +41,7 @@ public static class TabCatalog
         "component-splitter",
         "sources",
         "settings",
+        "notes",
         RbacTab,
     };
 
@@ -62,6 +63,7 @@ public static class TabCatalog
         ["component-splitter"] = "Component splitter",
         ["sources"] = "Sources",
         ["settings"] = "Settings",
+        ["notes"] = "Notes",
         [RbacTab] = "Access control",
     };
 
@@ -106,7 +108,7 @@ public static class TabCatalog
     /// </summary>
     private static readonly string[] GeneralTabs =
     {
-        "dashboard", "todo", "jsonto", "5lakhs", "sources", "settings",
+        "dashboard", "todo", "jsonto", "5lakhs", "notes", "sources", "settings",
     };
 
     /// <summary>

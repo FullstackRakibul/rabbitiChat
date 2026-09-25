@@ -32,3 +32,8 @@ export {
   parseComponent, deriveFacts, analyse as analyseComponentSplit,
   generate as generateSplit, toPlan as splitPlanFrom,
 } from './component-splitter.service.js'
+export {
+  listNotes, createNote, getNote, updateNote,
+  softDeleteNote, restoreNote, permanentDeleteNote,
+  shareNote, unshareNote, getPublicNote
+} from './notes.service.js'

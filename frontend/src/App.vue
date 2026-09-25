@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors
+  Scissors, StickyNote
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -38,6 +38,8 @@ import SearchTab from '@/components/tabs/SearchTab.vue'
 import SettingsTab from '@/components/tabs/SettingsTab.vue'
 import ComponentSplitterTab from '@/components/tabs/ComponentSplitterTab.vue'
 import RbacTab from '@/components/tabs/RbacTab.vue'
+import NotesTab from '@/components/tabs/NotesTab.vue'
+import PublicNote from '@/components/notes/PublicNote.vue'
 
 const { theme, toggleTheme } = useTheme()
 
@@ -386,6 +388,8 @@ const activeTab = computed({
   },
 })
 
+const isPublicNote = computed(() => route.name === 'public-note')
+
 /**
  * Every tab this build can render, with the id the backend knows it by. Which of
  * these a given user actually sees is decided by the server (see `allowedTabs`),
@@ -406,6 +410,7 @@ const ALL_TABS = [
   { id: 'sources', label: 'Sources', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'rbac', label: 'Access', icon: ShieldCheck },
+  { id: 'notes', label: 'Notes', icon: StickyNote },
 ]
 
 // ---- Permissions ----
@@ -793,6 +798,16 @@ const commands = computed(() => [
     run: () => goTab('workspace'),
   },
   {
+    id: 'action:new-note', label: 'New note', group: 'Actions', icon: Plus,
+    keys: 'mod + N',
+    run: () => {
+      goTab('notes');
+      setTimeout(() => {
+        notesTabRef.value?.newNote();
+      }, 100);
+    },
+  },
+  {
     id: 'action:sidebar', label: 'Toggle sidebar', group: 'Actions', icon: PanelLeft,
     keys: 'mod + B', run: () => toggleSidebar(),
   },
@@ -819,17 +834,22 @@ useShortcuts({
   },
   onJump: goTab,
 })
+
+const notesTabRef = ref(null)
 </script>
 
 <template>
-  <!-- Login gate -->
-  <LoginGate v-if="!loggedIn" v-model:username="loginUser" v-model:secret="loginSecret" :busy="loginBusy"
-    :error="loginError" @submit="doLogin" />
+  <PublicNote v-if="isPublicNote" />
+  
+  <template v-else>
+    <!-- Login gate -->
+    <LoginGate v-if="!loggedIn" v-model:username="loginUser" v-model:secret="loginSecret" :busy="loginBusy"
+      :error="loginError" @submit="doLogin" />
 
-  <!-- App. Tabs is the outermost element so the header's tab bar and the
-       panels below share one root; unmount-on-hide=false keeps every panel
-       alive across switches, so a streaming reply survives navigating away. -->
-  <Tabs v-else v-model="activeTab" :unmount-on-hide="false" class="contents">
+    <!-- App. Tabs is the outermost element so the header's tab bar and the
+         panels below share one root; unmount-on-hide=false keeps every panel
+         alive across switches, so a streaming reply survives navigating away. -->
+    <Tabs v-else v-model="activeTab" :unmount-on-hide="false" class="contents">
     <AppShell :tabs="tabs" :active-tab="activeTab" :theme="theme" :connected="connected" :status="status"
       :has-sidebar="tabHasSidebar" :sidebar-open="!sidebarCollapsed"
       v-model:mobile-open="mobileSidebarOpen"
@@ -918,6 +938,10 @@ useShortcuts({
           :status="status" :connected="connected" :api-base-url="environment.apiBaseUrl" :models="models"
           @logout="logout" />
       </TabsContent>
+      
+      <TabsContent value="notes" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <NotesTab ref="notesTabRef" />
+      </TabsContent>
     </AppShell>
 
     <CommandPalette v-model:open="paletteOpen" :commands="commands" @run="runCommand" />
@@ -929,4 +953,5 @@ useShortcuts({
     <ExtractionReview v-if="reviewDoc" :doc="reviewDoc" :model="model"
       @close="reviewDoc = null" @confirmed="onReviewConfirmed" />
   </Tabs>
+  </template>
 </template>

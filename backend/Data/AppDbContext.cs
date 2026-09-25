@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
 
@@ -37,6 +37,8 @@ public class AppDbContext : DbContext
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<BoardColumn> Columns => Set<BoardColumn>();
     public DbSet<Card> Cards => Set<Card>();
+
+    public DbSet<Note> Notes => Set<Note>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -145,5 +147,18 @@ public class AppDbContext : DbContext
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);
+
+        b.Entity<Note>()
+            .HasOne(n => n.Owner)
+            .WithMany()
+            .HasForeignKey(n => n.OwnerUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+            
+        b.Entity<Note>().HasIndex(n => new { n.OwnerUserId, n.IsDeleted, n.IsPinned, n.UpdatedAt });
+        
+        b.Entity<Note>()
+            .HasIndex(n => n.ShareToken)
+            .IsUnique()
+            .HasFilter("\"ShareToken\" IS NOT NULL");
     }
 }
