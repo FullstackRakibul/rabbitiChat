@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote
+  Scissors, StickyNote, Activity
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -40,6 +40,7 @@ import ComponentSplitterTab from '@/components/tabs/ComponentSplitterTab.vue'
 import RbacTab from '@/components/tabs/RbacTab.vue'
 import NotesTab from '@/components/tabs/NotesTab.vue'
 import PublicNote from '@/components/notes/PublicNote.vue'
+import LogsTab from '@/components/tabs/LogsTab.vue'
 
 const { theme, toggleTheme } = useTheme()
 
@@ -411,6 +412,7 @@ const ALL_TABS = [
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'rbac', label: 'Access', icon: ShieldCheck },
   { id: 'notes', label: 'Notes', icon: StickyNote },
+  { id: 'logs', label: 'Logs', icon: Activity },
 ]
 
 // ---- Permissions ----
@@ -941,6 +943,10 @@ const notesTabRef = ref(null)
       
       <TabsContent value="notes" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <NotesTab ref="notesTabRef" />
+      </TabsContent>
+      
+      <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <LogsTab />
       </TabsContent>
     </AppShell>
 

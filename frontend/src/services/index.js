@@ -37,3 +37,7 @@ export {
   softDeleteNote, restoreNote, permanentDeleteNote,
   shareNote, unshareNote, getPublicNote
 } from './notes.service.js'
+export {
+  listActivityLogs, listAuditLogs, getActivityLog, getCorrelation,
+  getSystemInfo, getLogStats, openLogStream, logClientEvent, flushClientEvents
+} from './logs.service.js'
