@@ -42,6 +42,7 @@ public static class TabCatalog
         "sources",
         "settings",
         "notes",
+        "logs",
         RbacTab,
     };
 
@@ -64,6 +65,7 @@ public static class TabCatalog
         ["sources"] = "Sources",
         ["settings"] = "Settings",
         ["notes"] = "Notes",
+        ["logs"] = "Logs",
         [RbacTab] = "Access control",
     };
 
@@ -119,6 +121,14 @@ public static class TabCatalog
     private static readonly string[] SystemExtraTabs =
     {
         "chat", "workspace", "docs", "search", "ielts", "component-splitter",
+    };
+
+    /// <summary>
+    /// Tabs available only to SystemAdmin. Not additive from lower tiers.
+    /// </summary>
+    private static readonly string[] SystemAdminOnlyTabs =
+    {
+        "logs",
     };
 
     /// <summary>

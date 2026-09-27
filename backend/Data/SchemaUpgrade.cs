@@ -28,6 +28,7 @@ public static class SchemaUpgrade
         EnsureExtractionTables(db);
         EnsureTodoRabbitTables(db);
         EnsureNotesTable(db);
+        EnsureObservabilityTables(db);
         EnsureMessageWebSearchColumn(db);
         EnsureContextSourceTable(db);
         EnsureSearchHistoryTable(db);
@@ -512,6 +513,61 @@ public static class SchemaUpgrade
             
         db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Notes_OwnerUserId_IsDeleted_IsPinned_UpdatedAt"" ON ""Notes"" (""OwnerUserId"", ""IsDeleted"", ""IsPinned"", ""UpdatedAt"");");
         db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_Notes_ShareToken"" ON ""Notes"" (""ShareToken"") WHERE ""ShareToken"" IS NOT NULL;");
+    }
+
+    private static void EnsureObservabilityTables(AppDbContext db)
+    {
+        if (!TableExists(db, "ActivityLogs"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""ActivityLogs"" (
+                    ""Id""             INTEGER NOT NULL CONSTRAINT ""PK_ActivityLogs"" PRIMARY KEY AUTOINCREMENT,
+                    ""TimestampUtc""   TEXT NOT NULL,
+                    ""Level""          TEXT NOT NULL,
+                    ""Category""       TEXT NOT NULL,
+                    ""CorrelationId""  TEXT NULL,
+                    ""UserId""         INTEGER NULL,
+                    ""UserName""       TEXT NULL,
+                    ""Method""         TEXT NULL,
+                    ""Path""           TEXT NULL,
+                    ""QueryString""    TEXT NULL,
+                    ""StatusCode""     INTEGER NULL,
+                    ""DurationMs""     INTEGER NULL,
+                    ""ClientIp""       TEXT NULL,
+                    ""UserAgent""      TEXT NULL,
+                    ""Module""         TEXT NULL,
+                    ""EventName""      TEXT NULL,
+                    ""Message""        TEXT NULL,
+                    ""PropertiesJson"" TEXT NULL,
+                    ""Environment""    TEXT NOT NULL,
+                    ""MachineName""    TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ActivityLogs_TimestampUtc"" ON ""ActivityLogs"" (""TimestampUtc"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ActivityLogs_Category_TimestampUtc"" ON ""ActivityLogs"" (""Category"", ""TimestampUtc"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ActivityLogs_CorrelationId"" ON ""ActivityLogs"" (""CorrelationId"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ActivityLogs_UserId_TimestampUtc"" ON ""ActivityLogs"" (""UserId"", ""TimestampUtc"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ActivityLogs_StatusCode_TimestampUtc"" ON ""ActivityLogs"" (""StatusCode"", ""TimestampUtc"");");
+        }
+
+        if (!TableExists(db, "AuditLogs"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""AuditLogs"" (
+                    ""Id""             INTEGER NOT NULL CONSTRAINT ""PK_AuditLogs"" PRIMARY KEY AUTOINCREMENT,
+                    ""TimestampUtc""   TEXT NOT NULL,
+                    ""CorrelationId""  TEXT NULL,
+                    ""UserId""         INTEGER NULL,
+                    ""EntityName""     TEXT NOT NULL,
+                    ""EntityKey""      TEXT NOT NULL,
+                    ""Action""         TEXT NOT NULL,
+                    ""ChangesJson""    TEXT NULL,
+                    ""Environment""    TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_AuditLogs_TimestampUtc"" ON ""AuditLogs"" (""TimestampUtc"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_AuditLogs_EntityName_EntityKey"" ON ""AuditLogs"" (""EntityName"", ""EntityKey"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_AuditLogs_CorrelationId"" ON ""AuditLogs"" (""CorrelationId"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_AuditLogs_UserId"" ON ""AuditLogs"" (""UserId"");");
+        }
     }
 
     /// <summary>Flags replies that were grounded on live web results. Older files predate it.</summary>

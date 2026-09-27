@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
+using RabbitIC.Api.Observability;
 
 namespace RabbitIC.Api.Data;
 
@@ -39,6 +40,17 @@ public class AppDbContext : DbContext
     public DbSet<Card> Cards => Set<Card>();
 
     public DbSet<Note> Notes => Set<Note>();
+
+    // ---- Observability ----
+    public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
+    public DbSet<AuditLog>    AuditLogs    => Set<AuditLog>();
+
+    protected override void OnConfiguring(DbContextOptionsBuilder options)
+    {
+        // Add the audit interceptor when it is available in DI.
+        // The interceptor is resolved lazily so it does not circularly depend on the context.
+        base.OnConfiguring(options);
+    }
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -160,5 +172,17 @@ public class AppDbContext : DbContext
             .HasIndex(n => n.ShareToken)
             .IsUnique()
             .HasFilter("\"ShareToken\" IS NOT NULL");
+
+        // ---- Observability indexes ----
+        b.Entity<ActivityLog>().HasIndex(a => a.TimestampUtc);
+        b.Entity<ActivityLog>().HasIndex(a => new { a.Category, a.TimestampUtc });
+        b.Entity<ActivityLog>().HasIndex(a => a.CorrelationId);
+        b.Entity<ActivityLog>().HasIndex(a => new { a.UserId, a.TimestampUtc });
+        b.Entity<ActivityLog>().HasIndex(a => new { a.StatusCode, a.TimestampUtc });
+
+        b.Entity<AuditLog>().HasIndex(a => a.TimestampUtc);
+        b.Entity<AuditLog>().HasIndex(a => new { a.EntityName, a.EntityKey });
+        b.Entity<AuditLog>().HasIndex(a => a.CorrelationId);
+        b.Entity<AuditLog>().HasIndex(a => a.UserId);
     }
 }

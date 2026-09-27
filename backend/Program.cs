@@ -5,7 +5,9 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Middleware;
+using RabbitIC.Api.MinimalApis;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Observability;
 using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Retrieval;
 
@@ -37,8 +39,23 @@ if (!string.IsNullOrEmpty(dbDirectory))
 
 var sqliteConnectionString = sqliteBuilder.ToString();
 
+// ---- Observability — must be first so the interceptor can be added to EF ----
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<IRedactor, Redactor>();
+builder.Services.AddSingleton<ILogQueue, BoundedLogQueue>();
+builder.Services.AddSingleton<LogStreamBroadcaster>();
+builder.Services.AddScoped<AuditInterceptor>();
+builder.Services.AddScoped<ActivityLogQueryService>();
+builder.Services.AddHostedService<LogWriterBackgroundService>();
+
 // ---- Services ----
-builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite(sqliteConnectionString));
+builder.Services.AddDbContext<AppDbContext>((sp, o) =>
+{
+    o.UseSqlite(sqliteConnectionString);
+    // Wire the EF audit interceptor so every SaveChanges produces audit rows.
+    var interceptor = sp.GetRequiredService<AuditInterceptor>();
+    o.AddInterceptors(interceptor);
+});
 
 
 builder.Services.AddHttpClient("ollama", c =>
@@ -258,6 +275,8 @@ app.UseStaticFiles();
 
 // RBAC enforcement — runs ahead of every endpoint below, so a user without a
 // tab is refused there regardless of what the UI chose to render.
+app.UseCorrelation();         // X-Correlation-Id on every request
+app.UseRequestLogging();      // ActivityLog entry after response completes
 app.UseTabAccess();
 
 app.ApplicationPublicApis();
@@ -271,6 +290,9 @@ app.ApplicationRbacApis();
 app.ApplicationIeltsApis();
 app.ApplicationComponentSplitterApis();
 app.ApplicationNoteApis();
+
+// Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
+LogEndpoints.MapLogApis(app);
 
 // SPA fallback — declared AFTER every API route so it can never swallow one.
 // vue-router uses real paths (/ielts, /5lakhs), so a refresh or a deep link
@@ -326,6 +348,22 @@ using (var scope = app.Services.CreateScope())
 	// Purge old deleted notes
 	var noteService = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Services.INoteService>();
 	noteService.PurgeOldDeletedNotesAsync().GetAwaiter().GetResult();
+
+	// Startup system log — environment, version, DB provider/name, .NET version.
+	// Never logs the connection string or credentials.
+	var startupQueue = scope.ServiceProvider.GetRequiredService<ILogQueue>();
+	var startupEnv   = app.Environment.EnvironmentName;
+	var asm          = System.Reflection.Assembly.GetExecutingAssembly();
+	var dbNamePart   = Path.GetFileName(sqliteBuilder.DataSource);
+	startupQueue.Enqueue(new RabbitIC.Api.Models.ActivityLog
+	{
+		TimestampUtc = DateTime.UtcNow,
+		Level        = "Information",
+		Category     = "system",
+		Message      = $"App started. Env={startupEnv} · DB={dbNamePart} · .NET={System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription} · v={asm.GetName().Version}",
+		Environment  = startupEnv,
+		MachineName  = System.Net.Dns.GetHostName(),
+	});
 }
 
 
