@@ -41,6 +41,7 @@ export const MODULE_ROUTES = [
   { key: 'settings', path: '/settings' },
   { key: 'rbac', path: '/access' },
   { key: 'notes', path: '/notes' },
+  { key: 'logs', path: '/logs' },
 ]
 
 /** Tab key → URL path. */

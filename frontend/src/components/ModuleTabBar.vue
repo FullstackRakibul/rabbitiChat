@@ -1,214 +1,292 @@
 <script setup>
 /**
- * The module tab bar: an animated, responsive, keyboard-accessible row of tabs
- * that drives routing.
+ * Module tab bar — a recessed pill track with a raised, sliding active pill.
  *
- * Three things it has to get right at once:
+ * Drop-in for AppShell: same props (`tabs`, `modelValue`). It renders reka's
+ * TabsList / TabsTrigger / TabsIndicator, so it plugs into the <Tabs> root that
+ * App.vue already wraps the whole app in. Clicking a trigger updates that root's
+ * v-model (activeTab → router), exactly as before. Keyboard support (arrows, Home,
+ * End) and ARIA come from reka.
  *
- *  1. ANIMATION — a single pill slides between tabs. It is one absolutely
- *     positioned element moved with `transform: translate3d` and scaled on X,
- *     so the browser animates it on the compositor; animating left/width would
- *     relayout the row on every frame. Under `prefers-reduced-motion` the
- *     transition is dropped and the pill simply appears in place.
- *
- *  2. RESPONSIVE — the row scrolls horizontally with scroll-snap rather than
- *     wrapping, so it degrades cleanly to 320px instead of breaking into a
- *     second line. The active tab is scrolled into view when it changes, and
- *     edge fades hint that there is more to reach.
- *
- *  3. ACCESSIBLE — reka-ui's Tabs primitives supply the roving tabindex, arrow
- *     keys, Home/End, `role="tab"` and `aria-selected`; this component adds
- *     visible focus rings and touch-sized hit targets. Labels stay readable at
- *     every width (icons never become the only affordance on mobile, which
- *     would strand a screen-reader user with an unlabelled control).
+ * Responsive "slider": when the modules don't fit, the track scrolls sideways
+ * (swipe, trackpad, or mouse wheel), soft edge fades show there is more, arrow
+ * buttons appear on pointer devices, and the active tab is kept centred. On
+ * phones, inactive tabs collapse to icon-only; the active one keeps its label.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { cn } from '@/lib/utils'
+import { TabsIndicator, TabsList, TabsTrigger } from 'reka-ui'
+import { ChevronLeft, ChevronRight } from '@lucide/vue'
 
 const props = defineProps({
-  /** [{ id, label, icon }] — already filtered to what this user may see. */
-  tabs: { type: Array, default: () => [] },
-  /** The active tab id. */
-  modelValue: { type: String, default: '' },
+  tabs: { type: Array, default: () => [] },         // [{ id, label, icon }]
+  modelValue: { type: String, default: '' },        // active tab id (for centring)
 })
 
-/** The scroller and the per-tab elements, for measuring the indicator. */
-const scroller = ref(null)
-const triggerEls = ref(new Map())
+const list = ref(null)            // TabsList component instance
+const canLeft = ref(false)
+const canRight = ref(false)
+const ready = ref(false)          // no slide-in animation on first paint
 
-/** Indicator geometry in pixels, relative to the scroller's content box. */
-const indicator = ref({ x: 0, width: 0, ready: false })
-
-/**
- * Honour the OS "reduce motion" setting. Read once and kept live: a user can
- * change it while the app is open, and the bar should respond without a reload.
- */
-const reduceMotion = ref(false)
-let motionQuery = null
-function syncMotionPreference(e) {
-  reduceMotion.value = e.matches
-}
-
-/** Whether the row actually overflows — drives the edge fades. */
-const overflowing = ref(false)
-const atStart = ref(true)
-const atEnd = ref(false)
-
-function setTriggerRef(id, el) {
-  // reka-ui hands back the component instance; unwrap to the DOM node.
-  const node = el?.$el ?? el
-  if (node) triggerEls.value.set(id, node)
-  else triggerEls.value.delete(id)
-}
-
-/**
- * Measure the active tab and move the pill onto it. Called after any change
- * that can move a tab: selection, tab-set changes, resize, font load.
- */
-function measure() {
-  const el = triggerEls.value.get(props.modelValue)
-  const box = scroller.value
-  if (!el || !box) {
-    indicator.value = { ...indicator.value, ready: false }
-    return
-  }
-
-  // offsetLeft is relative to the scrolling content, so the pill travels with
-  // the row when it scrolls instead of needing a scroll-position correction.
-  indicator.value = { x: el.offsetLeft, width: el.offsetWidth, ready: true }
-  updateEdges()
-}
+const el = () => list.value?.$el ?? null
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
 function updateEdges() {
-  const box = scroller.value
-  if (!box) return
-  const max = box.scrollWidth - box.clientWidth
-  overflowing.value = max > 1
-  atStart.value = box.scrollLeft <= 1
-  atEnd.value = box.scrollLeft >= max - 1
+  const e = el()
+  if (!e) return
+  canLeft.value = e.scrollLeft > 1
+  canRight.value = e.scrollLeft + e.clientWidth < e.scrollWidth - 1
 }
 
-/** Keep the selected tab visible when selection moves via keyboard or routing. */
-function scrollActiveIntoView() {
-  const el = triggerEls.value.get(props.modelValue)
-  if (!el) return
-  el.scrollIntoView({
-    behavior: reduceMotion.value ? 'auto' : 'smooth',
-    block: 'nearest',
-    inline: 'nearest',
-  })
+/** Bring the active trigger to the middle of the track (or as close as it can go). */
+function centerActive(instant = false) {
+  const e = el()
+  const t = e?.querySelector('[role="tab"][data-state="active"]')
+  if (!e || !t || e.scrollWidth <= e.clientWidth) return
+  const left = t.offsetLeft - (e.clientWidth - t.offsetWidth) / 2
+  e.scrollTo({ left, behavior: instant || reduceMotion() ? 'auto' : 'smooth' })
 }
 
-let resizeObserver = null
+function scrollByPage(dir) {
+  const e = el()
+  if (!e) return
+  e.scrollBy({ left: dir * e.clientWidth * 0.7, behavior: reduceMotion() ? 'auto' : 'smooth' })
+}
 
-onMounted(() => {
-  motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-  reduceMotion.value = motionQuery.matches
-  motionQuery.addEventListener('change', syncMotionPreference)
+/** Vertical wheel scrolls the strip sideways — only when it actually overflows. */
+function onWheel(ev) {
+  const e = el()
+  if (!e || e.scrollWidth <= e.clientWidth) return
+  if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return   // trackpad already horizontal
+  e.scrollLeft += ev.deltaY
+  ev.preventDefault()
+}
 
-  // A ResizeObserver catches the cases a window resize listener misses: the
-  // sidebar collapsing, a font swapping in, the row itself changing width.
-  if (scroller.value && 'ResizeObserver' in window) {
-    resizeObserver = new ResizeObserver(() => measure())
-    resizeObserver.observe(scroller.value)
-    for (const el of triggerEls.value.values()) resizeObserver.observe(el)
-  }
+/** Keyboard focus moving along the strip keeps the focused tab visible. */
+function onFocusIn(ev) {
+  const t = ev.target.closest?.('[role="tab"]')
+  t?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduceMotion() ? 'auto' : 'smooth' })
+}
 
-  nextTick(measure)
+let ro
+onMounted(async () => {
+  await nextTick()
+  const e = el()
+  if (!e) return
+  e.addEventListener('scroll', updateEdges, { passive: true })
+  e.addEventListener('wheel', onWheel, { passive: false })
+  ro = new ResizeObserver(() => { updateEdges() })
+  ro.observe(e)
+  document.fonts?.ready.then(() => { updateEdges(); centerActive(true) })
+  centerActive(true)
+  updateEdges()
+  // Two frames: let reka place the indicator first, then turn transitions on.
+  requestAnimationFrame(() => requestAnimationFrame(() => { ready.value = true }))
 })
-
 onBeforeUnmount(() => {
-  motionQuery?.removeEventListener('change', syncMotionPreference)
-  resizeObserver?.disconnect()
+  const e = el()
+  e?.removeEventListener('scroll', updateEdges)
+  e?.removeEventListener('wheel', onWheel)
+  ro?.disconnect()
 })
 
-// Re-measure whenever the selection or the permitted tab set changes.
-watch(() => props.modelValue, async () => {
-  await nextTick()
-  measure()
-  scrollActiveIntoView()
-})
+watch(() => props.modelValue, () => nextTick(() => centerActive()))
+watch(() => props.tabs.length, () => nextTick(() => { updateEdges(); centerActive(true) }))
 
-watch(() => props.tabs.map((t) => t.id).join(','), async () => {
-  await nextTick()
-  measure()
-})
-
-/**
- * The pill's transform. A single translate+scale keeps it on the compositor:
- * the element is 1px wide and scaled to the tab's width, so no layout property
- * ever animates.
- */
-const indicatorStyle = computed(() => ({
-  transform: `translate3d(${indicator.value.x}px, 0, 0) scaleX(${indicator.value.width})`,
-  opacity: indicator.value.ready ? '1' : '0',
-  transition: reduceMotion.value
-    ? 'none'
-    : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms linear',
+const fade = computed(() => ({
+  'fade-left': canLeft.value,
+  'fade-right': canRight.value,
 }))
 </script>
 
 <template>
-  <div class="relative min-w-0 flex-1">
-    <!-- Edge fades: only shown on the side that has more content. -->
-    <div
-      v-show="overflowing && !atStart"
-      aria-hidden="true"
-      class="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-background to-transparent"
-    />
-    <div
-      v-show="overflowing && !atEnd"
-      aria-hidden="true"
-      class="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background to-transparent"
-    />
+  <div class="module-tabs relative flex min-w-0 flex-1 items-center" :data-ready="ready || undefined">
+    <!-- Permissions not loaded yet: quiet placeholders, never a guessed tab set. -->
+    <div v-if="!tabs.length" class="track flex h-10 w-full items-center gap-1 rounded-full p-1" aria-hidden="true">
+      <span v-for="n in 5" :key="n" class="h-8 w-24 shrink-0 animate-pulse rounded-full bg-foreground/5" />
+    </div>
 
-    <div
-      ref="scroller"
-      class="module-tabbar-scroller overflow-x-auto overflow-y-hidden"
-      @scroll.passive="updateEdges"
-    >
-      <TabsList
-        class="relative h-auto w-max justify-start gap-0.5 bg-transparent p-0"
-      >
-        <!-- The sliding pill. Sits behind the triggers and is never focusable. -->
-        <span
-          aria-hidden="true"
-          class="pointer-events-none absolute bottom-0 left-0 top-0 z-0 w-px origin-left rounded-md bg-muted"
-          :style="indicatorStyle"
-        />
+    <template v-else>
+      <button type="button" class="edge-btn left-0" :class="{ 'is-on': canLeft }" tabindex="-1" aria-hidden="true"
+        @click="scrollByPage(-1)">
+        <ChevronLeft class="size-4" />
+      </button>
 
-        <TabsTrigger
-          v-for="t in tabs"
-          :key="t.id"
-          :ref="(el) => setTriggerRef(t.id, el)"
-          :value="t.id"
-          class="relative z-10 h-9 shrink-0 snap-start scroll-mx-2 px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none sm:px-3"
-        >
-          <component :is="t.icon" />
-          <span class="whitespace-nowrap">{{ t.label }}</span>
+      <TabsList ref="list" aria-label="Modules" data-testid="app-header-tabs"
+        class="track scroller relative flex h-10 w-full items-center gap-0.5 overflow-x-auto overflow-y-hidden rounded-full p-1"
+        :class="fade" @focusin="onFocusIn">
+        <TabsIndicator data-testid="app-tabs-indicator" class="pill" />
+
+        <TabsTrigger v-for="t in tabs" :key="t.id" :value="t.id" :data-tab-key="t.id" :title="t.label"
+          class="trigger group relative z-[1] inline-flex h-8 shrink-0 grow items-center justify-center gap-2 whitespace-nowrap rounded-full px-3.5 text-sm font-medium text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=active]:font-semibold data-[state=active]:text-[var(--pill-fg)] max-sm:px-2.5">
+          <component :is="t.icon" class="size-[18px] shrink-0 transition-transform duration-300 group-active:scale-90"
+            :stroke-width="1.75" />
+          <span class="label">{{ t.label }}</span>
         </TabsTrigger>
       </TabsList>
-    </div>
+
+      <button type="button" class="edge-btn right-0" :class="{ 'is-on': canRight }" tabindex="-1" aria-hidden="true"
+        @click="scrollByPage(1)">
+        <ChevronRight class="size-4" />
+      </button>
+    </template>
   </div>
 </template>
 
 <style scoped>
-/*
- * Scroll snapping makes a flicked row settle on a tab rather than mid-label.
- * The scrollbar itself is hidden: the edge fades already signal overflow, and a
- * visible bar under a 36px-tall row is mostly noise.
- */
-.module-tabbar-scroller {
-  scroll-snap-type: x proximity;
+/* NOTE: dark rules use :global(.dark .module-tabs …) as ONE selector. Vue compiles
+   `:global(.dark) .x` to just `.dark` (it drops `.x`), which would restyle <html>.
+
+   Black & white theme through the existing shadcn tokens:
+   light → off-white recessed track, white raised pill, black text
+   dark  → near-black recessed track, white raised pill, black text (true B/W inversion) */
+.module-tabs {
+  --track-bg: color-mix(in oklab, var(--muted) 88%, var(--foreground) 3%);
+  --pill-bg: var(--background);
+  --pill-fg: var(--foreground);
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  /* soft "settle" curve */
+  --dur: 420ms;
+}
+
+:global(.dark .module-tabs) {
+  --track-bg: color-mix(in oklab, var(--muted) 70%, black 30%);
+  --pill-bg: var(--foreground);
+  --pill-fg: var(--background);
+}
+
+/* Depth: the track is pressed in, the pill sits on top of it. */
+.track {
+  background: var(--track-bg);
+  box-shadow:
+    inset 0 1px 2px rgb(0 0 0 / .07),
+    inset 0 0 0 1px rgb(0 0 0 / .035);
+}
+
+:global(.dark .module-tabs .track) {
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / .6), inset 0 0 0 1px rgb(255 255 255 / .05);
+}
+
+.pill {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  height: calc(100% - 8px);
+  width: var(--reka-tabs-indicator-size);
+  transform: translateX(var(--reka-tabs-indicator-position));
+  border-radius: 9999px;
+  background: var(--pill-bg);
+  box-shadow:
+    0 1px 1px rgb(0 0 0 / .06),
+    0 2px 6px -1px rgb(0 0 0 / .10),
+    0 6px 14px -6px rgb(0 0 0 / .18),
+    inset 0 1px 0 rgb(255 255 255 / .7);
+  pointer-events: none;
+}
+
+:global(.dark .module-tabs .pill) {
+  box-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 6px 16px -6px rgb(0 0 0 / .8), inset 0 -1px 0 rgb(0 0 0 / .08);
+}
+
+[data-ready] .pill {
+  transition: transform var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+
+.trigger {
+  transition: color 200ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The slider itself: hidden scrollbar, gentle snapping, fades at the edges that have more. */
+.scroller {
   scrollbar-width: none;
-  -ms-overflow-style: none;
-  /* Momentum scrolling on touch, and no vertical rubber-banding. */
-  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 2.5rem;
   overscroll-behavior-x: contain;
 }
 
-.module-tabbar-scroller::-webkit-scrollbar {
+.scroller::-webkit-scrollbar {
   display: none;
+}
+
+.scroller> :deep([role="tab"]) {
+  scroll-snap-align: center;
+}
+
+.fade-left {
+  --fl: 28px;
+}
+
+.fade-right {
+  --fr: 28px;
+}
+
+.fade-left,
+.fade-right {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent 100%);
+}
+
+/* Arrow buttons: pointer devices only, fade in when that side has more tabs. */
+.edge-btn {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  display: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-top: -14px;
+  border-radius: 9999px;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .15);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms var(--ease);
+}
+
+.edge-btn.left-0 {
+  transform: translateX(-4px);
+}
+
+.edge-btn.right-0 {
+  transform: translateX(4px);
+}
+
+.edge-btn.is-on {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .edge-btn {
+    display: grid;
+  }
+}
+
+/* Phones: inactive tabs are icon-only; the active tab keeps its label. */
+@media (max-width: 639px) {
+  .trigger[data-state="inactive"] .label {
+    display: none;
+  }
+
+  .trigger {
+    flex-grow: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  [data-ready] .pill,
+  .trigger,
+  .edge-btn,
+  .trigger :deep(svg) {
+    transition: none !important;
+  }
+
+  .scroller {
+    scroll-behavior: auto;
+  }
 }
 </style>

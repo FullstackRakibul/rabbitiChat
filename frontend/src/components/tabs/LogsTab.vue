@@ -43,12 +43,28 @@ async function loadStats() {
 const activeTab = ref('live') // 'live' | 'history' | 'audit' | 'stats'
 
 // ---- Filters ----
-const filterCategory = ref('')
-const filterLevel    = ref('')
-const filterStatus   = ref('')
+//
+// The "no filter" value is the sentinel ALL, not an empty string.
+//
+// reka-ui reserves '' on a Select: it is how the component is told to clear its
+// selection and fall back to the placeholder, so a <SelectItem value=""> throws
+// ("A <SelectItem /> must have a value prop that is not an empty string").
+// A named sentinel keeps an explicit "All" row selectable, and `filterValue()`
+// turns it back into undefined at the one place the API is called — so the wire
+// format is unchanged: absent means unfiltered.
+const ALL = 'all'
+
+const filterCategory = ref(ALL)
+const filterLevel    = ref(ALL)
+const filterStatus   = ref(ALL)
 const filterModule   = ref('')
 const filterPath     = ref('')
 const filterSearch   = ref('')
+
+/** A filter ref → the value the API expects; ALL and '' both mean "unfiltered". */
+function filterValue(v) {
+  return !v || v === ALL ? undefined : v
+}
 
 // ---- Live tail ----
 const LIVE_MAX   = 2000
@@ -61,7 +77,7 @@ let closeStream   = null
 function startStream() {
   closeStream?.()
   closeStream = openLogStream(
-    { category: filterCategory.value || undefined, minLevel: filterLevel.value || undefined },
+    { category: filterValue(filterCategory.value), minLevel: filterValue(filterLevel.value) },
     onLiveEntry,
     (err) => { /* silently ignore disconnects */ }
   )
@@ -98,12 +114,12 @@ async function loadHistory(reset = false) {
   historyLoading.value = true
   try {
     const params = {
-      category:      filterCategory.value || undefined,
-      level:         filterLevel.value    || undefined,
-      status:        filterStatus.value   || undefined,
-      module:        filterModule.value   || undefined,
-      path:          filterPath.value     || undefined,
-      search:        filterSearch.value   || undefined,
+      category:      filterValue(filterCategory.value),
+      level:         filterValue(filterLevel.value),
+      status:        filterValue(filterStatus.value),
+      module:        filterValue(filterModule.value),
+      path:          filterValue(filterPath.value),
+      search:        filterValue(filterSearch.value),
       cursor:        reset ? undefined : nextCursor.value,
       pageSize:      50,
     }
@@ -249,7 +265,7 @@ const displayedLive = computed(() => liveEntries.value.slice(0, 200))
         <Select v-model="filterCategory">
           <SelectTrigger class="h-8 w-32 text-xs"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All</SelectItem>
+            <SelectItem :value="ALL">All</SelectItem>
             <SelectItem value="request">Request</SelectItem>
             <SelectItem value="client">Client</SelectItem>
             <SelectItem value="app">App</SelectItem>
@@ -259,7 +275,7 @@ const displayedLive = computed(() => liveEntries.value.slice(0, 200))
         <Select v-model="filterLevel">
           <SelectTrigger class="h-8 w-32 text-xs"><SelectValue placeholder="Level" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All</SelectItem>
+            <SelectItem :value="ALL">All</SelectItem>
             <SelectItem value="Warning">Warning+</SelectItem>
             <SelectItem value="Error">Error+</SelectItem>
           </SelectContent>
@@ -304,7 +320,7 @@ const displayedLive = computed(() => liveEntries.value.slice(0, 200))
         <Select v-model="filterCategory">
           <SelectTrigger class="h-8 w-28 text-xs"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All</SelectItem>
+            <SelectItem :value="ALL">All</SelectItem>
             <SelectItem value="request">Request</SelectItem>
             <SelectItem value="client">Client</SelectItem>
             <SelectItem value="app">App</SelectItem>
@@ -314,7 +330,7 @@ const displayedLive = computed(() => liveEntries.value.slice(0, 200))
         <Select v-model="filterLevel">
           <SelectTrigger class="h-8 w-28 text-xs"><SelectValue placeholder="Level" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All</SelectItem>
+            <SelectItem :value="ALL">All</SelectItem>
             <SelectItem value="Warning">Warning</SelectItem>
             <SelectItem value="Error">Error</SelectItem>
             <SelectItem value="Critical">Critical</SelectItem>
@@ -323,7 +339,7 @@ const displayedLive = computed(() => liveEntries.value.slice(0, 200))
         <Select v-model="filterStatus">
           <SelectTrigger class="h-8 w-24 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All</SelectItem>
+            <SelectItem :value="ALL">All</SelectItem>
             <SelectItem value="2xx">2xx</SelectItem>
             <SelectItem value="4xx">4xx</SelectItem>
             <SelectItem value="5xx">5xx</SelectItem>
