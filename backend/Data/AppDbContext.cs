@@ -1,6 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
+using RabbitIC.Api.Observability;
 
 namespace RabbitIC.Api.Data;
 
@@ -37,6 +38,19 @@ public class AppDbContext : DbContext
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<BoardColumn> Columns => Set<BoardColumn>();
     public DbSet<Card> Cards => Set<Card>();
+
+    public DbSet<Note> Notes => Set<Note>();
+
+    // ---- Observability ----
+    public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
+    public DbSet<AuditLog>    AuditLogs    => Set<AuditLog>();
+
+    protected override void OnConfiguring(DbContextOptionsBuilder options)
+    {
+        // Add the audit interceptor when it is available in DI.
+        // The interceptor is resolved lazily so it does not circularly depend on the context.
+        base.OnConfiguring(options);
+    }
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -145,5 +159,30 @@ public class AppDbContext : DbContext
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);
+
+        b.Entity<Note>()
+            .HasOne(n => n.Owner)
+            .WithMany()
+            .HasForeignKey(n => n.OwnerUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+            
+        b.Entity<Note>().HasIndex(n => new { n.OwnerUserId, n.IsDeleted, n.IsPinned, n.UpdatedAt });
+        
+        b.Entity<Note>()
+            .HasIndex(n => n.ShareToken)
+            .IsUnique()
+            .HasFilter("\"ShareToken\" IS NOT NULL");
+
+        // ---- Observability indexes ----
+        b.Entity<ActivityLog>().HasIndex(a => a.TimestampUtc);
+        b.Entity<ActivityLog>().HasIndex(a => new { a.Category, a.TimestampUtc });
+        b.Entity<ActivityLog>().HasIndex(a => a.CorrelationId);
+        b.Entity<ActivityLog>().HasIndex(a => new { a.UserId, a.TimestampUtc });
+        b.Entity<ActivityLog>().HasIndex(a => new { a.StatusCode, a.TimestampUtc });
+
+        b.Entity<AuditLog>().HasIndex(a => a.TimestampUtc);
+        b.Entity<AuditLog>().HasIndex(a => new { a.EntityName, a.EntityKey });
+        b.Entity<AuditLog>().HasIndex(a => a.CorrelationId);
+        b.Entity<AuditLog>().HasIndex(a => a.UserId);
     }
 }

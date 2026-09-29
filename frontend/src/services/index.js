@@ -28,3 +28,16 @@ export {
 export {
   myTabs, searchUsers, getUser, setRole, setTabs, listTabs,
 } from './rbac.service.js'
+export {
+  parseComponent, deriveFacts, analyse as analyseComponentSplit,
+  generate as generateSplit, toPlan as splitPlanFrom,
+} from './component-splitter.service.js'
+export {
+  listNotes, createNote, getNote, updateNote,
+  softDeleteNote, restoreNote, permanentDeleteNote,
+  shareNote, unshareNote, getPublicNote
+} from './notes.service.js'
+export {
+  listActivityLogs, listAuditLogs, getActivityLog, getCorrelation,
+  getSystemInfo, getLogStats, openLogStream, logClientEvent, flushClientEvents
+} from './logs.service.js'

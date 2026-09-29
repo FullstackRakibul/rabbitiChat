@@ -1,4 +1,4 @@
-﻿// RBAC — the tab catalogue and the role → default-tabs map.
+// RBAC — the tab catalogue and the role → default-tabs map.
 //
 // Deliberately a constant map rather than a table: role baselines change when
 // the SHIPPED TAB SET changes, which is a code change anyway. Keeping it here
@@ -38,8 +38,11 @@ public static class TabCatalog
         "jsonto",
         "5lakhs",
         "ielts",
+        "component-splitter",
         "sources",
         "settings",
+        "notes",
+        "logs",
         RbacTab,
     };
 
@@ -58,8 +61,11 @@ public static class TabCatalog
         ["jsonto"] = "JSON to ...",
         ["5lakhs"] = "5 Lakhs",
         ["ielts"] = "IELTS",
+        ["component-splitter"] = "Component splitter",
         ["sources"] = "Sources",
         ["settings"] = "Settings",
+        ["notes"] = "Notes",
+        ["logs"] = "Logs",
         [RbacTab] = "Access control",
     };
 
@@ -82,6 +88,10 @@ public static class TabCatalog
         // names; accept that spelling on input so the two can never drift into
         // a grant that silently matches nothing.
         ["fivelakhs"] = "5lakhs",
+        // The splitter is spoken of as "the splitter"; accept the short forms so a
+        // grant written either way lands on the same tab.
+        ["splitter"] = "component-splitter",
+        ["componentsplitter"] = "component-splitter",
         ["5lakh"] = "5lakhs",
     };
 
@@ -100,7 +110,7 @@ public static class TabCatalog
     /// </summary>
     private static readonly string[] GeneralTabs =
     {
-        "dashboard", "todo", "jsonto", "5lakhs", "sources", "settings",
+        "dashboard", "todo", "jsonto", "5lakhs", "notes", "sources", "settings",
     };
 
     /// <summary>
@@ -110,7 +120,15 @@ public static class TabCatalog
     /// </summary>
     private static readonly string[] SystemExtraTabs =
     {
-        "chat", "workspace", "docs", "search", "ielts",
+        "chat", "workspace", "docs", "search", "ielts", "component-splitter",
+    };
+
+    /// <summary>
+    /// Tabs available only to SystemAdmin. Not additive from lower tiers.
+    /// </summary>
+    private static readonly string[] SystemAdminOnlyTabs =
+    {
+        "logs",
     };
 
     /// <summary>
