@@ -27,8 +27,15 @@ var ollamaUrl = builder.Configuration["Ollama:Url"] ?? "http://localhost:11434";
 // service, or `dotnet run` from elsewhere, and the open then fails with
 // "SQLite Error 14: unable to open database file". Anchor it to the deployed
 // binaries instead and make sure the folder exists before EF opens the file.
+
 var sqliteBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(
 	builder.Configuration.GetConnectionString("Default") ?? "Data Source=Data/rabbitic.db");
+
+
+//var connectionString = builder.Configuration.GetConnectionString("Default")
+//                      ?? "Data Source=Data/rabbitic.db";
+
+
 
 if (!Path.IsPathRooted(sqliteBuilder.DataSource))
 	sqliteBuilder.DataSource = Path.Combine(AppContext.BaseDirectory, sqliteBuilder.DataSource);
@@ -38,6 +45,24 @@ if (!string.IsNullOrEmpty(dbDirectory))
 	Directory.CreateDirectory(dbDirectory);   // no-op when it already exists
 
 var sqliteConnectionString = sqliteBuilder.ToString();
+
+//var sqliteConnectionString = connectionString.ToString();
+
+
+//builder.Services.AddDbContext<AppDbContext>(options =>
+//{
+//    // Check if it's pointing to your remote Turso HTTP pipeline format
+//    if (connectionString.StartsWith("https://") && connectionString.Contains("/v2/pipeline"))
+//    {
+//        options.UseLibSql(connectionString);
+//    }
+//    else
+//    {
+//        // Fallback for standard local SQLite files
+//        options.UseSqlite(connectionString);
+//    }
+//});
+
 
 // ---- Observability — must be first so the interceptor can be added to EF ----
 builder.Services.AddHttpContextAccessor();
@@ -325,7 +350,7 @@ app.UseCors();
 using (var scope = app.Services.CreateScope())
 {
 	var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-	app.Logger.LogInformation("SQLite database: {Path}", sqliteBuilder.DataSource);
+	app.Logger.LogInformation("SQLite database: {Path}", sqliteConnectionString);
 	db.Database.EnsureCreated();   // creates everything fresh if the file is new
 	SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
 
@@ -354,7 +379,7 @@ using (var scope = app.Services.CreateScope())
 	var startupQueue = scope.ServiceProvider.GetRequiredService<ILogQueue>();
 	var startupEnv   = app.Environment.EnvironmentName;
 	var asm          = System.Reflection.Assembly.GetExecutingAssembly();
-	var dbNamePart   = Path.GetFileName(sqliteBuilder.DataSource);
+	var dbNamePart   = Path.GetFileName(sqliteConnectionString);
 	startupQueue.Enqueue(new RabbitIC.Api.Models.ActivityLog
 	{
 		TimestampUtc = DateTime.UtcNow,
