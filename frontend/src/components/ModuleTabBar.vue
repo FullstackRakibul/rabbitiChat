@@ -117,8 +117,8 @@ const fade = computed(() => ({
         <TabsIndicator data-testid="app-tabs-indicator" class="pill" />
 
         <TabsTrigger v-for="t in tabs" :key="t.id" :value="t.id" :data-tab-key="t.id" :title="t.label"
-          class="trigger group relative z-[1] inline-flex h-8 shrink-0 grow items-center justify-center gap-2 whitespace-nowrap rounded-full px-3.5 text-sm font-medium text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=active]:font-semibold data-[state=active]:text-[var(--pill-fg)] max-sm:px-2.5">
-          <component :is="t.icon" class="size-[18px] shrink-0 transition-transform duration-300 group-active:scale-90"
+          class="trigger group relative z-1 inline-flex h-8 shrink-0 grow items-center justify-center gap-2 whitespace-nowrap rounded-full px-3.5 text-sm font-medium text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=active]:font-semibold data-[state=active]:text-(--pill-fg) max-sm:px-2.5">
+          <component :is="t.icon" class="size-4.5 shrink-0 transition-transform duration-300 group-active:scale-90"
             :stroke-width="1.75" />
           <span class="label">{{ t.label }}</span>
         </TabsTrigger>
