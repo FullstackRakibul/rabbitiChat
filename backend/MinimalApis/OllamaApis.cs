@@ -61,9 +61,7 @@ namespace RabbitIC.Api.MinimalApis
                 }
                 else
                 {
-                    var (hash, _) = Authorization.HashSecret(req.Secret, Convert.FromBase64String(user.SecretSalt));
-                    if (!CryptographicOperations.FixedTimeEquals(
-                            Convert.FromBase64String(hash), Convert.FromBase64String(user.SecretHash)))
+                    if (!Authorization.VerifySecret(user, req.Secret))
                         return Results.Json(new { error = "Wrong secret for that username." }, statusCode: 401);
 
                     user.Token = Authorization.NewToken(); // fresh token each login
@@ -72,6 +70,36 @@ namespace RabbitIC.Api.MinimalApis
 
                 return Results.Ok(new { username = user.Username, token = user.Token, created });
             });
+
+            // Change your own secret. The current one must be right. The token rotates,
+            // so every other session of this account is signed out; the caller gets the
+            // new token and stays signed in. A wrong current secret is 403, not 401: the
+            // app reads 401 as "session expired" and would sign the user out.
+            app.MapPost("/auth/secret", async (ChangeSecretRequest req, HttpContext ctx, AppDbContext db) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                if (string.IsNullOrEmpty(req.CurrentSecret) || !Authorization.VerifySecret(user, req.CurrentSecret))
+                    return Results.Json(new { error = "The current secret is not right." }, statusCode: 403);
+
+                var next = req.NewSecret ?? "";
+                if (next.Length < ChangeSecretRequest.MinLength)
+                    return Results.BadRequest(new { error = $"The new secret needs at least {ChangeSecretRequest.MinLength} characters." });
+                if (next.Length > ChangeSecretRequest.MaxLength)
+                    return Results.BadRequest(new { error = $"The new secret can be at most {ChangeSecretRequest.MaxLength} characters." });
+                if (Authorization.VerifySecret(user, next))
+                    return Results.BadRequest(new { error = "The new secret must be different from the current one." });
+
+                var (hash, salt) = Authorization.HashSecret(next);
+                user.SecretHash = hash;
+                user.SecretSalt = salt;
+                user.Token = Authorization.NewToken();
+                await db.SaveChangesAsync();
+
+                return Results.Ok(new { username = user.Username, token = user.Token });
+            })
+            .WithSummary("Change your own secret. Signs out your other sessions; returns your new token.");
 
 
 

@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote, Activity, Satellite
+  Scissors, StickyNote, Activity, Satellite, Grip
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -401,29 +401,32 @@ const isPublicDocs = computed(() => route.name === 'oddity-docs')
  * these a given user actually sees is decided by the server (see `allowedTabs`),
  * never here — there is deliberately no per-role list in the frontend, so
  * changing someone's access needs no release.
+ *
+ * `group` is the section the module launcher files it under; it changes only
+ * how the grid is arranged, never who may open what.
  */
 const ALL_TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'workspace', label: 'Workspace', icon: Brain },
-  { id: 'docs', label: 'Documents', icon: FileText },
-  { id: 'todo', label: 'To-Do', icon: ListTodo },
-  { id: 'search', label: 'Search', icon: Globe },
-  { id: 'jsonto', label: 'JSON to ...', icon: Table },
-  { id: '5lakhs', label: '5Lakhs', icon: BadgeDollarSign },
-  { id: 'ielts', label: 'IELTS', icon: GraduationCap },
-  { id: 'component-splitter', label: 'Splitter', icon: Scissors },
-  { id: 'sources', label: 'Sources', icon: Plug },
-  { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'rbac', label: 'Access', icon: ShieldCheck },
-  { id: 'notes', label: 'Notes', icon: StickyNote },
-  { id: 'logs', label: 'Logs', icon: Activity },
-  { id: 'oddity', label: 'Oddity', icon: Satellite },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Work' },
+  { id: 'chat', label: 'Chat', icon: MessageSquare, group: 'Work' },
+  { id: 'workspace', label: 'Workspace', icon: Brain, group: 'Work' },
+  { id: 'docs', label: 'Documents', icon: FileText, group: 'Work' },
+  { id: 'todo', label: 'To-Do', icon: ListTodo, group: 'Work' },
+  { id: 'search', label: 'Search', icon: Globe, group: 'Work' },
+  { id: 'jsonto', label: 'JSON to ...', icon: Table, group: 'Tools' },
+  { id: '5lakhs', label: '5Lakhs', icon: BadgeDollarSign, group: 'Tools' },
+  { id: 'ielts', label: 'IELTS', icon: GraduationCap, group: 'Tools' },
+  { id: 'component-splitter', label: 'Splitter', icon: Scissors, group: 'Tools' },
+  { id: 'sources', label: 'Sources', icon: Plug, group: 'System' },
+  { id: 'settings', label: 'Settings', icon: Settings, group: 'System' },
+  { id: 'rbac', label: 'Access', icon: ShieldCheck, group: 'System' },
+  { id: 'notes', label: 'Notes', icon: StickyNote, group: 'Work' },
+  { id: 'logs', label: 'Logs', icon: Activity, group: 'System' },
+  { id: 'oddity', label: 'Oddity', icon: Satellite, group: 'System' },
 ]
 
 // ---- Permissions ----
-// What /api/me/tabs said this user may see. Null until it answers: the tab bar
-// stays empty for that moment rather than flashing tabs the user may not have.
+// What /api/me/tabs said this user may see. Null until it answers: the launcher
+// stays empty for that moment rather than flashing modules the user may not have.
 const allowedTabs = ref(null)
 const myRole = ref('')
 const isSystemAdmin = ref(false)
@@ -773,7 +776,7 @@ function primaryAction() {
 }
 
 function goTab(id) {
-  // Keyboard jumps (g-then-c, and friends) bypass the tab bar. The router guard
+  // Keyboard jumps (g-then-c, and friends) bypass the launcher. The router guard
   // would redirect a forbidden id anyway; refusing here as well means the URL
   // never changes at all, so the back button doesn't collect entries the user
   // never actually visited.
@@ -797,6 +800,12 @@ const commands = computed(() => [
     keys: { chat: 'g then c', workspace: 'g then w', docs: 'g then d', todo: 'g then t' }[t.id],
     run: () => goTab(t.id),
   })),
+  {
+    // The palette closes itself before running a row; opening the launcher a
+    // frame later keeps the dialog's focus return from closing it again.
+    id: 'action:launcher', label: 'Open module launcher', group: 'Actions', icon: Grip,
+    keys: 'g then m', run: () => requestAnimationFrame(() => shell.value?.openLauncher()),
+  },
   {
     id: 'action:new-chat', label: 'New chat', group: 'Actions', icon: Plus,
     run: () => openNewChat(),
@@ -841,7 +850,11 @@ useShortcuts({
     else if (mobileSidebarOpen.value) mobileSidebarOpen.value = false
   },
   onJump: goTab,
+  onLauncher: () => shell.value?.openLauncher(),
 })
+
+/** The shell, for opening its module launcher from the palette and "g then m". */
+const shell = ref(null)
 
 const notesTabRef = ref(null)
 </script>
@@ -855,14 +868,15 @@ const notesTabRef = ref(null)
     <LoginGate v-if="!loggedIn" v-model:username="loginUser" v-model:secret="loginSecret" :busy="loginBusy"
       :error="loginError" @submit="doLogin" />
 
-    <!-- App. Tabs is the outermost element so the header's tab bar and the
+    <!-- App. Tabs is the outermost element so the header's module launcher and the
          panels below share one root; unmount-on-hide=false keeps every panel
          alive across switches, so a streaming reply survives navigating away. -->
     <Tabs v-else v-model="activeTab" :unmount-on-hide="false" class="contents">
-    <AppShell :tabs="tabs" :active-tab="activeTab" :theme="theme" :connected="connected" :status="status"
+    <AppShell ref="shell" :tabs="tabs" :active-tab="activeTab" :user-id="myUserId" :loading="allowedTabs === null"
+      :theme="theme" :connected="connected" :status="status"
       :has-sidebar="tabHasSidebar" :sidebar-open="!sidebarCollapsed"
       v-model:mobile-open="mobileSidebarOpen"
-      @toggle-theme="toggleTheme" @open-palette="paletteOpen = true">
+      @toggle-theme="toggleTheme" @open-palette="paletteOpen = true" @navigate="goTab">
       <!-- Sidebar slot: filled only by the tabs that have one. -->
       <template v-if="tabHasSidebar" #sidebar>
         <ChatSidebar v-show="activeTab === 'chat'" v-model:source-search="sourceSearch"

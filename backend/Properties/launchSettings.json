@@ -3,11 +3,10 @@
     "http": {
       "commandName": "Project",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "applicationUrl": "http://*:5274"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": true,
-      "applicationUrl": "http://localhost:5274"
+      "applicationUrl": "http://*:5274"
     },
     "WSL": {
       "commandName": "WSL2",

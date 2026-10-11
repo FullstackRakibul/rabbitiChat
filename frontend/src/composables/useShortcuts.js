@@ -31,10 +31,11 @@ function typingNow() {
  *   onSubmit    Cmd/Ctrl+Enter  primary action of the active tab (fires while typing)
  *   onEscape    Esc             close the top-most overlay (fires while typing)
  *   onJump      g then c/w/d/t  jump to a tab, by tab id
+ *   onLauncher  g then m        open the module launcher
  *   enabled     ref/getter — shortcuts are inert when it returns false (e.g. login)
  */
 export function useShortcuts({
-  onPalette, onSidebar, onSubmit, onEscape, onJump, enabled,
+  onPalette, onSidebar, onSubmit, onEscape, onJump, onLauncher, enabled,
 } = {}) {
   const isEnabled = () => (typeof enabled === 'function'
     ? enabled()
@@ -99,6 +100,12 @@ export function useShortcuts({
 
     if (armed.value) {
       disarm()
+      // "m" opens the launcher rather than a tab, so it is not in JUMPS.
+      if (k === 'm' && onLauncher) {
+        e.preventDefault()
+        onLauncher()
+        return
+      }
       const tab = JUMPS[k]
       if (tab) {
         e.preventDefault()

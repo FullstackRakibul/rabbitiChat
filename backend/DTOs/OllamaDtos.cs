@@ -6,6 +6,16 @@
             public string Secret { get; set; } = string.Empty;
         };
 
+        /// <summary>Body of POST /api/auth/secret — change the caller's own secret.</summary>
+        public class ChangeSecretRequest
+        {
+            public const int MinLength = 8;
+            public const int MaxLength = 200;
+
+            public string? CurrentSecret { get; set; }
+            public string? NewSecret { get; set; }
+        }
+
 
 
         public class ChatRequest

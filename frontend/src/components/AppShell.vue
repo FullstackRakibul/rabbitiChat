@@ -3,22 +3,29 @@
  * The application shell: a persistent header above a body with an optional
  * left sidebar.
  *
- * The header lives here and is never unmounted, so switching tabs never
- * rebuilds the brand, tab bar, or theme toggle. The `sidebar` slot is filled
- * only by tabs that need one (Chat, Workspace); when nothing is passed the
- * body stretches full-bleed.
+ * The header lives here and is never unmounted, so switching modules never
+ * rebuilds the brand, the module launcher or the theme toggle. Navigation is the
+ * Google-apps pattern: a chip names the open module, and it and the grid button
+ * both open the launcher — every module the user may open, as tiles. The
+ * `sidebar` slot is filled only by tabs that need one (Chat, Workspace); when
+ * nothing is passed the body stretches full-bleed.
  */
-import { computed } from 'vue'
-import { Menu, Moon, Sun, X } from '@lucide/vue'
+import { computed, ref } from 'vue'
+import { ChevronDown, Grip, Menu, Moon, Sun, X } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
-import ModuleTabBar from '@/components/ModuleTabBar.vue'
+import ModuleLauncher from '@/components/launcher/ModuleLauncher.vue'
 
 const props = defineProps({
+  /** The modules this user may open: [{ id, label, icon, group }]. */
   tabs: { type: Array, default: () => [] },
-  /** The active tab id — the tab bar needs it to place its indicator. */
+  /** The open module's id — the chip names it and the launcher marks it. */
   activeTab: { type: String, default: '' },
+  /** The signed-in user's id (0 until known): keys their launcher favourites. */
+  userId: { type: Number, default: 0 },
+  /** Permissions still loading: the chip shows a placeholder, never a guess. */
+  loading: { type: Boolean, default: false },
   theme: { type: String, default: 'light' },
   connected: { type: Boolean, default: false },
   status: { type: String, default: '' },
@@ -35,10 +42,17 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:sidebarOpen', 'update:mobileOpen', 'toggle-theme', 'open-palette',
+  'update:sidebarOpen', 'update:mobileOpen', 'toggle-theme', 'open-palette', 'navigate',
 ])
 
 const showSidebar = computed(() => props.hasSidebar)
+
+const current = computed(() => props.tabs.find((t) => t.id === props.activeTab) ?? null)
+
+/** The grid button's launcher: what "g then m" and the palette open. */
+const gridLauncher = ref(null)
+
+defineExpose({ openLauncher: () => gridLauncher.value?.show() })
 </script>
 
 <template>
@@ -56,11 +70,35 @@ const showSidebar = computed(() => props.hasSidebar)
         <Menu />
       </Button>
 
-      <span class="mr-1 hidden shrink-0 truncate text-lg font-semibold tracking-tight lg:inline">
+      <span class="mr-1 hidden shrink-0 truncate text-lg font-semibold tracking-tight sm:inline">
         মস্তিস্ক the ai
       </span>
 
-      <ModuleTabBar :tabs="tabs" :model-value="activeTab" />
+      <!-- The open module, named — and one of the two ways into the launcher. -->
+      <div v-if="loading" class="h-9 w-36 shrink-0 animate-pulse rounded-full bg-muted" aria-hidden="true" />
+      <ModuleLauncher
+        v-else-if="tabs.length"
+        :tabs="tabs"
+        :active-tab="activeTab"
+        :user-id="userId"
+        align="start"
+        @launch="emit('navigate', $event)"
+      >
+        <template #trigger>
+          <button
+            type="button"
+            data-testid="module-chip"
+            class="inline-flex h-9 min-w-0 max-w-56 items-center gap-2 rounded-full border bg-muted/50 pl-1.5 pr-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            :aria-label="current ? `${current.label}: open the module launcher` : 'Open the module launcher'"
+          >
+            <span class="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
+              <component :is="current.icon" v-if="current" class="size-3.5" :stroke-width="2" aria-hidden="true" />
+            </span>
+            <span class="truncate">{{ current?.label ?? 'Modules' }}</span>
+            <ChevronDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          </button>
+        </template>
+      </ModuleLauncher>
 
       <div class="ml-auto flex shrink-0 items-center gap-2">
         <button
@@ -92,6 +130,28 @@ const showSidebar = computed(() => props.hasSidebar)
           <Sun v-else />
           <span class="sr-only">Toggle theme</span>
         </Button>
+
+        <ModuleLauncher
+          v-if="!loading && tabs.length"
+          ref="gridLauncher"
+          :tabs="tabs"
+          :active-tab="activeTab"
+          :user-id="userId"
+          align="end"
+          @launch="emit('navigate', $event)"
+        >
+          <template #trigger>
+            <button
+              type="button"
+              data-testid="launcher-button"
+              class="inline-flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title="Modules (g then m)"
+              aria-label="Open the module launcher"
+            >
+              <Grip class="size-5" aria-hidden="true" />
+            </button>
+          </template>
+        </ModuleLauncher>
       </div>
     </header>
 

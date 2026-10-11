@@ -216,6 +216,17 @@ async function freePort() {
   return port
 }
 
+/** True when something already accepts connections on 127.0.0.1:port. */
+function portAnswers(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port })
+    const done = (answered) => { socket.destroy(); resolve(answered) }
+    socket.setTimeout(500, () => done(false))
+    socket.once('connect', () => done(true))
+    socket.once('error', () => done(false))
+  })
+}
+
 // ─────────────────────────────── the API ───────────────────────────────
 
 export function buildApi() {
@@ -232,6 +243,10 @@ export function buildApi() {
  */
 export async function startApi({ fakeUrl, runDir, port }) {
   fs.mkdirSync(runDir, { recursive: true })
+  // A port someone else holds would answer the readiness check, and every call
+  // after it would reach THEIR server and database. Refuse rather than guess.
+  if (port !== undefined && await portAnswers(port))
+    throw new Error(`port ${port} is already in use (a dev server?) — refusing to start the eval API there`)
   port ??= await freePort()
   const dbPath = path.join(runDir, 'rabbitic.db')
   const logPath = path.join(runDir, 'api.log')
@@ -265,6 +280,9 @@ export async function startApi({ fakeUrl, runDir, port }) {
     if (proc.exitCode !== null) break
     try {
       const r = await fetch(`${url}/public/server/status`)
+      // Answered, but only trust it while our own process is alive: if it died
+      // (say, failing to bind), the answer came from another server.
+      if (r.ok && proc.exitCode !== null) break
       if (r.ok) {
         return {
           url, dbPath, logPath, runDir, port, proc,
@@ -1481,6 +1499,93 @@ check('DOC.11', 2, '/oddity/docs is a public route rendered outside the login ga
   const gateAt = app.indexOf('<LoginGate')
   return ok(noTab && docsAt > 0 && docsAt < gateAt && /isPublicDocs/.test(app),
     `route ${route || 'missing'} · rendered before the login gate: ${docsAt > 0 && docsAt < gateAt}`)
+})
+
+// ─────────────────────────────── Changing a secret (requested after the docs round) ───────────────────────────────
+//
+// The seeded administrator's secret is published in the README, so changing it
+// has to work before the app is exposed. AUTH.6 changes the admin's own secret and
+// is registered last; it puts the secret back when it is done.
+
+const SECRET_PATH = '/api/auth/secret'
+
+async function freshUser(name) {
+  const secret = 'start-' + crypto.randomBytes(6).toString('hex')
+  return { ...(await login(name, secret)), secret }
+}
+
+const changeSecret = (token, currentSecret, newSecret) =>
+  call(ctx.api.url, 'POST', SECRET_PATH, { token, body: { currentSecret, newSecret } })
+
+check('AUTH.1', 2, 'changing a secret needs a session: 401 without one', async () => {
+  const r = await call(ctx.api.url, 'POST', SECRET_PATH, { body: { currentSecret: 'x', newSecret: 'long-enough-secret' } })
+  return ok(r.status === 401, `${r.status}`)
+})
+
+check('AUTH.2', 2, 'a wrong current secret is a 403 (never 401, which signs the user out) and changes nothing', async () => {
+  const u = await freshUser('eval-secret-wrong')
+  const r = await changeSecret(u.token, 'not-it', 'brand-new-secret')
+  const tokenStill = (await call(ctx.api.url, 'GET', '/api/me/tabs', { token: u.token })).status
+  const secretStill = (await call(ctx.api.url, 'POST', '/api/auth/login', { body: { username: u.username, secret: u.secret } })).status
+  return ok(r.status === 403 && tokenStill === 200 && secretStill === 200,
+    `${r.status} "${r.json?.error}" · old token ${tokenStill} · old secret ${secretStill}`)
+})
+
+check('AUTH.3', 2, 'a new secret that is short or unchanged is a 400', async () => {
+  const u = await freshUser('eval-secret-rules')
+  const short = await changeSecret(u.token, u.secret, 'short')
+  const same = await changeSecret(u.token, u.secret, u.secret)
+  return ok(short.status === 400 && same.status === 400,
+    `short ${short.status} "${short.json?.error}" · unchanged ${same.status} "${same.json?.error}"`)
+})
+
+check('AUTH.4', 2, 'a change rotates the token: old token and old secret stop working, the new ones work', async () => {
+  const u = await freshUser('eval-secret-change')
+  const next = 'changed-' + crypto.randomBytes(6).toString('hex')
+  const r = await changeSecret(u.token, u.secret, next)
+  const oldToken = (await call(ctx.api.url, 'GET', '/api/me/tabs', { token: u.token })).status
+  const newToken = (await call(ctx.api.url, 'GET', '/api/me/tabs', { token: r.json?.token })).status
+  const oldSecret = (await call(ctx.api.url, 'POST', '/api/auth/login', { body: { username: u.username, secret: u.secret } })).status
+  const newSecret = (await call(ctx.api.url, 'POST', '/api/auth/login', { body: { username: u.username, secret: next } })).status
+  return ok(r.status === 200 && r.json?.token && r.json.token !== u.token
+    && oldToken === 401 && newToken === 200 && oldSecret === 401 && newSecret === 200,
+  `change ${r.status} · old token ${oldToken} · new token ${newToken} · old secret ${oldSecret} · new secret ${newSecret}`)
+})
+
+check('AUTH.5', 2, 'the audit log hides the secret hash and salt, for a new account and for a change (N3)', async () => {
+  const u = await freshUser('eval-secret-audit')
+  await changeSecret(u.token, u.secret, 'audited-' + crypto.randomBytes(6).toString('hex'))
+  let rows = []
+  for (let i = 0; i < 40 && rows.length < 2; i++) {
+    rows = await sql("select Action, ChangesJson from AuditLogs where EntityName = 'User' and EntityKey = ? order by Id", String(u.id))
+    if (rows.length < 2) await sleep(100)
+  }
+  const [stored] = await sql('select SecretHash, SecretSalt from Users where Id = ?', u.id)
+  const leaks = []
+  for (const row of rows) {
+    for (const c of JSON.parse(row.ChangesJson ?? '[]')) {
+      if (['SecretHash', 'SecretSalt'].includes(c.property) && [c.old, c.new].some((v) => v !== null && v !== '***'))
+        leaks.push(`${row.Action} ${c.property}`)
+    }
+    if (row.ChangesJson?.includes(stored.SecretHash) || row.ChangesJson?.includes(stored.SecretSalt)) leaks.push(`${row.Action} holds the stored value`)
+  }
+  return ok(rows.length >= 2 && leaks.length === 0, `${rows.map((r) => r.Action).join(', ')} · leaks ${show(leaks)}`)
+})
+
+check('AUTH.6', 2, 'a changed admin secret survives a restart: the seeder never resets it', async () => {
+  const seed = process.env.ODDITY_EVAL_ADMIN_SECRET
+  const changed = 'admin-' + crypto.randomBytes(8).toString('hex')
+  const r = await changeSecret(ctx.admin.token, seed, changed)
+  if (r.status !== 200) return ok(false, `change ${r.status} ${r.text}`)
+  await ctx.api.stop()
+  ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port })
+  const withNew = await call(ctx.api.url, 'POST', '/api/auth/login', { body: { username: ctx.admin.username, secret: changed } })
+  const withSeed = await call(ctx.api.url, 'POST', '/api/auth/login', { body: { username: ctx.admin.username, secret: seed } })
+  // Put the seed secret back, so the database ends as it started.
+  const back = await changeSecret(withNew.json?.token, changed, seed)
+  if (back.json?.token) ctx.admin.token = back.json.token
+  return ok(withNew.status === 200 && withSeed.status === 401 && back.status === 200,
+    `after restart: new secret ${withNew.status} · seed secret ${withSeed.status} · restored ${back.status}`)
 })
 
 // ─────────────────────────────── runner ───────────────────────────────

@@ -42,6 +42,8 @@ public sealed class Redactor : IRedactor
         "secret", "salt", "token", "access_token", "refresh_token",
         "apikey", "api_key", "authorization", "licensekey", "cookie",
         "keyhash",
+        // User's password material (N3): matched by exact name, so "secret" alone missed them.
+        "secrethash", "secretsalt",
     };
 
     // Matches a key=value pair where key is on the deny list (query strings).
