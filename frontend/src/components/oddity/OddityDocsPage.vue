@@ -3,8 +3,9 @@
  * /oddity/docs — the gateway's documentation for callers, with no login.
  *
  * Rendered by App.vue outside the login gate, the way a public note is. It makes
- * no API call: the caller part of the docs needs nothing from the server, and the
- * base URL shown is the address this page was opened on.
+ * no call of its own: the caller part of the docs needs nothing from the server,
+ * and the base URL shown is the address this page was opened on. The explorer
+ * calls the gateway, with the caller's key, only when its buttons are pressed.
  */
 import { Moon, Satellite, Sun } from '@lucide/vue'
 import { Button } from '@/components/ui/button'

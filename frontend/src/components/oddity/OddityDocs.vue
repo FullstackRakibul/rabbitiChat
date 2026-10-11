@@ -8,8 +8,9 @@
  * with the address the page was opened on.
  *
  * All content comes from lib/oddity-docs.js and lib/oddity-examples.js, which the
- * eval holds to the code. Everything is rendered as text. A pasted key only fills
- * in the examples: it stays in this component's memory, never sent and never stored.
+ * eval holds to the code. Everything is rendered as text. A key typed into the
+ * explorer ("Try it") stays in this component's memory: it fills in the examples
+ * and goes only to the gateway, and only when Check or Send is pressed.
  */
 import { computed, onMounted, ref } from 'vue'
 import { Check, Copy } from '@lucide/vue'
@@ -21,9 +22,8 @@ import {
 } from '@/lib/oddity-docs.js'
 import DocCodeBlock from '@/components/mostisko-docs/DocCodeBlock.vue'
 import DocSection from '@/components/mostisko-docs/DocSection.vue'
+import OddityExplorer from '@/components/oddity/OddityExplorer.vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
 const props = defineProps({
   /** The Docs board: live settings, both addresses and the Ground Control API. */
@@ -52,9 +52,18 @@ const liveRows = computed(() => {
   ]
 })
 
-// ---- Examples ----
+// ---- Explorer and examples ----
 
+/** One key, typed into the explorer, also fills the examples. Memory only. */
 const pastedKey = ref('')
+const explorer = ref(null)
+
+/** The endpoints table's "Try" buttons: pick the endpoint, then scroll to the explorer. */
+function tryEndpoint(path) {
+  explorer.value?.select(path)
+  jump('oddity-try')
+}
+
 const exampleKey = computed(() => pastedKey.value.trim() || 'YOUR_ODDITY_KEY')
 const exampleId = ref(EXAMPLES[0].id)
 const example = computed(() => EXAMPLES.find((e) => e.id === exampleId.value) ?? EXAMPLES[0])
@@ -77,6 +86,7 @@ const schemaOrder = computed(() => {
 const sections = computed(() => [
   { id: 'oddity-base', title: 'Base URL' },
   { id: 'oddity-start', title: 'Quick start' },
+  { id: 'oddity-try', title: 'Try it' },
   { id: 'oddity-auth', title: 'Authentication' },
   { id: 'oddity-endpoints', title: 'Endpoints' },
   { id: 'oddity-changes', title: 'What Oddity changes' },
@@ -162,6 +172,30 @@ onMounted(async () => {
       </p>
       <p v-if="settingsError" class="text-sm text-destructive">{{ settingsError }}</p>
 
+      <details v-if="admin" class="rounded-lg border bg-card text-sm">
+        <summary class="cursor-pointer px-3 py-2 font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+          Publishing the gateway on your network
+        </summary>
+        <ol class="list-decimal space-y-1.5 border-t px-3 py-3 pl-8 leading-relaxed">
+          <li>
+            Run the API on every interface. <code class="rounded bg-muted px-1 font-mono text-xs">dotnet run</code>
+            listens on <code class="rounded bg-muted px-1 font-mono text-xs">http://*:5274</code>; Docker publishes
+            its port on every interface already.
+          </li>
+          <li>Let other machines in: allow inbound TCP 5274 in the firewall of this machine.</li>
+          <li>
+            Set <span class="font-medium">Public gateway URL</span> in Settings to this machine's address, e.g.
+            <code class="rounded bg-muted px-1 font-mono text-xs">http://10.10.60.156:5274/oddity</code>. A DHCP
+            address can change; reserve it on the router.
+          </li>
+          <li>
+            Point callers at the API's port, not the Vite dev server's: through Vite every call is
+            recorded with the proxy's address, 127.0.0.1.
+          </li>
+          <li>Change the administrator's secret first (Settings → Account): the seeded one is published.</li>
+        </ol>
+      </details>
+
       <div v-if="admin && liveRows.length" class="overflow-x-auto rounded-lg border bg-card">
         <table class="w-full text-sm">
           <caption class="px-3 pt-3 text-left text-sm font-medium">This gateway now</caption>
@@ -189,6 +223,15 @@ onMounted(async () => {
         </li>
         <li>Use Ollama's own API: the same paths, request JSON and streamed replies.</li>
       </ol>
+    </DocSection>
+
+    <!-- ── Try it ── -->
+    <DocSection id="oddity-try" title="Try it">
+      <p class="text-sm text-muted-foreground">
+        Check a key and send a real request, then see exactly what the gateway answered: the
+        status, the timings, the headers and the reply as it streams.
+      </p>
+      <OddityExplorer ref="explorer" v-model:api-key="pastedKey" :default-model="settings?.defaultModel ?? ''" />
     </DocSection>
 
     <!-- ── Authentication ── -->
@@ -225,6 +268,7 @@ onMounted(async () => {
               <th class="px-3 py-2 font-medium">Method</th>
               <th class="px-3 py-2 font-medium">Path</th>
               <th class="px-3 py-2 font-medium">What it does</th>
+              <th class="px-3 py-2"><span class="sr-only">Try</span></th>
             </tr>
           </thead>
           <tbody>
@@ -234,6 +278,9 @@ onMounted(async () => {
               <td class="px-3 py-2">
                 {{ e.summary }}
                 <span v-if="e.recorded" class="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">logged</span>
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <Button variant="ghost" size="sm" :aria-label="`Try ${e.method} ${e.path}`" @click="tryEndpoint(e.path)">Try</Button>
               </td>
             </tr>
           </tbody>
@@ -309,20 +356,9 @@ onMounted(async () => {
 
     <!-- ── Examples ── -->
     <DocSection id="oddity-examples" title="Examples">
-      <div class="space-y-1.5">
-        <Label for="oddity-docs-key">Your key (optional)</Label>
-        <Input
-          id="oddity-docs-key"
-          v-model="pastedKey"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="odd_…"
-          class="font-mono"
-        />
-        <p class="text-xs text-muted-foreground">
-          Only fills in the examples below. It stays on this page; it is never sent or saved.
-        </p>
-      </div>
+      <p class="text-sm text-muted-foreground">
+        A key typed into <span class="font-medium text-foreground">Try it</span> fills in the examples too.
+      </p>
       <div class="flex flex-wrap gap-1" role="group" aria-label="Example language">
         <button
           v-for="e in EXAMPLES"

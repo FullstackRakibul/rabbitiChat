@@ -99,6 +99,16 @@ export const http = {
   },
 
   /**
+   * A call outside the app's own /api — the Oddity gateway — with the caller's own
+   * headers and NO session token: the gateway takes its own key, and an app session
+   * must never reach it. Resolves with the raw Response for every status, so the
+   * API explorer can show an error exactly as it came back.
+   */
+  async external(url, { method = 'GET', headers = {}, body, signal } = {}) {
+    return fetch(url, { method, headers, body, signal })
+  },
+
+  /**
    * POST and stream the raw response body. Calls onChunk with each decoded
    * text chunk; resolves with the Response (headers stay readable) once done.
    */

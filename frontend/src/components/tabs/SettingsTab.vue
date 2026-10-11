@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { Moon, Sun, Settings, BookOpen } from '@lucide/vue'
+import { Moon, Sun, Settings, BookOpen, KeyRound, Loader2 } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { changeSecret } from '@/services/index.js'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
@@ -37,6 +39,35 @@ const modelValue = computed({
   get: () => props.model,
   set: (v) => emit('update:model', v),
 })
+
+// ---- Change secret ----
+// The server checks the current secret and the rules; this form only reports.
+// Held in memory only and cleared after every attempt.
+const secretOpen = ref(false)
+const secretForm = ref({ current: '', next: '', confirm: '' })
+const secretBusy = ref(false)
+const secretError = ref('')
+const secretDone = ref('')
+
+const secretMismatch = computed(() =>
+  secretForm.value.confirm.length > 0 && secretForm.value.next !== secretForm.value.confirm)
+
+async function submitSecret() {
+  if (secretBusy.value || secretMismatch.value) return
+  secretBusy.value = true
+  secretError.value = ''
+  secretDone.value = ''
+  try {
+    await changeSecret(secretForm.value.current, secretForm.value.next)
+    secretDone.value = 'Secret changed. Your other sessions are signed out; this one carries on.'
+    secretOpen.value = false
+  } catch (e) {
+    secretError.value = e.message
+  } finally {
+    secretForm.value = { current: '', next: '', confirm: '' }
+    secretBusy.value = false
+  }
+}
 
 /** @type {import('vue').Ref<'settings' | 'docs'>} */
 const settingsView = ref('settings')
@@ -85,17 +116,49 @@ const viewTabs = [
             <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Account
             </p>
-            <div class="flex items-center gap-3 rounded-lg border p-3">
+            <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3">
               <span
                 class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
               >
                 {{ initials }}
               </span>
               <span class="flex-1 truncate text-sm font-medium">{{ username }}</span>
+              <Button variant="outline" size="sm" :aria-expanded="secretOpen" @click="secretOpen = !secretOpen; secretError = ''; secretDone = ''">
+                <KeyRound class="h-4 w-4" /> Change secret
+              </Button>
               <Button variant="destructive" size="sm" @click="emit('logout')">
                 Log out
               </Button>
             </div>
+
+            <form v-if="secretOpen" class="flex flex-col gap-3 rounded-lg border p-3" @submit.prevent="submitSecret">
+              <div class="flex flex-col gap-1.5">
+                <Label for="secret-current">Current secret</Label>
+                <Input id="secret-current" v-model="secretForm.current" type="password" autocomplete="current-password" required />
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div class="flex flex-col gap-1.5">
+                  <Label for="secret-next">New secret</Label>
+                  <Input id="secret-next" v-model="secretForm.next" type="password" autocomplete="new-password" minlength="8" required />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="secret-confirm">Repeat the new secret</Label>
+                  <Input id="secret-confirm" v-model="secretForm.confirm" type="password" autocomplete="new-password" required />
+                </div>
+              </div>
+              <p class="text-xs text-muted-foreground">
+                At least 8 characters. Changing it signs out your other sessions.
+              </p>
+              <p v-if="secretMismatch" class="text-sm text-destructive">The two new secrets do not match.</p>
+              <p v-if="secretError" class="text-sm text-destructive">{{ secretError }}</p>
+              <div class="flex gap-2">
+                <Button type="submit" size="sm" :disabled="secretBusy || secretMismatch || !secretForm.confirm">
+                  <Loader2 v-if="secretBusy" class="h-4 w-4 animate-spin" /> Save new secret
+                </Button>
+                <Button type="button" variant="ghost" size="sm" @click="secretOpen = false">Cancel</Button>
+              </div>
+            </form>
+            <p v-if="secretDone" class="text-sm text-muted-foreground">{{ secretDone }}</p>
           </section>
 
           <Separator />
