@@ -43,6 +43,7 @@ public static class TabCatalog
         "settings",
         "notes",
         "logs",
+        "oddity",
         RbacTab,
     };
 
@@ -66,6 +67,7 @@ public static class TabCatalog
         ["settings"] = "Settings",
         ["notes"] = "Notes",
         ["logs"] = "Logs",
+        ["oddity"] = "Oddity",
         [RbacTab] = "Access control",
     };
 
@@ -124,6 +126,15 @@ public static class TabCatalog
     };
 
     /// <summary>
+    /// Ground Control is System plus the Oddity gateway it operates. Additive like
+    /// the tiers below it, so moving a System user to Ground Control removes nothing.
+    /// </summary>
+    private static readonly string[] GroundControlExtraTabs =
+    {
+        "oddity",
+    };
+
+    /// <summary>
     /// Tabs available only to SystemAdmin. Not additive from lower tiers.
     /// </summary>
     private static readonly string[] SystemAdminOnlyTabs =
@@ -140,6 +151,7 @@ public static class TabCatalog
         UserRoles.Normalize(role) switch
         {
             UserRoles.SystemAdmin => All,
+            UserRoles.GroundControl => GeneralTabs.Concat(SystemExtraTabs).Concat(GroundControlExtraTabs).ToArray(),
             UserRoles.System => GeneralTabs.Concat(SystemExtraTabs).ToArray(),
             _ => GeneralTabs,
         };

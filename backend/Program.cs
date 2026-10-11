@@ -264,6 +264,23 @@ builder.Services.AddScoped<RabbitIC.Api.Services.TodoRabbitService>();
 builder.Services.AddScoped<RabbitIC.Api.Services.INoteService,
 							 RabbitIC.Api.Services.NoteService>();
 
+// ---- Oddity gateway ----
+// Its own client to the same Ollama: no timeout (a slow model on a long reply
+// must not be cut off; the caller's disconnect cancels instead), and nothing
+// shared with the app's own chat client.
+builder.Services.AddHttpClient(RabbitIC.Api.Oddity.OddityProxy.ClientName, c =>
+{
+	c.BaseAddress = new Uri(ollamaUrl);
+	c.Timeout = Timeout.InfiniteTimeSpan;
+})
+// Only Content-Type and Accept go upstream (R3). HttpClient would otherwise add a
+// traceparent continuing the caller's own trace — the caller's header by proxy.
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ActivityHeadersPropagator = null });
+builder.Services.AddScoped<RabbitIC.Api.Oddity.OdditySettingsService>();
+builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityKeyService>();
+builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityRecorder>();
+builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityProxy>();
+
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 	p.WithOrigins("http://localhost:5173", "http://192.168.61.41:4200",
@@ -315,6 +332,7 @@ app.ApplicationRbacApis();
 app.ApplicationIeltsApis();
 app.ApplicationComponentSplitterApis();
 app.ApplicationNoteApis();
+app.ApplicationOddityApis();
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);
@@ -330,7 +348,8 @@ app.MapFallback(async ctx =>
 
     var isApiPath = path.StartsWith("/api", StringComparison.OrdinalIgnoreCase)
         || path.StartsWith("/public", StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase);
+        || path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith("/oddity/api", StringComparison.OrdinalIgnoreCase);
 
     var indexHtml = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");
 

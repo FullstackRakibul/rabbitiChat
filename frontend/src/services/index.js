@@ -26,7 +26,7 @@ export {
   deleteContextSource, reorderContextSources,
 } from './context-source.service.js'
 export {
-  myTabs, searchUsers, getUser, setRole, setTabs, listTabs,
+  myTabs, searchUsers, getUser, setRole, setTabs, listTabs, listRoles,
 } from './rbac.service.js'
 export {
   parseComponent, deriveFacts, analyse as analyseComponentSplit,
@@ -37,6 +37,11 @@ export {
   softDeleteNote, restoreNote, permanentDeleteNote,
   shareNote, unshareNote, getPublicNote
 } from './notes.service.js'
+export {
+  gatewayBaseUrl, gatewayUrls, getOdditySettings, saveOdditySettings,
+  listOddityKeys, createOddityKey, updateOddityKey, deleteOddityKey,
+  listOddityRequests, getOddityRequest,
+} from './oddity.service.js'
 export {
   listActivityLogs, listAuditLogs, getActivityLog, getCorrelation,
   getSystemInfo, getLogStats, openLogStream, logClientEvent, flushClientEvents

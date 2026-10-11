@@ -50,6 +50,7 @@ public class TabAccessMiddleware
         ("/api/notes", "notes"),
         ("/api/logs", "logs"),
         ("/api/stream/logs", "logs"),
+        ("/api/oddity", "oddity"),
     };
 
     /// <summary>

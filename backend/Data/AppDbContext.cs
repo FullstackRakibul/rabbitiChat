@@ -45,6 +45,11 @@ public class AppDbContext : DbContext
     public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
     public DbSet<AuditLog>    AuditLogs    => Set<AuditLog>();
 
+    // ---- Oddity gateway ----
+    public DbSet<OddityKey>      OddityKeys     => Set<OddityKey>();
+    public DbSet<OdditySettings> OdditySettings => Set<OdditySettings>();
+    public DbSet<OddityRequest>  OddityRequests => Set<OddityRequest>();
+
     protected override void OnConfiguring(DbContextOptionsBuilder options)
     {
         // Add the audit interceptor when it is available in DI.
@@ -184,5 +189,23 @@ public class AppDbContext : DbContext
         b.Entity<AuditLog>().HasIndex(a => new { a.EntityName, a.EntityKey });
         b.Entity<AuditLog>().HasIndex(a => a.CorrelationId);
         b.Entity<AuditLog>().HasIndex(a => a.UserId);
+
+        // ---- Oddity ----
+        // No relationships on purpose: a request row must outlive its key.
+        b.Entity<OddityKey>().HasIndex(k => k.Prefix).IsUnique();
+        b.Entity<OddityKey>().HasIndex(k => k.OwnerUserId);
+        b.Entity<OddityRequest>().HasIndex(r => new { r.OwnerUserId, r.TimestampUtc });
+        b.Entity<OddityRequest>().HasIndex(r => new { r.KeyId, r.TimestampUtc });
+
+        // SQLite keeps no DateTimeKind; mark Oddity's *Utc columns as UTC on the way
+        // out so the JSON carries a "Z" and the boards never read them as local time.
+        var utc = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, DateTime>(
+            v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+        var utcOrNull = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime?, DateTime?>(
+            v => v, v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+        b.Entity<OddityKey>().Property(k => k.CreatedAtUtc).HasConversion(utc);
+        b.Entity<OddityKey>().Property(k => k.ExpiresAtUtc).HasConversion(utcOrNull);
+        b.Entity<OdditySettings>().Property(s => s.UpdatedAtUtc).HasConversion(utc);
+        b.Entity<OddityRequest>().Property(r => r.TimestampUtc).HasConversion(utc);
     }
 }

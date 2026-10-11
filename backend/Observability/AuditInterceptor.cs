@@ -19,6 +19,8 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
     private static readonly HashSet<string> SkippedEntities = new(StringComparer.OrdinalIgnoreCase)
     {
         nameof(ActivityLog), nameof(AuditLog),
+        // A row per gateway call; auditing it would record every call twice.
+        nameof(OddityRequest),
     };
 
     // Per-SaveChanges staging area (thread-safe via async context).

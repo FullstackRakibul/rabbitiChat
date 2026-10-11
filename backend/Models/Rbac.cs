@@ -8,7 +8,7 @@
 namespace RabbitIC.Api.Models;
 
 /// <summary>
-/// The three roles, as stored in User.Role. A string rather than an int so the
+/// The four roles, as stored in User.Role. A string rather than an int so the
 /// column is readable in SQLite and an unknown future value degrades to
 /// "General" instead of silently becoming a different role.
 /// </summary>
@@ -16,24 +16,49 @@ public static class UserRoles
 {
     public const string General = "General";
     public const string System = "System";
+    /// <summary>Operates the Oddity gateway: System's tabs plus "oddity".</summary>
+    public const string GroundControl = "GroundControl";
     public const string SystemAdmin = "SystemAdmin";
 
-    public static readonly string[] All = { General, System, SystemAdmin };
+    /// <summary>Least to most privileged — the order the admin picker lists them in.</summary>
+    public static readonly string[] All = { General, System, GroundControl, SystemAdmin };
 
     /// <summary>
     /// Maps arbitrary input to a known role. Anything unrecognised — including a
     /// null column on a row written before this feature — reads as General, the
     /// least-privileged role. Failing closed is the point.
     /// </summary>
+    /// <summary>
+    /// The other ways "GroundControl" may be written on input. Deliberately a short
+    /// list for this one role: every other role still has to match exactly, so a
+    /// loose spelling can never land on a more privileged role.
+    /// </summary>
+    private static readonly string[] GroundControlSpellings =
+    {
+        "ground-control", "ground control", "ground_control",
+    };
+
     public static string Normalize(string? role) =>
-        All.FirstOrDefault(r => string.Equals(r, role?.Trim(), StringComparison.OrdinalIgnoreCase))
-        ?? General;
+        All.FirstOrDefault(r => Matches(r, role)) ?? General;
 
     public static bool IsKnown(string? role) =>
-        All.Any(r => string.Equals(r, role?.Trim(), StringComparison.OrdinalIgnoreCase));
+        All.Any(r => Matches(r, role));
 
     public static bool IsSystemAdmin(User user) =>
         Normalize(user.Role) == SystemAdmin;
+
+    /// <summary>Display name, e.g. "Ground Control". Unknown input labels as General.</summary>
+    public static string LabelFor(string? role) =>
+        Normalize(role) == GroundControl ? "Ground Control" : Normalize(role);
+
+    private static bool Matches(string role, string? input)
+    {
+        var value = input?.Trim();
+        if (string.Equals(role, value, StringComparison.OrdinalIgnoreCase)) return true;
+
+        return role == GroundControl &&
+            GroundControlSpellings.Contains(value, StringComparer.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>

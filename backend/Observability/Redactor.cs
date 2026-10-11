@@ -41,6 +41,7 @@ public sealed class Redactor : IRedactor
         "password", "passwordhash", "securitystamp", "concurrencystamp",
         "secret", "salt", "token", "access_token", "refresh_token",
         "apikey", "api_key", "authorization", "licensekey", "cookie",
+        "keyhash",
     };
 
     // Matches a key=value pair where key is on the deny list (query strings).

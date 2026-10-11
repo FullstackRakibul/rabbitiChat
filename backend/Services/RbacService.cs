@@ -95,6 +95,13 @@ public class RbacService
     public IReadOnlyList<TabOptionDto> ListTabs() =>
         TabCatalog.All.Select(k => new TabOptionDto(k, TabCatalog.LabelFor(k))).ToList();
 
+    /// <summary>Every role with its baseline tabs, in catalogue order, for the admin picker.</summary>
+    public IReadOnlyList<RoleOptionDto> ListRoles() =>
+        UserRoles.All
+            .Select(r => new RoleOptionDto(
+                r, UserRoles.LabelFor(r), TabCatalog.EffectiveTabs(r, Array.Empty<string>())))
+            .ToList();
+
     // ---- Admin surface ----
 
     public async Task<RbacResult<UserPageDto>> SearchUsersAsync(

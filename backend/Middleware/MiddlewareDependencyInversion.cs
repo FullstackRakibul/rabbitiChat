@@ -98,6 +98,19 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        /// <summary>
+        /// Oddity. The admin API mounts under /api (behind the "oddity" tab gate);
+        /// the gateway itself under /oddity/api, authenticated by its own keys.
+        /// </summary>
+        public static WebApplication ApplicationOddityApis(this WebApplication app)
+        {
+            var adminApi = app.MapGroup("/api").WithTags("Oddity");
+
+            adminApi.MapOddityAdminApis();
+            app.MapOddityGatewayApis();
+            return app;
+        }
+
         public static WebApplication ApplicationNoteApis(this WebApplication app)
         {
             app.MapNoteApis();

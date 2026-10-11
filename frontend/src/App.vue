@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote, Activity
+  Scissors, StickyNote, Activity, Satellite
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -41,6 +41,8 @@ import RbacTab from '@/components/tabs/RbacTab.vue'
 import NotesTab from '@/components/tabs/NotesTab.vue'
 import PublicNote from '@/components/notes/PublicNote.vue'
 import LogsTab from '@/components/tabs/LogsTab.vue'
+import OddityTab from '@/components/tabs/OddityTab.vue'
+import OddityDocsPage from '@/components/oddity/OddityDocsPage.vue'
 
 const { theme, toggleTheme } = useTheme()
 
@@ -391,6 +393,9 @@ const activeTab = computed({
 
 const isPublicNote = computed(() => route.name === 'public-note')
 
+/** The gateway's caller docs — public, like a shared note. */
+const isPublicDocs = computed(() => route.name === 'oddity-docs')
+
 /**
  * Every tab this build can render, with the id the backend knows it by. Which of
  * these a given user actually sees is decided by the server (see `allowedTabs`),
@@ -413,6 +418,7 @@ const ALL_TABS = [
   { id: 'rbac', label: 'Access', icon: ShieldCheck },
   { id: 'notes', label: 'Notes', icon: StickyNote },
   { id: 'logs', label: 'Logs', icon: Activity },
+  { id: 'oddity', label: 'Oddity', icon: Satellite },
 ]
 
 // ---- Permissions ----
@@ -842,7 +848,8 @@ const notesTabRef = ref(null)
 
 <template>
   <PublicNote v-if="isPublicNote" />
-  
+  <OddityDocsPage v-else-if="isPublicDocs" />
+
   <template v-else>
     <!-- Login gate -->
     <LoginGate v-if="!loggedIn" v-model:username="loginUser" v-model:secret="loginSecret" :busy="loginBusy"
@@ -947,6 +954,13 @@ const notesTabRef = ref(null)
       
       <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <LogsTab />
+      </TabsContent>
+
+      <!-- Oddity gateway. Rendered only for a user who holds the tab; its API
+           answers 403 to anyone else regardless. -->
+      <TabsContent v-if="allowedTabs?.includes('oddity')" value="oddity"
+        class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <OddityTab />
       </TabsContent>
     </AppShell>
 

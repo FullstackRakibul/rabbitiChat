@@ -42,6 +42,7 @@ export const MODULE_ROUTES = [
   { key: 'rbac', path: '/access' },
   { key: 'notes', path: '/notes' },
   { key: 'logs', path: '/logs' },
+  { key: 'oddity', path: '/oddity' },
 ]
 
 /** Tab key → URL path. */
@@ -75,6 +76,9 @@ export const router = createRouter({
     })),
     { path: '/notes/:id', name: 'notes-detail', component: Passthrough, meta: { tab: 'notes' } },
     { path: '/n/:token', name: 'public-note', component: Passthrough },
+    // The gateway's caller docs. No meta.tab, so the guard lets anyone through;
+    // App.vue renders it outside the login gate.
+    { path: '/oddity/docs', name: 'oddity-docs', component: Passthrough },
     // Anything else lands on the dashboard rather than showing a dead screen.
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],

@@ -35,6 +35,7 @@ public static class SchemaUpgrade
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
         EnsureIeltsTables(db);
+        EnsureOddityTables(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
         // Only adopt orphans when we just introduced the column (i.e. an old file with existing rows).
@@ -513,6 +514,100 @@ public static class SchemaUpgrade
             
         db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_Notes_OwnerUserId_IsDeleted_IsPinned_UpdatedAt"" ON ""Notes"" (""OwnerUserId"", ""IsDeleted"", ""IsPinned"", ""UpdatedAt"");");
         db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_Notes_ShareToken"" ON ""Notes"" (""ShareToken"") WHERE ""ShareToken"" IS NOT NULL;");
+    }
+
+    /// <summary>
+    /// The Oddity gateway's tables, matching what EnsureCreated makes for a new file.
+    /// OddityRequests has no foreign key by design: its rows outlive the key.
+    /// </summary>
+    private static void EnsureOddityTables(AppDbContext db)
+    {
+        if (!TableExists(db, "OddityKeys"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""OddityKeys"" (
+                    ""Id""               INTEGER NOT NULL CONSTRAINT ""PK_OddityKeys"" PRIMARY KEY AUTOINCREMENT,
+                    ""OwnerUserId""      INTEGER NOT NULL,
+                    ""Name""             TEXT NOT NULL,
+                    ""Note""             TEXT NULL,
+                    ""Prefix""           TEXT NOT NULL,
+                    ""KeyHash""          TEXT NOT NULL,
+                    ""DefaultProfileId"" INTEGER NULL,
+                    ""RatePerMinute""    INTEGER NULL,
+                    ""Enabled""          INTEGER NOT NULL,
+                    ""ExpiresAtUtc""     TEXT NULL,
+                    ""CreatedAtUtc""     TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_OddityKeys_OwnerUserId"" ON ""OddityKeys"" (""OwnerUserId"");");
+            db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_OddityKeys_Prefix"" ON ""OddityKeys"" (""Prefix"");");
+        }
+
+        if (!TableExists(db, "OdditySettings"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""OdditySettings"" (
+                    ""Id""                   INTEGER NOT NULL CONSTRAINT ""PK_OdditySettings"" PRIMARY KEY AUTOINCREMENT,
+                    ""Enabled""              INTEGER NOT NULL,
+                    ""DefaultModel""         TEXT NOT NULL,
+                    ""AllowedModels""        TEXT NOT NULL,
+                    ""NumCtx""               INTEGER NOT NULL,
+                    ""ReplyReserve""         INTEGER NOT NULL,
+                    ""KeepAlive""            TEXT NOT NULL,
+                    ""DefaultRatePerMinute"" INTEGER NOT NULL,
+                    ""MaxInlineFileMb""      INTEGER NOT NULL,
+                    ""LogBodies""            TEXT NOT NULL,
+                    ""RetentionDays""        INTEGER NOT NULL,
+                    ""UpdatedAtUtc""         TEXT NOT NULL,
+                    ""UpdatedByUserId""      INTEGER NULL,
+                    ""PublicBaseUrl""        TEXT NOT NULL
+                );");
+        }
+        else if (!ColumnExists(db, "OdditySettings", "PublicBaseUrl"))
+        {
+            // Phase 2 databases predate the public gateway URL.
+            db.Database.ExecuteSqlRaw(@"ALTER TABLE ""OdditySettings"" ADD COLUMN ""PublicBaseUrl"" TEXT NOT NULL DEFAULT '';");
+        }
+
+        if (!TableExists(db, "OddityRequests"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""OddityRequests"" (
+                    ""Id""                    INTEGER NOT NULL CONSTRAINT ""PK_OddityRequests"" PRIMARY KEY AUTOINCREMENT,
+                    ""TimestampUtc""          TEXT NOT NULL,
+                    ""CorrelationId""         TEXT NULL,
+                    ""OwnerUserId""           INTEGER NOT NULL,
+                    ""KeyId""                 INTEGER NOT NULL,
+                    ""KeyName""               TEXT NOT NULL,
+                    ""ClientIp""              TEXT NULL,
+                    ""UserAgent""             TEXT NULL,
+                    ""Endpoint""              TEXT NOT NULL,
+                    ""RequestedModel""        TEXT NULL,
+                    ""Model""                 TEXT NULL,
+                    ""Profile""               TEXT NULL,
+                    ""Stream""                INTEGER NOT NULL,
+                    ""StatusCode""            INTEGER NOT NULL,
+                    ""Outcome""               TEXT NOT NULL,
+                    ""Error""                 TEXT NULL,
+                    ""DoneReason""            TEXT NULL,
+                    ""PromptTokens""          INTEGER NULL,
+                    ""CachedPromptTokens""    INTEGER NULL,
+                    ""OutputTokens""          INTEGER NULL,
+                    ""LoadMs""                INTEGER NULL,
+                    ""PromptMs""              INTEGER NULL,
+                    ""GenerationMs""          INTEGER NULL,
+                    ""FirstByteMs""           INTEGER NULL,
+                    ""TotalMs""               INTEGER NOT NULL,
+                    ""EstimatedPromptTokens"" INTEGER NULL,
+                    ""AddedTokens""           INTEGER NULL,
+                    ""ReceiptJson""           TEXT NULL,
+                    ""RequestPreview""        TEXT NULL,
+                    ""ResponsePreview""       TEXT NULL,
+                    ""RequestBytes""          INTEGER NOT NULL,
+                    ""ResponseBytes""         INTEGER NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_OddityRequests_KeyId_TimestampUtc"" ON ""OddityRequests"" (""KeyId"", ""TimestampUtc"");");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_OddityRequests_OwnerUserId_TimestampUtc"" ON ""OddityRequests"" (""OwnerUserId"", ""TimestampUtc"");");
+        }
     }
 
     private static void EnsureObservabilityTables(AppDbContext db)

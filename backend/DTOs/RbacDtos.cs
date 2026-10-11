@@ -31,6 +31,12 @@ public record UserDetailDto(
 public record TabOptionDto(string Key, string Label);
 
 /// <summary>
+/// A role in the admin picker, with the tabs it gives before any grant — so the
+/// UI can preview a role change without keeping its own copy of the baselines.
+/// </summary>
+public record RoleOptionDto(string Key, string Label, List<string> DefaultTabs);
+
+/// <summary>
 /// What the shell asks for on login: the caller's own role and tabs. Deliberately
 /// not the admin detail shape — it carries no other user's data and needs no
 /// admin rights.

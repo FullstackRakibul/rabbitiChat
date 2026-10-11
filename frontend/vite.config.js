@@ -21,6 +21,8 @@ export default defineConfig({
     proxy: {
       // '/api': 'http://localhost:8080'
       "/api": "http://localhost:5274",
+      // The Oddity gateway, so an Ollama client can point at the dev server too.
+      "/oddity/api": "http://localhost:5274",
       // '/api': 'http://192.168.61.41:5274'
     },
   },

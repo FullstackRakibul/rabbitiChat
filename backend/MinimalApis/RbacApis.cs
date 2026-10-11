@@ -61,6 +61,19 @@ namespace RabbitIC.Api.MinimalApis
             })
             .WithSummary("Known tab keys, for the permission checklist.");
 
+            group.MapGet("/roles", async (
+                HttpContext ctx, AppDbContext db, RbacService svc) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                if (!Models.UserRoles.IsSystemAdmin(user))
+                    return Forbid("SystemAdmin role required.");
+
+                return Results.Ok(svc.ListRoles());
+            })
+            .WithSummary("Every role with its label and default tabs, for the role picker.");
+
             group.MapGet("/users", async (
                 HttpContext ctx, AppDbContext db, RbacService svc,
                 string? search, int? page, int? pageSize, CancellationToken ct) =>

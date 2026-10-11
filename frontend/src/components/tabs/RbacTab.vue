@@ -11,8 +11,8 @@
  * and any refusal that arrives anyway is surfaced as the server worded it.
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { Loader2, Search, ShieldCheck, UserCog } from '@lucide/vue'
-import { searchUsers, getUser, setRole, setTabs, listTabs } from '@/services/index.js'
+import { Loader2, Satellite, Search, ShieldCheck, UserCog } from '@lucide/vue'
+import { searchUsers, getUser, setRole, setTabs, listTabs, listRoles } from '@/services/index.js'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -40,6 +40,7 @@ const listError = ref('')
 
 // ---- Detail state ----
 const tabCatalog = ref([])
+const roleCatalog = ref([])     // [{ key, label, defaultTabs }] — from the server, never a local copy
 const selected = ref(null)      // UserDetailDto
 const detailBusy = ref(false)
 const saving = ref(false)
@@ -48,8 +49,6 @@ const toast = ref('')           // transient success line
 
 const draftRole = ref('General')
 const draftGrants = ref([])     // explicit grants only — baseline is not stored here
-
-const ROLES = ['General', 'System', 'SystemAdmin']
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 
@@ -88,9 +87,9 @@ const baselineTabs = ref([])
 
 /**
  * The baseline follows the draft role, not the saved one, so switching the
- * dropdown to System immediately shows which tabs that role would cover. It is
- * read from the server's own answer for the saved role and adjusted optimistically
- * only when the role picker moves; saving re-reads the truth.
+ * dropdown to System immediately shows which tabs that role would cover. Both
+ * come from the server: the saved role from the user's own detail, a role not
+ * yet saved from /admin/rbac/roles. Saving re-reads the truth.
  */
 watch(draftRole, (role) => {
   if (!selected.value) return
@@ -98,20 +97,8 @@ watch(draftRole, (role) => {
     baselineTabs.value = [...selected.value.roleDefaultTabs]
     return
   }
-  baselineTabs.value = predictBaseline(role)
+  baselineTabs.value = [...(roleCatalog.value.find((r) => r.key === role)?.defaultTabs ?? [])]
 })
-
-/**
- * Mirror of the backend's role → default-tabs map, used only to preview a role
- * the user has not saved yet. The saved state always comes from the server.
- */
-function predictBaseline(role) {
-  const general = ['chat', 'dashboard', 'todo', 'jsonto', '5lakhs', 'ielts', 'settings']
-  const system = [...general, 'workspace', 'docs', 'search', 'sources']
-  if (role === 'SystemAdmin') return tabCatalog.value.map((t) => t.key)
-  if (role === 'System') return system
-  return general
-}
 
 function isBaseline(key) {
   return baselineTabs.value.includes(key)
@@ -215,10 +202,20 @@ function goPage(next) {
   refreshList()
 }
 
+/**
+ * The kit has four badge variants and red means "error" in this theme, so Ground
+ * Control shares System's secondary variant and is told apart by its label and
+ * a Satellite icon in the template.
+ */
 function roleVariant(role) {
   if (role === 'SystemAdmin') return 'default'
+  if (role === 'GroundControl') return 'secondary'
   if (role === 'System') return 'secondary'
   return 'outline'
+}
+
+function roleLabel(role) {
+  return roleCatalog.value.find((r) => r.key === role)?.label ?? role
 }
 
 function labelFor(key) {
@@ -227,7 +224,7 @@ function labelFor(key) {
 
 onMounted(async () => {
   try {
-    tabCatalog.value = await listTabs()
+    ;[tabCatalog.value, roleCatalog.value] = await Promise.all([listTabs(), listRoles()])
   } catch (e) {
     listError.value = e.message
   }
@@ -297,7 +294,10 @@ defineExpose({ refresh: refreshList })
               </div>
               <span class="text-xs text-muted-foreground">{{ u.tabCount }} tabs</span>
             </div>
-            <Badge :variant="roleVariant(u.role)" class="shrink-0">{{ u.role }}</Badge>
+            <Badge :variant="roleVariant(u.role)" class="shrink-0 gap-1">
+              <Satellite v-if="u.role === 'GroundControl'" class="h-3 w-3" aria-hidden="true" />
+              {{ roleLabel(u.role) }}
+            </Badge>
           </button>
         </div>
 
@@ -335,7 +335,10 @@ defineExpose({ refresh: refreshList })
                 {{ selected.grantedTabs.length }} explicit grants
               </p>
             </div>
-            <Badge :variant="roleVariant(selected.role)">{{ selected.role }}</Badge>
+            <Badge :variant="roleVariant(selected.role)" class="gap-1">
+              <Satellite v-if="selected.role === 'GroundControl'" class="h-3 w-3" aria-hidden="true" />
+              {{ roleLabel(selected.role) }}
+            </Badge>
           </div>
 
           <!-- Guardrail notices: why the controls below may be locked. -->
@@ -360,7 +363,7 @@ defineExpose({ refresh: refreshList })
                 :disabled="isSelf || saving"
                 class="mt-1.5 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option v-for="r in ROLES" :key="r" :value="r">{{ r }}</option>
+                <option v-for="r in roleCatalog" :key="r.key" :value="r.key">{{ r.label }}</option>
               </select>
               <p class="mt-1.5 text-xs text-muted-foreground">
                 Sets the baseline tabs below. Grants add on top of it.

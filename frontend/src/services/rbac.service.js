@@ -60,3 +60,14 @@ export function setTabs(id, tabKeys) {
 export function listTabs() {
   return http.get('/admin/rbac/tabs')
 }
+
+/**
+ * Every role, least to most privileged, with the tabs it gives before any grant:
+ *   [{ key, label, defaultTabs: ['dashboard', …] }]
+ *
+ * The role picker previews a change from this, so the frontend never keeps its
+ * own copy of the role baselines.
+ */
+export function listRoles() {
+  return http.get('/admin/rbac/roles')
+}
