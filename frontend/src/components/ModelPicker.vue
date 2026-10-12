@@ -7,7 +7,7 @@
  * they carry a badge. The last choice is remembered in localStorage.
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { Check, ChevronDown, Cloud, HardDrive } from '@lucide/vue'
+import { Check, ChevronDown, Cloud, HardDrive, Lock } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { listModelsGrouped, loadModelChoice, saveModelChoice } from '@/services/model.service.js'
 
@@ -22,6 +22,10 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'update:source'])
 
 const groups = ref([])
+// True when the caller's role is held to a single model. The server says so,
+// and it is the only thing that may say so: a browser-side guess would either
+// lock someone who is free or offer a model the server will refuse.
+const locked = ref(false)
 const loading = ref(true)
 const error = ref('')
 const open = ref(false)
@@ -48,7 +52,9 @@ function choose(model) {
 
 onMounted(async () => {
   try {
-    groups.value = await listModelsGrouped()
+    const served = await listModelsGrouped()
+    groups.value = served.groups
+    locked.value = served.locked
 
     // Restore the remembered choice when it still exists; otherwise fall back to
     // the first local model, so a vanished cloud plan can't leave a dead picker.
@@ -60,6 +66,13 @@ onMounted(async () => {
     // Never auto-select a metered model: spending someone's quota has to be a
     // deliberate act. With no local model available the picker stays empty and
     // the user opts in explicitly.
+    // Locked: the one served model IS the choice, whatever was remembered, so
+    // the first send after an admin narrows the policy cannot use a stale name.
+    if (locked.value && all.length === 1) {
+      if (props.modelValue !== all[0].name || props.source !== all[0].source) choose(all[0])
+      return
+    }
+
     const pick = match || all.find((m) => m.source === 'local' && !m.metered)
     if (pick && !props.modelValue) choose(pick)
   } catch (e) {
@@ -72,7 +85,21 @@ onMounted(async () => {
 
 <template>
   <div class="relative">
+    <!--
+      Locked: plain text, not a disabled dropdown. A disabled dropdown still
+      lists the models the role may not run, which is the opposite of the point.
+    -->
+    <div
+      v-if="locked && !loading"
+      class="flex h-9 w-full items-center gap-2 rounded-md border border-dashed bg-muted/40 px-3 text-sm"
+    >
+      <Lock class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span class="min-w-0 flex-1 truncate text-left font-medium">{{ modelValue }}</span>
+      <span class="shrink-0 text-xs text-muted-foreground">Set by your role</span>
+    </div>
+
     <button
+      v-else
       type="button"
       :disabled="disabled || loading"
       :class="cn(

@@ -21,10 +21,27 @@ function labelFor(model, key) {
 
 /**
  * Every model the server can serve.
+ *
+ * For a role held to a list, the server has already filtered this down; the
+ * browser never sees a model it may not run. That filtering is convenience,
+ * not the control - every endpoint enforces the policy itself.
  * @returns {Promise<Array<{name, source, contextLength, capabilities, metered, sourceLabel}>>}
  */
 export function listModels() {
   return http.get('/models')
+}
+
+/**
+ * The same list plus whether the role is held to a single model.
+ *
+ * `locked` rides in the X-Model-Locked header rather than the body, so the
+ * plain listModels() shape stays exactly as every existing caller expects.
+ * @returns {Promise<{models: Array, locked: boolean}>}
+ */
+export async function listModelsWithPolicy() {
+  const res = await http.raw('/models')
+  const models = await res.json()
+  return { models, locked: res.headers.get('X-Model-Locked') === 'true' }
 }
 
 /** True when this model can be used for tool calling (agentic search). */
@@ -35,10 +52,10 @@ export function supportsTools(model) {
 /**
  * The same list arranged for a picker: local first (the private default), then
  * Ollama cloud, then any configured OpenAI-compatible provider in config order.
- * @returns {Promise<Array<{key: string, label: string, models: Array}>>}
+ * @returns {Promise<{groups: Array<{key: string, label: string, models: Array}>, locked: boolean}>}
  */
 export async function listModelsGrouped() {
-  const models = await listModels()
+  const { models, locked } = await listModelsWithPolicy()
   const order = ['local', 'cloud']
 
   const groups = []
@@ -55,7 +72,9 @@ export async function listModelsGrouped() {
     g.models.push(m)
   }
 
-  return groups
+  // Returned together, from the one request: a second call for `locked` could
+  // answer differently and leave the picker disagreeing with its own list.
+  return { groups, locked }
 }
 
 /** Remembers the last picked model across reloads. Shape: { source, model }. */

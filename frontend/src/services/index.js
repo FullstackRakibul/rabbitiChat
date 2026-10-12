@@ -19,7 +19,7 @@ export {
   addCard, updateCard, deleteCard, moveCard,
 } from './todorabbit.service.js'
 export {
-  listModels, listModelsGrouped, saveModelChoice, loadModelChoice,
+  listModels, listModelsWithPolicy, listModelsGrouped, saveModelChoice, loadModelChoice,
 } from './model.service.js'
 export {
   listContextSources, createContextSource, updateContextSource,
