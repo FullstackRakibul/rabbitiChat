@@ -35,7 +35,12 @@ const BIN_DIR = path.join(EVAL_ROOT, 'api-bin')
 // ---- Expected values, written by hand ----
 // These mirror the design contract (§3.1), not the code: a check that read them
 // from TabCatalog.cs would only prove the code agrees with itself.
-const GENERAL_TABS = ['dashboard', 'todo', 'jsonto', '5lakhs', 'notes', 'sources', 'settings']
+// The model-policy build removed 'jsonto' from the General baseline (it is a
+// grant now, not a default) — see docs/MODEL_POLICY_PROMPT.md §1. These two
+// checks only use this list to build the SYSTEM and Ground Control expectations,
+// which are General's baseline plus their own extras, so the change belongs here
+// rather than in each check.
+const GENERAL_TABS = ['dashboard', 'todo', '5lakhs', 'notes', 'sources', 'settings']
 const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter']
 const ROLE_KEYS = ['General', 'System', 'GroundControl', 'SystemAdmin']
 
@@ -241,7 +246,7 @@ export function buildApi() {
  * is the working directory, so uploads land there too. Reuse `runDir` to restart
  * on the same database.
  */
-export async function startApi({ fakeUrl, runDir, port }) {
+export async function startApi({ fakeUrl, runDir, port, env: extraEnv } = {}) {
   fs.mkdirSync(runDir, { recursive: true })
   // A port someone else holds would answer the readiness check, and every call
   // after it would reach THEIR server and database. Refuse rather than guess.
@@ -264,6 +269,11 @@ export async function startApi({ fakeUrl, runDir, port }) {
     OllamaCloud__BaseUrl: fakeUrl,
     Logging__LogLevel__Default: 'Warning',
     Logging__LogLevel__Microsoft__AspNetCore: 'Warning',
+
+    // A caller's own settings, applied last so a suite can configure a source
+    // this one blanks (model-policy-eval points the cloud source at its fake,
+    // so a refusal there is the policy's and not a missing key).
+    ...extraEnv,
   }
 
   const proc = spawn('dotnet', [

@@ -112,7 +112,7 @@ public static class TabCatalog
     /// </summary>
     private static readonly string[] GeneralTabs =
     {
-        "dashboard", "todo", "jsonto", "5lakhs", "notes", "sources", "settings",
+        "dashboard", "todo", "notes", "sources", "settings", "5lakhs",
     };
 
     /// <summary>

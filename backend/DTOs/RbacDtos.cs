@@ -53,3 +53,25 @@ public record SetRoleInput(string? Role);
 /// dropped rather than rejected, so the UI can post back whatever it has checked.
 /// </summary>
 public record SetTabsInput(List<string>? TabKeys);
+
+/// <summary>
+/// One role's model policy, as the Access screen's "Models by role" shows it.
+/// An empty <paramref name="AllowedModels"/> means every local model.
+/// </summary>
+/// <param name="CanRestrict">
+/// False for SystemAdmin, whose row is read-only: an administrator locked out of
+/// every model could not undo it through a UI that needs one.
+/// </param>
+public record RoleModelPolicyDto(
+    string Role,
+    string Label,
+    List<string> AllowedModels,
+    string DefaultModel,
+    bool CanRestrict,
+    DateTime? UpdatedAtUtc);
+
+/// <summary>
+/// A saved policy. An empty list clears the restriction, and then the default is
+/// cleared too — the caller's own fallback decides, as it always has.
+/// </summary>
+public record RoleModelPolicyInput(List<string>? AllowedModels, string? DefaultModel);

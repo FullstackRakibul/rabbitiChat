@@ -23,9 +23,21 @@ namespace RabbitIC.Api.MinimalApis
             // source and a metered flag. Routed through ChatService so this endpoint
             // never names a concrete source.
             group.MapGet("/models", async (
-                ChatService chat, IModelSourceRegistry registry, CancellationToken ct) =>
+                HttpContext ctx, AppDbContext db, ChatService chat,
+                IModelSourceRegistry registry, Rbac.ModelPolicy modelPolicy,
+                CancellationToken ct) =>
             {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
                 var models = await chat.ListAllModelsAsync(ct);
+
+                // Convenience, not control: the picker stops offering what every
+                // endpoint would refuse anyway (rule 4). An unrestricted role's
+                // list is returned untouched.
+                models = await modelPolicy.FilterAsync(user, models, m => (m.Name, m.Source), ct);
+                var locked = await modelPolicy.IsLockedAsync(user, ct);
+                if (locked) ctx.Response.Headers["X-Model-Locked"] = "true";
 
                 // A configured provider names its own picker group; the built-in
                 // sources return null and keep the labels the client already has.
@@ -36,7 +48,8 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(models
                     .Select(m => new ModelDto(
                         m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered,
-                        labels.TryGetValue(m.Source, out var label) ? label : null))
+                        labels.TryGetValue(m.Source, out var label) ? label : null,
+                        locked))
                     .ToList());
             });
 

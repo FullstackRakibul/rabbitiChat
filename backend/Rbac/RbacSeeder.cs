@@ -103,4 +103,51 @@ public static class RbacSeeder
                 AdminUsername, UserRoles.Normalize(previous), UserRoles.SystemAdmin);
         }
     }
+
+    /// <summary>
+    /// One model-policy row per role (§3.2 of docs/MODEL_POLICY_PROMPT.md).
+    ///
+    /// Only for roles that have no row yet, so a role added in a later build gets
+    /// its row on the next start and an administrator's edit is NEVER overwritten
+    /// — the same reasoning as the admin secret above: a restart must not undo a
+    /// deliberate change.
+    ///
+    /// General starts confined to the install's default extraction model; every
+    /// other role starts unrestricted, which is both today's behaviour and the
+    /// safe default for a missing row.
+    /// </summary>
+    public static void SeedModelPolicies(AppDbContext db, IConfiguration config, ILogger logger)
+    {
+        var generalDefault =
+            Blank(config["Extraction:DefaultModel"])
+            ?? Blank(config["Ollama:ExtractionModel"])
+            ?? "gemma4:12b";
+
+        var existing = db.RoleModelPolicies.Select(p => p.Role).ToList();
+        var added = new List<string>();
+
+        foreach (var role in UserRoles.All)
+        {
+            if (existing.Any(r => UserRoles.Normalize(r) == role)) continue;
+
+            var restricted = role == UserRoles.General;
+            db.RoleModelPolicies.Add(new RoleModelPolicy
+            {
+                Role = role,
+                AllowedModels = restricted ? generalDefault : "",
+                DefaultModel = restricted ? generalDefault : "",
+                UpdatedAtUtc = DateTime.UtcNow,
+            });
+            added.Add(role);
+        }
+
+        if (added.Count == 0) return;
+
+        db.SaveChanges();
+        logger.LogInformation(
+            "RBAC: seeded model policies for {Roles} (General limited to {Model}).",
+            string.Join(", ", added), generalDefault);
+    }
+
+    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 }

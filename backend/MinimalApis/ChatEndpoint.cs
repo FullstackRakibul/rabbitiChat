@@ -36,7 +36,8 @@ namespace RabbitIC.Api.MinimalApis
             IContextSourceService contextSources,
             WebSearchRunner webSearchRunner,
             IConfiguration config,
-            ILoggerFactory logs)
+            ILoggerFactory logs,
+            Rbac.ModelPolicy modelPolicy)
         {
             var log = logs.CreateLogger("ChatEndpoint");
             var ct = ctx.RequestAborted;
@@ -53,6 +54,16 @@ namespace RabbitIC.Api.MinimalApis
             {
                 ctx.Response.StatusCode = 400;
                 await ctx.Response.WriteAsync("model and message are required.");
+                return;
+            }
+
+            // The model policy, before the conversation and the user's message are
+            // stored: a refused request must leave no trace (§3.1, §9).
+            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct: ct);
+            if (!policy.Allowed)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await ctx.Response.WriteAsync(policy.Error!);
                 return;
             }
 

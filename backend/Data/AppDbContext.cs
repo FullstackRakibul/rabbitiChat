@@ -21,6 +21,9 @@ public class AppDbContext : DbContext
 
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
+    /// <summary>Which models each role may run — see Rbac/ModelPolicy.cs.</summary>
+    public DbSet<RoleModelPolicy> RoleModelPolicies => Set<RoleModelPolicy>();
+
     /// <summary>Connected sources and buyer profiles — one table, split by Kind.</summary>
     public DbSet<ContextSource> ContextSources => Set<ContextSource>();
 
@@ -161,6 +164,10 @@ public class AppDbContext : DbContext
             .HasForeignKey(a => a.ReadingAttemptId)
             .OnDelete(DeleteBehavior.Cascade);
         b.Entity<ReadingAttemptAnswer>().HasIndex(a => a.ReadingAttemptId);
+
+        // One row per role, keyed by the role name itself: there is nothing else
+        // to identify it by, and a surrogate key would allow two rows for one role.
+        b.Entity<RoleModelPolicy>().HasKey(p => p.Role);
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);

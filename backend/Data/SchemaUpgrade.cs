@@ -34,6 +34,7 @@ public static class SchemaUpgrade
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
+        EnsureRoleModelPolicyTable(db);
         EnsureIeltsTables(db);
         EnsureOddityTables(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
@@ -377,6 +378,26 @@ public static class SchemaUpgrade
     private static void AddColumnIfMissing(AppDbContext db, string table, string column, string ddl)
     {
         if (!ColumnExists(db, table, column)) db.Database.ExecuteSqlRaw(ddl);
+    }
+
+    /// <summary>
+    /// Which models each role may run (Rbac/ModelPolicy.cs). Only needed for a
+    /// database that predates the feature: on a fresh file EnsureCreated() builds
+    /// it from the EF model. The ROWS are seeded in RbacSeeder, which runs for
+    /// both cases — Run() above returns early on a brand-new database.
+    /// </summary>
+    private static void EnsureRoleModelPolicyTable(AppDbContext db)
+    {
+        if (TableExists(db, "RoleModelPolicies")) return;
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE ""RoleModelPolicies"" (
+                ""Role""            TEXT NOT NULL CONSTRAINT ""PK_RoleModelPolicies"" PRIMARY KEY,
+                ""AllowedModels""   TEXT NOT NULL DEFAULT '',
+                ""DefaultModel""    TEXT NOT NULL DEFAULT '',
+                ""UpdatedAtUtc""    TEXT NOT NULL,
+                ""UpdatedByUserId"" INTEGER NULL
+            );");
     }
 
     private static void EnsureExtractionTables(AppDbContext db)

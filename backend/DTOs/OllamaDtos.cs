@@ -59,7 +59,16 @@
             /// knows; configured providers supply their own so a new one needs
             /// no frontend edit.
             /// </summary>
-            string? SourceLabel = null);
+            string? SourceLabel = null,
+
+            /// <summary>
+            /// True when the caller's role allows exactly one model, so the UI
+            /// shows it as plain text with a lock instead of a dropdown. Sent on
+            /// the row AND as the X-Model-Locked header, because a caller that
+            /// ignores unknown fields (Oddity's /api/tags passthrough) still sees
+            /// the header, and the field keeps the browser from a second request.
+            /// </summary>
+            bool Locked = false);
 
 
         /// <summary>Proxied web search. MaxResults is clamped to 1..10 server-side.</summary>

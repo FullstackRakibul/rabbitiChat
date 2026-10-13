@@ -166,6 +166,49 @@ public sealed class ExtractionDispatcher(
         }
     }
 
+    /// <summary>
+    /// Which model an extraction WOULD use, and which profile decided it, without
+    /// running anything.
+    ///
+    /// This exists so the model policy can be applied to the RESOLVED model: the
+    /// fallback order is request → buyer profile → install default, so a caller
+    /// who names no model can still be pointed at one their role cannot run. The
+    /// endpoint checks this answer before dispatching, which is what keeps a
+    /// refused extraction from writing a run row or reaching Ollama.
+    /// </summary>
+    /// <returns>
+    /// The model name (null when nothing but the install default applies, which
+    /// the fallback resolves from configuration) and the profile that named it.
+    /// </returns>
+    public async Task<(string? Model, BuyerProfile? Profile)> ResolveModelAsync(
+        Document doc, Func<Task<string>> chunkText, int? forcedProfileId, string? model,
+        CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            // A named model wins, so the profile does not matter to the answer.
+            return (model, null);
+        }
+
+        var isPdf = doc.FilePath is not null && File.Exists(doc.FilePath)
+                    && Path.GetExtension(doc.FilePath).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+
+        string probeText; string? producer = null;
+        if (isPdf)
+        {
+            try { (probeText, producer) = ReadPdfProbe(doc.FilePath!); }
+            catch { probeText = ""; }
+        }
+        else
+        {
+            var text = await chunkText();
+            probeText = text.Length > 4000 ? text[..4000] : text;
+        }
+
+        var (profile, _) = await ResolveProfileAsync(probeText, producer, forcedProfileId, ct);
+        return (NullIfBlank(profile?.ExtractionModel), profile);
+    }
+
     /// <summary>Detection dry-run for tuning a DetectPattern — no parsing, no model call.</summary>
     public async Task<DetectProbe> ProbeAsync(Document doc, Func<Task<string>> chunkText, CancellationToken ct = default)
     {

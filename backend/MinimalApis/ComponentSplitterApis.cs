@@ -95,13 +95,19 @@ public static class ComponentSplitterApis
         // its existing reader. Frames: stage / ai / proposal / error.
         app.MapPost("/component-splitter/analyse", async (
             SplitAnalyseRequest req, HttpContext ctx, AppDbContext db,
-            SplitterService splitter, CancellationToken ct) =>
+            SplitterService splitter, RabbitIC.Api.Rbac.ModelPolicy modelPolicy,
+            CancellationToken ct) =>
         {
             var user = await Authorization.ResolveUser(ctx, db);
             if (user is null) return Results.Unauthorized();
 
             if (string.IsNullOrWhiteSpace(req.Model))
                 return Results.BadRequest(new { error = "A model is required for the reasoning stage." });
+
+            // The model policy, before the reasoning stage spends anything.
+            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct: ct);
+            if (!policy.Allowed)
+                return Results.Json(new { error = policy.Error }, statusCode: StatusCodes.Status403Forbidden);
 
             ComponentIr ir;
             try

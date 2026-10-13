@@ -9,6 +9,7 @@
 // A non-admin therefore gets 403 from every admin route by the same code path,
 // with no route able to forget the check.
 
+using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.DTOs.Rbac;
@@ -73,6 +74,137 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(svc.ListRoles());
             })
             .WithSummary("Every role with its label and default tabs, for the role picker.");
+
+            // ---- Models by role ----
+            // The policy editor behind Access. Reading and writing are both
+            // SystemAdmin only; the rule itself lives in Rbac/ModelPolicy.cs and
+            // is never restated here.
+            group.MapGet("/model-policies", async (
+                HttpContext ctx, AppDbContext db, ChatService chat,
+                Rbac.ModelPolicy modelPolicy, CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                if (!Models.UserRoles.IsSystemAdmin(user))
+                    return Forbid("SystemAdmin role required.");
+
+                var rows = await modelPolicy.RowsAsync(ct);
+
+                // Only local models can be allowed (§3.1), so only those are
+                // offered as choices — the editor cannot propose a cloud model.
+                var installed = (await chat.ListAllModelsAsync(ct))
+                    .Where(m => m.Source.Equals(Rbac.ModelPolicy.LocalSource, StringComparison.OrdinalIgnoreCase))
+                    .Select(m => m.Name)
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var policies = Models.UserRoles.All.Select(role =>
+                {
+                    rows.TryGetValue(role, out var row);
+                    return new RoleModelPolicyDto(
+                        Role: role,
+                        Label: Models.UserRoles.LabelFor(role),
+                        AllowedModels: Rbac.ModelPolicy.Split(row?.AllowedModels),
+                        DefaultModel: row?.DefaultModel ?? "",
+                        // SystemAdmin can never be restricted, so the editor shows
+                        // its row read-only with the reason rather than a control
+                        // that would always be refused.
+                        CanRestrict: role != Models.UserRoles.SystemAdmin,
+                        UpdatedAtUtc: row?.UpdatedAtUtc);
+                }).ToList();
+
+                return Results.Ok(new { policies, installedModels = installed });
+            })
+            .WithSummary("Which models each role may run, plus the installed local models to choose from.");
+
+            group.MapPut("/model-policies/{role}", async (
+                string role, RoleModelPolicyInput input, HttpContext ctx, AppDbContext db,
+                ChatService chat, Rbac.ModelPolicy modelPolicy, CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                if (!Models.UserRoles.IsSystemAdmin(user))
+                    return Forbid("SystemAdmin role required.");
+
+                // An unknown role would otherwise create a row nothing reads.
+                if (!Models.UserRoles.IsKnown(role))
+                    return Results.BadRequest(new { error = $"'{role}' is not a known role." });
+
+                var canonical = Models.UserRoles.Normalize(role);
+                var allowed = (input.AllowedModels ?? new List<string>())
+                    .Where(m => !string.IsNullOrWhiteSpace(m))
+                    .Select(m => m.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var defaultModel = (input.DefaultModel ?? "").Trim();
+
+                // An admin who locked their own role out of every model could not
+                // undo it through a UI that needs a model to work.
+                if (canonical == Models.UserRoles.SystemAdmin && allowed.Count > 0)
+                    return Results.BadRequest(new
+                    {
+                        error = "SystemAdmin cannot be restricted — an administrator must always be able to "
+                              + "run any model, or a mistake here could not be undone.",
+                    });
+
+                if (allowed.Count > 0)
+                {
+                    // Only installed local models: allowing a name nothing serves
+                    // would refuse the role at run time for no visible reason.
+                    var installed = (await chat.ListAllModelsAsync(ct))
+                        .Where(m => m.Source.Equals(Rbac.ModelPolicy.LocalSource, StringComparison.OrdinalIgnoreCase))
+                        .Select(m => m.Name)
+                        .ToList();
+
+                    var unknown = allowed
+                        .Where(a => !installed.Any(i => Rbac.ModelPolicy.SameModel(i, a)))
+                        .ToList();
+                    if (unknown.Count > 0)
+                        return Results.BadRequest(new
+                        {
+                            error = $"Not installed locally: {string.Join(", ", unknown)}.",
+                        });
+
+                    if (string.IsNullOrWhiteSpace(defaultModel))
+                        return Results.BadRequest(new { error = "A default model is required when the list is not empty." });
+
+                    if (!allowed.Any(a => Rbac.ModelPolicy.SameModel(a, defaultModel)))
+                        return Results.BadRequest(new
+                        {
+                            error = $"The default '{defaultModel}' is not in the allowed list.",
+                        });
+                }
+                else
+                {
+                    // No restriction means no default either: the caller's own
+                    // fallback decides, as it always has.
+                    defaultModel = "";
+                }
+
+                var row = await db.RoleModelPolicies.FirstOrDefaultAsync(p => p.Role == canonical, ct);
+                if (row is null)
+                {
+                    row = new Models.RoleModelPolicy { Role = canonical };
+                    db.RoleModelPolicies.Add(row);
+                }
+
+                row.AllowedModels = string.Join(",", allowed);
+                row.DefaultModel = defaultModel;
+                row.UpdatedAtUtc = DateTime.UtcNow;
+                row.UpdatedByUserId = user.Id;
+                await db.SaveChangesAsync(ct);
+
+                // So the change applies to the very next request, with no restart.
+                modelPolicy.Invalidate();
+
+                return Results.Ok(new RoleModelPolicyDto(
+                    canonical, Models.UserRoles.LabelFor(canonical),
+                    allowed, defaultModel,
+                    canonical != Models.UserRoles.SystemAdmin, row.UpdatedAtUtc));
+            })
+            .WithSummary("Save one role's allowed models. SystemAdmin cannot be restricted.");
 
             group.MapGet("/users", async (
                 HttpContext ctx, AppDbContext db, RbacService svc,
