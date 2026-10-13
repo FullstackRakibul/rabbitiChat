@@ -62,13 +62,19 @@ public record SetTabsInput(List<string>? TabKeys);
 /// False for SystemAdmin, whose row is read-only: an administrator locked out of
 /// every model could not undo it through a UI that needs one.
 /// </param>
+/// <param name="Stale">
+/// Allowed models that are no longer installed locally. They stay in
+/// <paramref name="AllowedModels"/> — hiding them would make the editor post
+/// them back unchanged — but the UI marks them and an admin can untick them.
+/// </param>
 public record RoleModelPolicyDto(
     string Role,
     string Label,
     List<string> AllowedModels,
     string DefaultModel,
     bool CanRestrict,
-    DateTime? UpdatedAtUtc);
+    DateTime? UpdatedAtUtc,
+    List<string> Stale);
 
 /// <summary>
 /// A saved policy. An empty list clears the restriction, and then the default is

@@ -246,6 +246,33 @@ async function profileWithModel(name, extractionModel) {
   return (list.json ?? []).find((p) => p.name === name)?.id
 }
 
+/**
+ * Put a policy row into a state the API itself would refuse to save — which is
+ * exactly how an uninstalled model gets into one. ModelPolicy caches rows, so
+ * the cache is dropped afterwards by restarting the API: there is deliberately
+ * no "clear the cache" endpoint to call.
+ */
+async function writeRowDirectly(role, allowedModels, defaultModel) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const w = new DatabaseSync(ctx.api.dbPath)
+  try {
+    w.prepare('UPDATE "RoleModelPolicies" SET "AllowedModels" = ?, "DefaultModel" = ? WHERE "Role" = ?')
+      .run(allowedModels, defaultModel, role)
+  } finally { w.close() }
+
+  await ctx.api.stop()
+  ctx.api = await startApi({
+    fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port,
+    env: {
+      OllamaCloud__ApiKey: 'eval-fake-key',
+      OllamaCloud__BaseUrl: ctx.fake.url,
+      OllamaCloud__Models__0: CLOUD_MODELS[0],
+      OllamaCloud__Models__1: CLOUD_MODELS[1],
+    },
+  })
+  ctx.admin = await login(ctx.admin.username, ctx.adminSecret)
+}
+
 /** The role message the refusal must carry (§3.1). */
 const roleMessageRe = /Your role \(General\) can use: gemma4:12b\./
 
@@ -574,6 +601,72 @@ check('G1.9', 1, 'admin policy routes: 403 for non-admins, 400 for each invalid 
     return ok(false, 'restoring the restriction did not take effect')
 
   return ok(true, 'non-admin 403; four invalid saves 400; a valid save applied to the next request and reverted')
+})
+
+check('G1.9b', 1, 'a stale saved model never blocks a save that removes it', async () => {
+  // Reported from the Access screen: a role whose row still named a model that
+  // has since been deleted from the Mac (§2 F14) could not be saved at all —
+  // the refusal named a model the form no longer showed, so there was no way to
+  // fix the row through the UI that reported it.
+  const stale = 'qwen3.5:0.8b'
+
+  // Put the role into that state the way an uninstall does: straight into the
+  // row, bypassing the API, because the API is what refuses it.
+  await writeRowDirectly('General', `${ALLOWED},${stale}`, stale)
+
+  // The listing must show the stale entry rather than hiding it, or an admin
+  // cannot tell why the role behaves oddly.
+  const list = await asAdmin('GET', '/api/admin/rbac/model-policies')
+  const general = (list.json?.policies ?? []).find((p) => p.role === 'General')
+  if (!general) return ok(false, 'the listing has no General row')
+  if (!general.allowedModels.some((m) => m.toLowerCase() === stale))
+    return ok(false, `the listing dropped the stale model silently: [${general.allowedModels.join(', ')}]`)
+
+  // Saving a list that REMOVES the stale model must succeed: this is the fix.
+  const fix = await asAdmin('PUT', '/api/admin/rbac/model-policies/General',
+    { allowedModels: [ALLOWED], defaultModel: ALLOWED })
+  if (fix.status !== 200)
+    return ok(false, `removing the stale model was refused (${fix.status}): ${fix.json?.error ?? fix.text.slice(0, 200)}`)
+
+  // And adding a model that is genuinely not installed is still refused, naming
+  // only that model — the validation must not have been weakened wholesale.
+  const bad = await asAdmin('PUT', '/api/admin/rbac/model-policies/General',
+    { allowedModels: [ALLOWED, 'definitely-not-installed:9b'], defaultModel: ALLOWED })
+  if (bad.status !== 400)
+    return ok(false, `adding an uninstalled model was accepted (${bad.status})`)
+  if (!/definitely-not-installed:9b/.test(bad.json?.error ?? ''))
+    return ok(false, `the refusal does not name the offending model: ${bad.json?.error}`)
+  if (new RegExp(stale).test(bad.json?.error ?? ''))
+    return ok(false, `the refusal still blames the stale model: ${bad.json?.error}`)
+
+  // Leave General as the other checks expect to find it.
+  await asAdmin('PUT', '/api/admin/rbac/model-policies/General',
+    { allowedModels: [ALLOWED], defaultModel: ALLOWED })
+
+  return ok(true, `stale "${stale}" listed, removable, and no longer blocks the save; a newly added uninstalled model is still refused by name`)
+})
+
+check('G1.9c', 1, 'an uninstalled model stays listed and is flagged stale, so it can be unticked', async () => {
+  // The other half of the same report. The row is NOT healed automatically (an
+  // admin's list is their decision): the listing keeps the model and marks it
+  // missing, which is what lets the editor show a ticked-but-stale entry instead
+  // of hiding it and silently posting it back on the next save.
+  await writeRowDirectly('General', 'gone-from-the-mac:1b', 'gone-from-the-mac:1b')
+
+  const list = await asAdmin('GET', '/api/admin/rbac/model-policies')
+  const general = (list.json?.policies ?? []).find((p) => p.role === 'General')
+
+  // Put the row back BEFORE asserting, so a failure here cannot leave the
+  // database in a state that fails every later check too.
+  await asAdmin('PUT', '/api/admin/rbac/model-policies/General',
+    { allowedModels: [ALLOWED], defaultModel: ALLOWED })
+
+  if (!general?.stale?.length)
+    return ok(false, `the listing does not flag which allowed models are missing: ${JSON.stringify(general)}`)
+  if (!general.allowedModels.includes('gone-from-the-mac:1b'))
+    return ok(false, 'the listing dropped the uninstalled model instead of flagging it')
+
+  return ok(true, `a role whose models are all uninstalled is flagged: stale [${general.stale.join(', ')}]`)
 })
 
 check('G1.10', 1, 'one row per role with the seeded values; an edit survives a restart', async () => {

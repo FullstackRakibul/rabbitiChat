@@ -102,16 +102,28 @@ namespace RabbitIC.Api.MinimalApis
                 var policies = Models.UserRoles.All.Select(role =>
                 {
                     rows.TryGetValue(role, out var row);
+                    var allowedModels = Rbac.ModelPolicy.Split(row?.AllowedModels);
+
+                    // A model can be uninstalled from the Mac long after a policy
+                    // named it. Say which ones those are rather than listing them
+                    // as though they still worked: an editor that cannot tell the
+                    // difference shows a tick for a model that no longer exists,
+                    // and then posts it straight back on the next save.
+                    var stale = allowedModels
+                        .Where(a => !installed.Any(i => Rbac.ModelPolicy.SameModel(i, a)))
+                        .ToList();
+
                     return new RoleModelPolicyDto(
                         Role: role,
                         Label: Models.UserRoles.LabelFor(role),
-                        AllowedModels: Rbac.ModelPolicy.Split(row?.AllowedModels),
+                        AllowedModels: allowedModels,
                         DefaultModel: row?.DefaultModel ?? "",
                         // SystemAdmin can never be restricted, so the editor shows
                         // its row read-only with the reason rather than a control
                         // that would always be refused.
                         CanRestrict: role != Models.UserRoles.SystemAdmin,
-                        UpdatedAtUtc: row?.UpdatedAtUtc);
+                        UpdatedAtUtc: row?.UpdatedAtUtc,
+                        Stale: stale);
                 }).ToList();
 
                 return Results.Ok(new { policies, installedModels = installed });
@@ -199,10 +211,13 @@ namespace RabbitIC.Api.MinimalApis
                 // So the change applies to the very next request, with no restart.
                 modelPolicy.Invalidate();
 
+                // Nothing is stale right after a save: the validation above just
+                // confirmed every allowed model is installed.
                 return Results.Ok(new RoleModelPolicyDto(
                     canonical, Models.UserRoles.LabelFor(canonical),
                     allowed, defaultModel,
-                    canonical != Models.UserRoles.SystemAdmin, row.UpdatedAtUtc));
+                    canonical != Models.UserRoles.SystemAdmin, row.UpdatedAtUtc,
+                    new List<string>()));
             })
             .WithSummary("Save one role's allowed models. SystemAdmin cannot be restricted.");
 
