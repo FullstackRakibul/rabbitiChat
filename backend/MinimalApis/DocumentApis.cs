@@ -283,6 +283,19 @@ namespace RabbitIC.Api.MinimalApis
                     Status = outcome.Status,
                     ResultJson = resultJson,
                     FailedChecks = string.Join("; ", outcome.FailedChecks.Select(c => c.Check)),
+
+                    // How it was made (§3.5) — without these, two runs' accuracy
+                    // cannot be compared across a model or profile change.
+                    Model = outcome.Model,
+                    ProfileVersion = outcome.ProfileVersion,
+                    PromptHash = outcome.PromptHash,
+                    RepairUsed = outcome.RepairUsed,
+                    FirstResultJson = outcome.FirstResult is null
+                        ? null
+                        : JsonSerializer.Serialize(outcome.FirstResult, WebJson),
+                    PromptTokens = outcome.PromptTokens,
+                    OutputTokens = outcome.OutputTokens,
+                    DurationMs = outcome.DurationMs,
                 };
                 db.ExtractionRuns.Add(run);
                 await db.SaveChangesAsync(ct);
@@ -301,6 +314,12 @@ namespace RabbitIC.Api.MinimalApis
                     failedChecks = outcome.FailedChecks.Select(c => new { c.Check, c.Detail }),
                     checks = outcome.Result?.Validation.Select(c => new { c.Check, c.Passed, c.Detail }),
                     data = outcome.Result,
+                    model = outcome.Model,
+                    profileVersion = outcome.ProfileVersion,
+                    repairUsed = outcome.RepairUsed,
+                    promptTokens = outcome.PromptTokens,
+                    outputTokens = outcome.OutputTokens,
+                    durationMs = outcome.DurationMs,
                 };
                 return outcome.Status == "failed"
                     ? Results.Json(payload, statusCode: 422)

@@ -1,0 +1,50 @@
+{
+  "header": {
+    "buyer": "EvalKohls",
+    "orderNumber": "EVALPO-1",
+    "poType": "PREPACK",
+    "poDate": "2026-01-05",
+    "cancelDate": "2026-03-01",
+    "shippingWindow": {
+      "start": "2026-02-01",
+      "end": "2026-02-14"
+    },
+    "incoterms": "FOB",
+    "vendor": {
+      "name": "ALPHA GARMENTS LTD",
+      "country": "BD"
+    }
+  },
+  "orderLine": {
+    "styleNumber": "MS6SX117RN",
+    "upc": "400110380823",
+    "unitPrice": 12.5,
+    "quantity": 100,
+    "itemTotal": 8750,
+    "isPrepack": true
+  },
+  "prepackComponents": [
+    {
+      "line": 1,
+      "size": "S",
+      "qtyPerPrepack": 2,
+      "unitCost": 12.5,
+      "retailPrice": 24.99
+    },
+    {
+      "line": 2,
+      "size": "M",
+      "qtyPerPrepack": 3,
+      "unitCost": 12.5,
+      "retailPrice": 24.99
+    },
+    {
+      "line": 3,
+      "size": "L",
+      "qtyPerPrepack": 2,
+      "unitCost": 12.5,
+      "retailPrice": 24.99
+    }
+  ],
+  "purchaseOrderTotal": 8750
+}

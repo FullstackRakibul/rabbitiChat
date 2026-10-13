@@ -1,0 +1,11 @@
+--- page 1 ---
+KOHLS DEPARTMENT STORES        PURCHASE ORDER
+Order #: EVALPO-2        PO Type: FLAT
+PO Date: 2026-02-10
+Delivery Window: 2026-04-01 to 2026-04-10
+Vendor: BETA TEXTILES   Country: IN
+
+Style       UPC            Unit Price   Qty      Line Total
+WS1AB222CD  400110999001    7.25         400      2900.00
+
+Purchase Order Total: 2900.00

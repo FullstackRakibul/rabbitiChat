@@ -30,7 +30,17 @@ public sealed record DispatchOutcome(
     ExtractionResult? Result,
     IReadOnlyList<ValidationCheck> FailedChecks,
     string? Note,
-    string? Error);
+    string? Error,
+    // ---- PO Studio: how the run was made (§3.5) ----
+    // Null on the deterministic path, which uses no model and no prompt.
+    string? Model = null,
+    int? ProfileVersion = null,
+    string? PromptHash = null,
+    bool RepairUsed = false,
+    ExtractionResult? FirstResult = null,
+    int? PromptTokens = null,
+    int? OutputTokens = null,
+    int? DurationMs = null);
 
 public sealed class ExtractionDispatcher(
     AppDbContext db, IEnumerable<IPoParser> parsers, LlmPoFallback fallback)
@@ -105,19 +115,55 @@ public sealed class ExtractionDispatcher(
         }
 
         // ---- fallback path ----
+        // The profile carries its own rules, glossary and worked examples into the
+        // prompt, and the validator is handed to the fallback so its repair round
+        // can judge the second answer by the SAME checks the gate below applies.
         var llmInput = isPdf ? ReadAllPdfText(doc.FilePath!) : await chunkText();
-        var llm = await fallback.ExtractAsync(llmInput, model, ct);
-        if (llm is null)
+        var examples = await PoStudio.LoadExamplesAsync(db, profile, DocumentTextAsync, ct);
+        var promptProfile = PoStudio.ToPromptProfile(profile, examples);
+
+        static IReadOnlyList<string> FailedCheckDetails(ExtractionResult candidate)
+        {
+            var copy = Clone(candidate);
+            ExtractionValidator.ApplyDerivedAndValidation(copy);
+            return copy.Validation.Where(v => !v.Passed).Select(v => v.Detail).ToList();
+        }
+
+        var chosenModel = string.IsNullOrWhiteSpace(model) ? NullIfBlank(profile?.ExtractionModel) : model;
+        var llm = await fallback.ExtractAsync(llmInput, promptProfile, chosenModel, FailedCheckDetails, ct);
+
+        if (llm.Result is null)
             return new("failed", "GenericLlm", profile?.Name, profile?.Id, confidence, null,
                        Array.Empty<ValidationCheck>(), note,
-                       "The model did not return usable JSON.");
+                       llm.Error ?? "The model did not return usable JSON.",
+                       llm.Model, llm.ProfileVersion, llm.PromptHash, false, null,
+                       llm.PromptTokens, llm.OutputTokens, llm.DurationMs);
 
-        ExtractionValidator.ApplyDerivedAndValidation(llm);
-        var llmFailed = llm.Validation.Where(v => !v.Passed).ToList();
+        ExtractionValidator.ApplyDerivedAndValidation(llm.Result);
+        var llmFailed = llm.Result.Validation.Where(v => !v.Passed).ToList();
+
+        var firstResult = llm.FirstResult;
+        if (firstResult is not null && !ReferenceEquals(firstResult, llm.Result))
+            ExtractionValidator.ApplyDerivedAndValidation(firstResult);
 
         // Never "ok" from the model — see the header comment.
         return new("needs_review", "GenericLlm", profile?.Name, profile?.Id,
-                   confidence, llm, llmFailed, note, null);
+                   confidence, llm.Result, llmFailed, note, null,
+                   llm.Model, llm.ProfileVersion, llm.PromptHash, llm.RepairUsed,
+                   firstResult, llm.PromptTokens, llm.OutputTokens, llm.DurationMs);
+
+        async Task<string> DocumentTextAsync(int documentId)
+        {
+            var exampleDoc = await db.Documents
+                .FirstOrDefaultAsync(d => d.Id == documentId, ct);
+            if (exampleDoc?.FilePath is not null && File.Exists(exampleDoc.FilePath)
+                && Path.GetExtension(exampleDoc.FilePath).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                return ReadAllPdfText(exampleDoc.FilePath);
+
+            return string.Join("\n", await db.EmbeddingChunks
+                .Where(c => c.DocumentId == documentId).OrderBy(c => c.Id)
+                .Select(c => c.Text).ToListAsync(ct));
+        }
     }
 
     /// <summary>Detection dry-run for tuning a DetectPattern — no parsing, no model call.</summary>
@@ -178,6 +224,16 @@ public sealed class ExtractionDispatcher(
         var page = pdf.NumberOfPages > 0 ? pdf.GetPage(1).Text : "";
         return (page, producer);
     }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    /// <summary>
+    /// A deep copy via the serializer, so running the validator to COUNT a
+    /// candidate's failures never mutates the candidate the caller still holds.
+    /// </summary>
+    private static ExtractionResult Clone(ExtractionResult r) =>
+        System.Text.Json.JsonSerializer.Deserialize<ExtractionResult>(
+            System.Text.Json.JsonSerializer.Serialize(r))!;
 
     private static string ReadAllPdfText(string path)
     {

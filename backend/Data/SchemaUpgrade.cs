@@ -370,6 +370,15 @@ public static class SchemaUpgrade
         }
     }
 
+    /// <summary>
+    /// Runs a literal ADD COLUMN only when the column is absent, so the upgrade is
+    /// idempotent on a database that already has it.
+    /// </summary>
+    private static void AddColumnIfMissing(AppDbContext db, string table, string column, string ddl)
+    {
+        if (!ColumnExists(db, table, column)) db.Database.ExecuteSqlRaw(ddl);
+    }
+
     private static void EnsureExtractionTables(AppDbContext db)
     {
         if (!TableExists(db, "BuyerProfiles"))
@@ -382,7 +391,12 @@ public static class SchemaUpgrade
                     ""ParserKey""        TEXT NOT NULL,
                     ""ChunkingStrategy"" TEXT NOT NULL,
                     ""IsActive""         INTEGER NOT NULL,
-                    ""CreatedAt""        TEXT NOT NULL
+                    ""CreatedAt""        TEXT NOT NULL,
+                    ""ExtractionModel""  TEXT NOT NULL DEFAULT '',
+                    ""Rules""            TEXT NOT NULL DEFAULT '',
+                    ""Glossary""         TEXT NOT NULL DEFAULT '',
+                    ""ExampleRunIds""    TEXT NOT NULL DEFAULT '',
+                    ""Version""          INTEGER NOT NULL DEFAULT 1
                 );");
             db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_BuyerProfiles_Name"" ON ""BuyerProfiles"" (""Name"");");
         }
@@ -403,7 +417,15 @@ public static class SchemaUpgrade
                     ""ConfirmedByUserId"" INTEGER NULL,
                     ""ConfirmedAt""       TEXT NULL,
                     ""EditsJson""         TEXT NULL,
-                    ""CreatedAt""         TEXT NOT NULL
+                    ""CreatedAt""         TEXT NOT NULL,
+                    ""Model""             TEXT NULL,
+                    ""ProfileVersion""    INTEGER NULL,
+                    ""PromptHash""        TEXT NULL,
+                    ""RepairUsed""        INTEGER NOT NULL DEFAULT 0,
+                    ""FirstResultJson""   TEXT NULL,
+                    ""PromptTokens""      INTEGER NULL,
+                    ""OutputTokens""      INTEGER NULL,
+                    ""DurationMs""        INTEGER NULL
                 );");
             db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_ExtractionRuns_DocumentId"" ON ""ExtractionRuns"" (""DocumentId"");");
         }
@@ -420,6 +442,41 @@ public static class SchemaUpgrade
                 db.Database.ExecuteSqlRaw(@"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""EditsJson"" TEXT NULL;");
         }
 
+        // PO Studio: a run has to remember HOW it was made, or accuracy cannot be
+        // compared across a profile edit or a model change. Each statement is a
+        // literal — the column list is fixed in code, never user input.
+        AddColumnIfMissing(db, "ExtractionRuns", "Model",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""Model"" TEXT NULL;");
+        AddColumnIfMissing(db, "ExtractionRuns", "ProfileVersion",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""ProfileVersion"" INTEGER NULL;");
+        AddColumnIfMissing(db, "ExtractionRuns", "PromptHash",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""PromptHash"" TEXT NULL;");
+        AddColumnIfMissing(db, "ExtractionRuns", "RepairUsed",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""RepairUsed"" INTEGER NOT NULL DEFAULT 0;");
+        AddColumnIfMissing(db, "ExtractionRuns", "FirstResultJson",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""FirstResultJson"" TEXT NULL;");
+        AddColumnIfMissing(db, "ExtractionRuns", "PromptTokens",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""PromptTokens"" INTEGER NULL;");
+        AddColumnIfMissing(db, "ExtractionRuns", "OutputTokens",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""OutputTokens"" INTEGER NULL;");
+        AddColumnIfMissing(db, "ExtractionRuns", "DurationMs",
+            @"ALTER TABLE ""ExtractionRuns"" ADD COLUMN ""DurationMs"" INTEGER NULL;");
+
+        // PO Studio: a profile carries its own extraction knowledge — the model
+        // to use, buyer rules, a glossary and up to two confirmed runs as worked
+        // examples. Version is bumped on every save so a run can record which
+        // revision of the profile produced it.
+        AddColumnIfMissing(db, "BuyerProfiles", "ExtractionModel",
+            @"ALTER TABLE ""BuyerProfiles"" ADD COLUMN ""ExtractionModel"" TEXT NOT NULL DEFAULT '';");
+        AddColumnIfMissing(db, "BuyerProfiles", "Rules",
+            @"ALTER TABLE ""BuyerProfiles"" ADD COLUMN ""Rules"" TEXT NOT NULL DEFAULT '';");
+        AddColumnIfMissing(db, "BuyerProfiles", "Glossary",
+            @"ALTER TABLE ""BuyerProfiles"" ADD COLUMN ""Glossary"" TEXT NOT NULL DEFAULT '';");
+        AddColumnIfMissing(db, "BuyerProfiles", "ExampleRunIds",
+            @"ALTER TABLE ""BuyerProfiles"" ADD COLUMN ""ExampleRunIds"" TEXT NOT NULL DEFAULT '';");
+        AddColumnIfMissing(db, "BuyerProfiles", "Version",
+            @"ALTER TABLE ""BuyerProfiles"" ADD COLUMN ""Version"" INTEGER NOT NULL DEFAULT 1;");
+
         // Seed the one template that has a dedicated parser.
         var kohls = db.Database
             .SqlQueryRaw<int>(@"SELECT COUNT(*) AS ""Value"" FROM ""BuyerProfiles"" WHERE ""Name"" = 'Kohls';")
@@ -428,9 +485,11 @@ public static class SchemaUpgrade
         {
             db.Database.ExecuteSqlRaw(@"
                 INSERT INTO ""BuyerProfiles""
-                    (""Name"", ""DetectPattern"", ""ParserKey"", ""ChunkingStrategy"", ""IsActive"", ""CreatedAt"")
+                    (""Name"", ""DetectPattern"", ""ParserKey"", ""ChunkingStrategy"", ""IsActive"", ""CreatedAt"",
+                     ""ExtractionModel"", ""Rules"", ""Glossary"", ""ExampleRunIds"", ""Version"")
                 VALUES
-                    ('Kohls', 'SPS Commerce|Kohls|Order #:|Vendors Style', 'KohlsSps', 'none', 1, {0});",
+                    ('Kohls', 'SPS Commerce|Kohls|Order #:|Vendors Style', 'KohlsSps', 'none', 1, {0},
+                     '', '', '', '', 1);",
                 DateTime.Now.ToString("o"));
         }
     }

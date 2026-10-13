@@ -89,6 +89,15 @@ builder.Services.AddHttpClient("ollama", c =>
 	c.Timeout = TimeSpan.FromMinutes(10); // local models can be slow on first load
 });
 
+// Extraction streams, so there is no sensible fixed timeout: a 27B model on a
+// cold load can spend longer than ten minutes before the first token, and the
+// request's own cancellation token is what ends the call. See LlmPoFallback.
+builder.Services.AddHttpClient("ollama-extract", c =>
+{
+	c.BaseAddress = new Uri(ollamaUrl);
+	c.Timeout = Timeout.InfiniteTimeSpan;
+});
+
 // Ollama's hosted web search. The key stays server-side — the browser calls our
 // /api/search proxy instead. A missing key is NOT fatal here: the endpoints answer
 // 503 at request time so the rest of the app still boots.
@@ -325,6 +334,7 @@ app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
 app.ApplicationBuyerProfileApis();
+app.ApplicationPoStudioApis();
 app.ApplicationSearchApis();
 app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();

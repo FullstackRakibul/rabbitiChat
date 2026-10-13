@@ -1,0 +1,25 @@
+{
+  "header": {
+    "buyer": "EvalWalmart",
+    "orderNumber": "EVALPO-3",
+    "poType": "FLAT",
+    "poDate": "2026-03-03",
+    "cancelDate": "2026-05-01",
+    "exitFactoryEndDate": "2026-04-20",
+    "incoterms": "DDP",
+    "vendor": {
+      "name": "GAMMA APPAREL",
+      "country": "VN"
+    }
+  },
+  "orderLine": {
+    "styleNumber": "KD9ZZ100XY",
+    "upc": "400111222333",
+    "unitPrice": 3,
+    "quantity": 1000,
+    "itemTotal": 3000,
+    "isPrepack": false
+  },
+  "prepackComponents": [],
+  "purchaseOrderTotal": 3000
+}

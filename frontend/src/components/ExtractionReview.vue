@@ -18,6 +18,13 @@ import {
 const props = defineProps({
   doc: { type: Object, required: true },     // { id, fileName }
   model: { type: String, default: '' },      // chat model for the LLM fallback
+
+  /**
+   * PO Studio renders this INSIDE its Review section rather than as a
+   * full-screen overlay. Same logic, same markup, same checks — only the outer
+   * chrome differs, so there is one review implementation rather than two.
+   */
+  embedded: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'confirmed'])
 
@@ -344,7 +351,7 @@ const statusClass = computed(() => ({
 </script>
 
 <template>
-  <div class="fixed inset-0 z-40 flex flex-col bg-background">
+  <div :class="embedded ? 'flex h-full min-h-0 flex-col' : 'fixed inset-0 z-40 flex flex-col bg-background'">
     <!-- Toolbar -->
     <div class="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
       <Badge :class="cn('capitalize', statusClass)">
@@ -370,7 +377,7 @@ const statusClass = computed(() => ({
         <Loader2 v-if="loading" class="animate-spin" />
         Re-extract
       </Button>
-      <Button variant="ghost" size="icon" aria-label="Close review" @click="close">
+      <Button v-if="!embedded" variant="ghost" size="icon" aria-label="Close review" @click="close">
         <X />
       </Button>
     </div>

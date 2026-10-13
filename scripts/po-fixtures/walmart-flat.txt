@@ -1,0 +1,12 @@
+--- page 1 ---
+WALMART STORES INC             PURCHASE ORDER
+Order #: EVALPO-3        PO Type: FLAT
+PO Date: 2026-03-03      Cancel Date: 2026-05-01
+Ex-Factory End Date: 2026-04-20
+Incoterms: DDP
+Vendor: GAMMA APPAREL   Country: VN
+
+Style       UPC            Unit Price   Qty      Line Total
+KD9ZZ100XY  400111222333    3.00         1000     3000.00
+
+Purchase Order Total: 3000.00

@@ -7,10 +7,14 @@ using RabbitIC.Api.Models;
 namespace RabbitIC.Api.MinimalApis
 {
     public record BuyerProfileDto(int Id, string Name, string DetectPattern, string ParserKey,
-                                  string ChunkingStrategy, bool IsActive);
+                                  string ChunkingStrategy, bool IsActive,
+                                  string ExtractionModel, string Rules, string Glossary,
+                                  string ExampleRunIds, int Version);
 
     public record BuyerProfileInput(string? Name, string? DetectPattern, string? ParserKey,
-                                    string? ChunkingStrategy, bool? IsActive);
+                                    string? ChunkingStrategy, bool? IsActive,
+                                    string? ExtractionModel, string? Rules, string? Glossary,
+                                    string? ExampleRunIds);
 
     public static class BuyerProfileApis
     {
@@ -24,7 +28,9 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(await db.BuyerProfiles
                     .OrderByDescending(p => p.IsActive).ThenBy(p => p.Name)
                     .Select(p => new BuyerProfileDto(p.Id, p.Name, p.DetectPattern, p.ParserKey,
-                                                     p.ChunkingStrategy, p.IsActive))
+                                                     p.ChunkingStrategy, p.IsActive,
+                                                     p.ExtractionModel, p.Rules, p.Glossary,
+                                                     p.ExampleRunIds, p.Version))
                     .ToListAsync());
             });
 
@@ -59,13 +65,21 @@ namespace RabbitIC.Api.MinimalApis
                     ParserKey = string.IsNullOrWhiteSpace(input.ParserKey) ? "GenericLlm" : input.ParserKey.Trim(),
                     ChunkingStrategy = input.ChunkingStrategy ?? "none",
                     IsActive = input.IsActive ?? true,
+                    ExtractionModel = (input.ExtractionModel ?? "").Trim(),
+                    Rules = input.Rules ?? "",
+                    Glossary = input.Glossary ?? "",
                 };
+
+                // Worked examples are checked before the row exists, so a refusal
+                // leaves nothing half-created.
+                var (exampleIds, refusal) = await ResolveExamplesAsync(db, input.ExampleRunIds, default);
+                if (refusal is not null) return Results.BadRequest(new { error = refusal });
+                profile.ExampleRunIds = PoStudio.FormatRunIds(exampleIds);
+
                 db.BuyerProfiles.Add(profile);
                 await db.SaveChangesAsync();
 
-                return Results.Created($"/api/buyer-profiles/{profile.Id}",
-                    new BuyerProfileDto(profile.Id, profile.Name, profile.DetectPattern,
-                                        profile.ParserKey, profile.ChunkingStrategy, profile.IsActive));
+                return Results.Created($"/api/buyer-profiles/{profile.Id}", Dto(profile));
             });
 
             app.MapPut("/buyer-profiles/{id:int}", async (
@@ -81,10 +95,23 @@ namespace RabbitIC.Api.MinimalApis
                 if (!string.IsNullOrWhiteSpace(input.ParserKey)) profile.ParserKey = input.ParserKey.Trim();
                 if (input.ChunkingStrategy is not null) profile.ChunkingStrategy = input.ChunkingStrategy;
                 if (input.IsActive is bool active) profile.IsActive = active;
+                if (input.ExtractionModel is not null) profile.ExtractionModel = input.ExtractionModel.Trim();
+                if (input.Rules is not null) profile.Rules = input.Rules;
+                if (input.Glossary is not null) profile.Glossary = input.Glossary;
+
+                if (input.ExampleRunIds is not null)
+                {
+                    var (exampleIds, refusal) = await ResolveExamplesAsync(db, input.ExampleRunIds, default);
+                    if (refusal is not null) return Results.BadRequest(new { error = refusal });
+                    profile.ExampleRunIds = PoStudio.FormatRunIds(exampleIds);
+                }
+
+                // Every save is a new revision: a run records the version that
+                // produced it, so the accuracy trend can show whether an edit helped.
+                profile.Version++;
 
                 await db.SaveChangesAsync();
-                return Results.Ok(new BuyerProfileDto(profile.Id, profile.Name, profile.DetectPattern,
-                                                      profile.ParserKey, profile.ChunkingStrategy, profile.IsActive));
+                return Results.Ok(Dto(profile));
             });
 
             app.MapDelete("/buyer-profiles/{id:int}", async (int id, HttpContext ctx, AppDbContext db) =>
@@ -128,6 +155,30 @@ namespace RabbitIC.Api.MinimalApis
             });
 
             return app;
+        }
+
+        private static BuyerProfileDto Dto(BuyerProfile p) =>
+            new(p.Id, p.Name, p.DetectPattern, p.ParserKey, p.ChunkingStrategy, p.IsActive,
+                p.ExtractionModel, p.Rules, p.Glossary, p.ExampleRunIds, p.Version);
+
+        /// <summary>
+        /// Validates the requested worked examples against the §3.3 and §3.6 rules
+        /// (confirmed, not held out, at most two) and returns them in order, or the
+        /// reason the first offending one was refused.
+        /// </summary>
+        private static async Task<(List<int> Ids, string? Refusal)> ResolveExamplesAsync(
+            AppDbContext db, string? csv, CancellationToken ct)
+        {
+            var ids = PoStudio.ParseRunIds(csv);
+            if (ids.Count > PoStudio.MaxExamples)
+                return (ids, $"At most {PoStudio.MaxExamples} worked examples fit a prompt; {ids.Count} were given.");
+
+            foreach (var id in ids)
+            {
+                var refusal = await PoStudio.ExampleRefusalAsync(db, id, ct);
+                if (refusal is not null) return (ids, refusal);
+            }
+            return (ids, null);
         }
     }
 }
