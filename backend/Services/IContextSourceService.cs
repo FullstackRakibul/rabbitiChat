@@ -50,4 +50,37 @@ public interface IContextSourceService
     Task<string> BuildSystemPromptAsync(
         int userId, IReadOnlyList<int>? activeIds, string? basePersona,
         string kind = ContextSource.KindSource, CancellationToken ct = default);
+
+    // ---- shared kinds: the one exception to owner scoping ----
+    // A shared kind (the HR library, Kind = "hr") is company knowledge: every row
+    // is readable by whoever the calling route lets in (tab `hr`), whoever wrote
+    // it, and only HrAssistant and SystemAdmin may change it. Shared rows never
+    // appear through the owner-scoped methods above, so /api/context-sources can
+    // neither read nor create one (docs/HR_MODULE_PROMPT.md §3.2).
+
+    /// <summary>Every row of a shared kind, in SortOrder then Id.</summary>
+    Task<IReadOnlyList<ContextSource>> ListSharedAsync(string kind, CancellationToken ct = default);
+
+    /// <summary>One row of a shared kind; null when absent or of another kind.</summary>
+    Task<ContextSource?> GetSharedAsync(string kind, int id, CancellationToken ct = default);
+
+    /// <summary>Adds a row of a shared kind, owned by the editor and placed last.</summary>
+    Task<SharedWrite> CreateSharedAsync(User editor, ContextSource item, CancellationToken ct = default);
+
+    /// <summary>
+    /// Changes a row of a shared kind through <paramref name="apply"/>. The
+    /// version goes up by one when the content changed, and only then.
+    /// </summary>
+    Task<SharedWrite> UpdateSharedAsync(User editor, string kind, int id, Action<ContextSource> apply, CancellationToken ct = default);
+
+    Task<SharedWrite> DeleteSharedAsync(User editor, string kind, int id, CancellationToken ct = default);
+}
+
+public enum SharedOutcome { Ok, NotFound, Forbidden }
+
+/// <summary>The result of a write to a shared kind, and the row as stored.</summary>
+public sealed record SharedWrite(SharedOutcome Outcome, ContextSource? Item)
+{
+    public static SharedWrite Forbidden => new(SharedOutcome.Forbidden, null);
+    public static SharedWrite NotFound => new(SharedOutcome.NotFound, null);
 }

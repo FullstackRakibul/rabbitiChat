@@ -33,6 +33,25 @@ public class ContextSource
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
+    // ---- HR library (Kind = "hr" only; null for every other kind) ----
+    // docs/HR_MODULE_PROMPT.md §3.2. HR items are company knowledge, shared by
+    // everyone with the `hr` tab rather than scoped to OwnerUserId — the one
+    // exception to owner scoping, made in ContextSourceService.
+
+    /// <summary>"rules", "procedure", "codes" or "note".</summary>
+    public string? HrType { get; set; }
+
+    /// <summary>"always": sent whole with every question. "search": split, embedded, best excerpts sent.</summary>
+    public string? Mode { get; set; }
+
+    /// <summary>Goes up by one on every content change. Starts at 1.</summary>
+    public int Version { get; set; } = 1;
+
+    /// <summary>Who in HR signed this version off, if anyone. A label; unapproved items are still used.</summary>
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
     public const string KindSource = "source";
     public const string KindBuyer = "buyer";
+    public const string KindHr = "hr";
 }

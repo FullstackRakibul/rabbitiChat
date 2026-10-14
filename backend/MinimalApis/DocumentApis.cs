@@ -614,7 +614,7 @@ namespace RabbitIC.Api.MinimalApis
         // ───────────────────────── chunking ─────────────────────────
 
         /// <summary>Split on newline boundaries where possible, ~800 chars with ~100 overlap.</summary>
-        private static IEnumerable<string> ChunkText(string text)
+        internal static IEnumerable<string> ChunkText(string text)
         {
             text = text.Trim();
             if (text.Length <= ChunkSize) { yield return text; yield break; }

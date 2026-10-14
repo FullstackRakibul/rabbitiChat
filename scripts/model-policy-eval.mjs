@@ -44,7 +44,8 @@ const LOCAL_MODELS = [ALLOWED, FORBIDDEN, THIRD, EMBED]
 /** A cloud model that shares General's allowed NAME — G1.5's trap. */
 const CLOUD_MODELS = [ALLOWED, 'cloud-only-model']
 
-const ROLES = ['General', 'System', 'GroundControl', 'SystemAdmin']
+// HrAssistant joined with the মানব সম্পদ module (docs/HR_MODULE_PROMPT.md §3.1).
+const ROLES = ['General', 'HrAssistant', 'System', 'GroundControl', 'SystemAdmin']
 
 // ─────────────────────────── the fake Ollama ───────────────────────────
 

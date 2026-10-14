@@ -174,6 +174,9 @@ builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
 
+// ---- মানব সম্পদ (HR Assistant): the HR library (docs/HR_MODULE_PROMPT.md) ----
+builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
+
 builder.Services.Configure<RabbitIC.Api.ModelSources.OllamaCloudOptions>(
 	builder.Configuration.GetSection(RabbitIC.Api.ModelSources.OllamaCloudOptions.SectionName));
 
@@ -348,6 +351,23 @@ app.ApplicationIeltsApis();
 app.ApplicationComponentSplitterApis();
 app.ApplicationNoteApis();
 app.ApplicationOddityApis();
+app.ApplicationHrApis();
+
+// The HR library's chunks are embedded once the app is serving, so start-up
+// never waits on Ollama; anything it cannot embed now waits for the next try.
+app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
+{
+	try
+	{
+		using var embedScope = app.Services.CreateScope();
+		var embedded = await embedScope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>().EmbedPendingAsync();
+		if (embedded > 0) app.Logger.LogInformation("HR library: embedded {Count} chunk(s).", embedded);
+	}
+	catch (Exception e)
+	{
+		app.Logger.LogWarning(e, "HR library: embedding after start-up failed.");
+	}
+}));
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);
@@ -397,6 +417,20 @@ using (var scope = app.Services.CreateScope())
 	// Which models each role may run. After the roles exist, and idempotent: a
 	// row an administrator edited is never overwritten by a restart.
 	RbacSeeder.SeedModelPolicies(db, app.Configuration, app.Logger);
+
+	// মানব সম্পদ. The hr-assistant account, only when it does not exist and only
+	// from HR_ASSISTANT_SECRET; then the HR library from docs/hr/, only files not
+	// in it yet, so an edit made in the app survives every restart. Both after
+	// RBAC: the account's role is set through the admin service, and seeded items
+	// are owned by the administrator.
+	RabbitIC.Api.Hr.HrAssistantSeeder.RunAsync(scope.ServiceProvider, app.Configuration, app.Logger).GetAwaiter().GetResult();
+	if (RabbitIC.Api.Hr.HrLibrary.FindSeedDir(app.Configuration, app.Environment) is { } hrSeedDir
+		&& db.Users.FirstOrDefault(u => u.Role == RabbitIC.Api.Models.UserRoles.SystemAdmin) is { } hrSeedOwner)
+	{
+		var added = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>()
+			.SeedAsync(hrSeedDir, hrSeedOwner).GetAwaiter().GetResult();
+		if (added > 0) app.Logger.LogInformation("HR library: seeded {Count} item(s) from {Dir}.", added, hrSeedDir);
+	}
 
 	// Shared IELTS demo content. After RBAC so roles exist first, and idempotent
 	// by SeedKey: restarting never duplicates, and editing a seed in code

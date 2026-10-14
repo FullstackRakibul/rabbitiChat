@@ -42,7 +42,9 @@ const BIN_DIR = path.join(EVAL_ROOT, 'api-bin')
 // rather than in each check.
 const GENERAL_TABS = ['dashboard', 'todo', '5lakhs', 'notes', 'sources', 'settings']
 const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter']
-const ROLE_KEYS = ['General', 'System', 'GroundControl', 'SystemAdmin']
+// HrAssistant joined with the মানব সম্পদ module (docs/HR_MODULE_PROMPT.md §3.1),
+// listed next to General as the server orders them.
+const ROLE_KEYS = ['General', 'HrAssistant', 'System', 'GroundControl', 'SystemAdmin']
 
 // ─────────────────────────────── fake Ollama ───────────────────────────────
 
@@ -479,7 +481,7 @@ check('G1.3', 1, 'GroundControl survives a restart on the same database (F2)', a
 
 // ---- G1.4 the existing guards ----
 
-check('G1.4', 1, 'an unknown role is a 400 that lists the four roles', async () => {
+check('G1.4', 1, 'an unknown role is a 400 that lists the five roles', async () => {
   const { gen } = await users()
   const r = await setRole(gen.id, 'Pilot')
   const msg = r.json?.error ?? ''
@@ -519,7 +521,7 @@ check('G1.6', 1, 'Ground Control badge is secondary with a Satellite icon, never
   return ok(!red && gcSecondary && icon, `destructive: ${red} · GroundControl → secondary: ${gcSecondary} · Satellite icon: ${icon}`)
 })
 
-check('G1.6', 1, 'GET /api/admin/rbac/roles lists four roles in order, with labels', async () => {
+check('G1.6', 1, 'GET /api/admin/rbac/roles lists five roles in order, with labels', async () => {
   const r = await call(ctx.api.url, 'GET', '/api/admin/rbac/roles', { token: ctx.admin.token })
   const keys = (r.json ?? []).map?.((x) => x.key) ?? []
   const gcLabel = (r.json ?? []).find?.((x) => x.key === 'GroundControl')?.label

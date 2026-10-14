@@ -111,6 +111,15 @@ namespace RabbitIC.Api.Middleware
         /// Oddity. The admin API mounts under /api (behind the "oddity" tab gate);
         /// the gateway itself under /oddity/api, authenticated by its own keys.
         /// </summary>
+        /// <summary>মানব সম্পদ: /api/hr/*, gated by the `hr` tab.</summary>
+        public static WebApplication ApplicationHrApis(this WebApplication app)
+        {
+            var hrApi = app.MapGroup("/api").WithTags("HR Assistant");
+
+            hrApi.MapHrApis();
+            return app;
+        }
+
         public static WebApplication ApplicationOddityApis(this WebApplication app)
         {
             var adminApi = app.MapGroup("/api").WithTags("Oddity");

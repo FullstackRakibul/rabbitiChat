@@ -152,9 +152,82 @@ public class ContextSourceService : IContextSourceService
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>Every read starts here — there is no way to reach another user's row.</summary>
+    // ---- shared kinds ----
+
+    /// <summary>Kinds whose rows are shared rather than owned. Only the HR library today.</summary>
+    private static readonly string[] SharedKinds = { ContextSource.KindHr };
+
+    public static bool IsShared(string? kind) => kind is not null && SharedKinds.Contains(kind);
+
+    /// <summary>
+    /// Who may change a shared row: HrAssistant and SystemAdmin. Reading is the
+    /// calling route's decision (its tab gate); writing is decided here, once.
+    /// </summary>
+    public static bool CanEditShared(User user) =>
+        UserRoles.Normalize(user.Role) is UserRoles.HrAssistant or UserRoles.SystemAdmin;
+
+    public async Task<IReadOnlyList<ContextSource>> ListSharedAsync(string kind, CancellationToken ct = default) =>
+        await Shared(kind).OrderBy(s => s.SortOrder).ThenBy(s => s.Id).ToListAsync(ct);
+
+    public async Task<ContextSource?> GetSharedAsync(string kind, int id, CancellationToken ct = default) =>
+        await Shared(kind).FirstOrDefaultAsync(s => s.Id == id, ct);
+
+    public async Task<SharedWrite> CreateSharedAsync(User editor, ContextSource item, CancellationToken ct = default)
+    {
+        if (!IsShared(item.Kind)) throw new ArgumentException($"'{item.Kind}' is not a shared kind.", nameof(item));
+        if (!CanEditShared(editor)) return SharedWrite.Forbidden;
+
+        var max = await Shared(item.Kind).Select(s => (int?)s.SortOrder).MaxAsync(ct);
+        item.OwnerUserId = editor.Id;
+        item.SortOrder = (max ?? -1) + 1;
+        item.Version = 1;
+        item.CreatedAt = item.UpdatedAt = DateTime.Now;
+
+        _db.Add(item);
+        await _db.SaveChangesAsync(ct);
+        return new SharedWrite(SharedOutcome.Ok, item);
+    }
+
+    public async Task<SharedWrite> UpdateSharedAsync(
+        User editor, string kind, int id, Action<ContextSource> apply, CancellationToken ct = default)
+    {
+        var item = await Shared(kind).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (item is null) return SharedWrite.NotFound;
+        if (!CanEditShared(editor)) return SharedWrite.Forbidden;
+
+        var content = item.Content;
+        apply(item);
+        item.Kind = kind;   // a shared row stays shared, whatever apply did
+        if (!string.Equals(item.Content, content, StringComparison.Ordinal)) item.Version++;
+        item.UpdatedAt = DateTime.Now;
+
+        await _db.SaveChangesAsync(ct);
+        return new SharedWrite(SharedOutcome.Ok, item);
+    }
+
+    public async Task<SharedWrite> DeleteSharedAsync(User editor, string kind, int id, CancellationToken ct = default)
+    {
+        var item = await Shared(kind).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (item is null) return SharedWrite.NotFound;
+        if (!CanEditShared(editor)) return SharedWrite.Forbidden;
+
+        _db.Remove(item);
+        await _db.SaveChangesAsync(ct);
+        return new SharedWrite(SharedOutcome.Ok, item);
+    }
+
+    private IQueryable<ContextSource> Shared(string kind) =>
+        IsShared(kind)
+            ? _db.ContextSources.Where(s => s.Kind == kind)
+            : throw new ArgumentException($"'{kind}' is not a shared kind.", nameof(kind));
+
+    /// <summary>
+    /// Every owner-scoped read starts here — there is no way to reach another
+    /// user's row, and no way to reach a shared row: those have their own
+    /// methods above, behind their own route's tab.
+    /// </summary>
     private IQueryable<ContextSource> Owned(int userId) =>
-        _db.ContextSources.Where(s => s.OwnerUserId == userId);
+        _db.ContextSources.Where(s => s.OwnerUserId == userId && !SharedKinds.Contains(s.Kind));
 
     private async Task<int> NextSortOrderAsync(int userId, string kind, CancellationToken ct)
     {

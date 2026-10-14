@@ -8,7 +8,7 @@
 namespace RabbitIC.Api.Models;
 
 /// <summary>
-/// The four roles, as stored in User.Role. A string rather than an int so the
+/// The five roles, as stored in User.Role. A string rather than an int so the
 /// column is readable in SQLite and an unknown future value degrades to
 /// "General" instead of silently becoming a different role.
 /// </summary>
@@ -20,8 +20,16 @@ public static class UserRoles
     public const string GroundControl = "GroundControl";
     public const string SystemAdmin = "SystemAdmin";
 
+    /// <summary>
+    /// HR staff using the মানব সম্পদ module (docs/HR_MODULE_PROMPT.md §3.1): its
+    /// own tabs and the HR library, and nothing model-backed beyond them. Shown
+    /// as "hr-assistant". Narrow rather than higher than General, so it sits next
+    /// to it in the picker.
+    /// </summary>
+    public const string HrAssistant = "HrAssistant";
+
     /// <summary>Least to most privileged — the order the admin picker lists them in.</summary>
-    public static readonly string[] All = { General, System, GroundControl, SystemAdmin };
+    public static readonly string[] All = { General, HrAssistant, System, GroundControl, SystemAdmin };
 
     /// <summary>
     /// Maps arbitrary input to a known role. Anything unrecognised — including a
@@ -38,6 +46,12 @@ public static class UserRoles
         "ground-control", "ground control", "ground_control",
     };
 
+    /// <summary>The same allowance for HrAssistant, whose display name is "hr-assistant".</summary>
+    private static readonly string[] HrAssistantSpellings =
+    {
+        "hr-assistant", "hr assistant", "hr_assistant",
+    };
+
     public static string Normalize(string? role) =>
         All.FirstOrDefault(r => Matches(r, role)) ?? General;
 
@@ -48,16 +62,24 @@ public static class UserRoles
         Normalize(user.Role) == SystemAdmin;
 
     /// <summary>Display name, e.g. "Ground Control". Unknown input labels as General.</summary>
-    public static string LabelFor(string? role) =>
-        Normalize(role) == GroundControl ? "Ground Control" : Normalize(role);
+    public static string LabelFor(string? role) => Normalize(role) switch
+    {
+        GroundControl => "Ground Control",
+        HrAssistant => "hr-assistant",
+        var r => r,
+    };
 
     private static bool Matches(string role, string? input)
     {
         var value = input?.Trim();
         if (string.Equals(role, value, StringComparison.OrdinalIgnoreCase)) return true;
 
-        return role == GroundControl &&
-            GroundControlSpellings.Contains(value, StringComparer.OrdinalIgnoreCase);
+        return role switch
+        {
+            GroundControl => GroundControlSpellings.Contains(value, StringComparer.OrdinalIgnoreCase),
+            HrAssistant => HrAssistantSpellings.Contains(value, StringComparer.OrdinalIgnoreCase),
+            _ => false,
+        };
     }
 }
 

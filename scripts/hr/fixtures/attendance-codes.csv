@@ -1,0 +1,11 @@
+code,counts_as_worked_day,meaning
+P,yes,Present
+LT,yes,Late
+LTP,yes,Late present
+SD,yes,Short duty
+TL,yes,Tour leave
+EE,yes,Early exit
+NOP,yes,No punch
+EXL,yes,Extra leave
+SL,last part-year only,Sick leave
+AL,no (subtracted),Annual leave taken

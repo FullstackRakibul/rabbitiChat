@@ -31,6 +31,7 @@ public static class SchemaUpgrade
         EnsureObservabilityTables(db);
         EnsureMessageWebSearchColumn(db);
         EnsureContextSourceTable(db);
+        EnsureHrLibrarySchema(db);
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
@@ -163,6 +164,86 @@ public static class SchemaUpgrade
             );");
         db.Database.ExecuteSqlRaw(
             @"CREATE INDEX ""IX_ContextSources_OwnerUserId_Kind"" ON ""ContextSources"" (""OwnerUserId"", ""Kind"");");
+    }
+
+    /// <summary>
+    /// The HR library (docs/HR_MODULE_PROMPT.md §3.2), for a database that predates it.
+    ///
+    /// ContextSources gains the HR columns. EmbeddingChunks is rebuilt once:
+    /// DocumentId becomes nullable and the chunk gains ContextSourceId and Kind,
+    /// so HR library chunks live in the same table and the same vector index as
+    /// document chunks rather than in a second store. SQLite cannot relax a NOT
+    /// NULL in place, hence the copy; it carries over whichever columns the old
+    /// table has, and it runs only while DocumentId is still NOT NULL.
+    /// </summary>
+    private static void EnsureHrLibrarySchema(AppDbContext db)
+    {
+        AddColumnIfMissing(db, "ContextSources", "HrType", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""HrType"" TEXT NULL;");
+        AddColumnIfMissing(db, "ContextSources", "Mode", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""Mode"" TEXT NULL;");
+        AddColumnIfMissing(db, "ContextSources", "Version", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""Version"" INTEGER NOT NULL DEFAULT 1;");
+        AddColumnIfMissing(db, "ContextSources", "ApprovedBy", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""ApprovedBy"" TEXT NULL;");
+        AddColumnIfMissing(db, "ContextSources", "ApprovedAt", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""ApprovedAt"" TEXT NULL;");
+
+        if (!ColumnIsNotNull(db, "EmbeddingChunks", "DocumentId")) return;
+
+        var carried = new[] { "Id", "DocumentId", "OwnerUserId", "Buyer", "StyleNumber", "SourceRef", "Text", "Vector", "CreatedAt" }
+            .Where(c => ColumnExists(db, "EmbeddingChunks", c))
+            .Select(c => $@"""{c}""");
+        var columns = string.Join(", ", carried);
+
+        // Nothing references EmbeddingChunks, but foreign keys are switched off
+        // for the copy anyway, as SQLite's own guide to rebuilding a table says.
+        db.Database.ExecuteSqlRaw("PRAGMA foreign_keys = OFF;");
+        try
+        {
+            using var tx = db.Database.BeginTransaction();
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""EmbeddingChunks_new"" (
+                    ""Id""              INTEGER NOT NULL CONSTRAINT ""PK_EmbeddingChunks"" PRIMARY KEY AUTOINCREMENT,
+                    ""DocumentId""      INTEGER NULL,
+                    ""ContextSourceId"" INTEGER NULL,
+                    ""Kind""            TEXT NULL,
+                    ""OwnerUserId""     INTEGER NULL,
+                    ""Buyer""           TEXT NULL,
+                    ""StyleNumber""     TEXT NULL,
+                    ""SourceRef""       TEXT NULL,
+                    ""Text""            TEXT NOT NULL,
+                    ""Vector""          BLOB NOT NULL,
+                    ""CreatedAt""       TEXT NOT NULL,
+                    CONSTRAINT ""FK_EmbeddingChunks_ContextSources_ContextSourceId""
+                        FOREIGN KEY (""ContextSourceId"") REFERENCES ""ContextSources"" (""Id"") ON DELETE CASCADE,
+                    CONSTRAINT ""FK_EmbeddingChunks_Documents_DocumentId""
+                        FOREIGN KEY (""DocumentId"") REFERENCES ""Documents"" (""Id"") ON DELETE CASCADE
+                );");
+            // Column names from the fixed list above, never input: built as text on purpose.
+            var copy = $@"INSERT INTO ""EmbeddingChunks_new"" ({columns}) SELECT {columns} FROM ""EmbeddingChunks"";";
+            db.Database.ExecuteSqlRaw(copy);
+            db.Database.ExecuteSqlRaw(@"DROP TABLE ""EmbeddingChunks"";");
+            db.Database.ExecuteSqlRaw(@"ALTER TABLE ""EmbeddingChunks_new"" RENAME TO ""EmbeddingChunks"";");
+            foreach (var column in new[] { "DocumentId", "OwnerUserId", "Buyer", "StyleNumber", "ContextSourceId", "Kind" })
+            {
+                var createIndex = $@"CREATE INDEX ""IX_EmbeddingChunks_{column}"" ON ""EmbeddingChunks"" (""{column}"");";
+                db.Database.ExecuteSqlRaw(createIndex);
+            }
+            tx.Commit();
+        }
+        finally
+        {
+            db.Database.ExecuteSqlRaw("PRAGMA foreign_keys = ON;");
+        }
+    }
+
+    private static bool ColumnIsNotNull(AppDbContext db, string table, string column)
+    {
+        var conn = db.Database.GetDbConnection();
+        OpenIfNeeded(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table});";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return reader.GetInt32(3) == 1;
+        return false;
     }
 
     /// <summary>

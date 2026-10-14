@@ -33,6 +33,9 @@ public static class TabCatalog
         "chat",
         "workspace",
         "docs",
+        // মানব সম্পদ (HR Assistant): SystemAdmin's and HrAssistant's by role,
+        // everyone else's only through a grant (docs/HR_MODULE_PROMPT.md §3.1).
+        "hr",
         "todo",
         "search",
         "jsonto",
@@ -57,6 +60,7 @@ public static class TabCatalog
         ["chat"] = "Chat",
         ["workspace"] = "Workspace Studio",
         ["docs"] = "Documents",
+        ["hr"] = "মানব সম্পদ",
         ["todo"] = "To-Do",
         ["search"] = "Search",
         ["jsonto"] = "JSON to ...",
@@ -135,6 +139,17 @@ public static class TabCatalog
     };
 
     /// <summary>
+    /// HrAssistant's tabs: the HR module and the two personal tools, nothing else.
+    /// A side branch rather than a tier — it is not a superset of General, so a
+    /// move between HrAssistant and another role can remove tabs; a grant keeps
+    /// any of them for one user.
+    /// </summary>
+    private static readonly string[] HrAssistantTabs =
+    {
+        "hr", "notes", "settings",
+    };
+
+    /// <summary>
     /// Tabs available only to SystemAdmin. Not additive from lower tiers.
     /// </summary>
     private static readonly string[] SystemAdminOnlyTabs =
@@ -153,6 +168,7 @@ public static class TabCatalog
             UserRoles.SystemAdmin => All,
             UserRoles.GroundControl => GeneralTabs.Concat(SystemExtraTabs).Concat(GroundControlExtraTabs).ToArray(),
             UserRoles.System => GeneralTabs.Concat(SystemExtraTabs).ToArray(),
+            UserRoles.HrAssistant => HrAssistantTabs,
             _ => GeneralTabs,
         };
 

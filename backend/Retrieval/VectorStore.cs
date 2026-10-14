@@ -46,12 +46,12 @@ public static class VectorOps
 
 // ───────────────────────── in-memory index ─────────────────────────
 
-public sealed record RetrievalHit(int ChunkId, float Score, string Text, string? SourceRef);
+public sealed record RetrievalHit(int ChunkId, float Score, string Text, string? SourceRef, int? ContextSourceId = null);
 
 public sealed class VectorIndex
 {
     private sealed record Entry(
-        int ChunkId, int DocumentId, int? OwnerUserId,
+        int ChunkId, int? DocumentId, int? ContextSourceId, string? Kind, int? OwnerUserId,
         string? Buyer, string? StyleNumber, string? SourceRef,
         string Text, float[] Vector);
 
@@ -67,7 +67,9 @@ public sealed class VectorIndex
         try
         {
             _entries.Clear();
-            foreach (var c in chunks) _entries.Add(ToEntry(c));
+            // A chunk with no vector yet (an HR item saved while Ollama was away)
+            // is not searchable; it joins through Add once it has been embedded.
+            foreach (var c in chunks) if (c.Vector.Length > 0) _entries.Add(ToEntry(c));
         }
         finally { _lock.ExitWriteLock(); }
     }
@@ -75,6 +77,7 @@ public sealed class VectorIndex
     /// <summary>Append after ingesting a new document — no full rebuild needed.</summary>
     public void Add(EmbeddingChunk chunk)
     {
+        if (chunk.Vector.Length == 0) return;
         _lock.EnterWriteLock();
         try { _entries.Add(ToEntry(chunk)); }
         finally { _lock.ExitWriteLock(); }
@@ -87,8 +90,29 @@ public sealed class VectorIndex
         finally { _lock.ExitWriteLock(); }
     }
 
+    /// <summary>Drops every chunk of one HR library item — before re-adding its new ones, or on delete.</summary>
+    public void RemoveContextSource(int contextSourceId)
+    {
+        _lock.EnterWriteLock();
+        try { _entries.RemoveAll(e => e.ContextSourceId == contextSourceId); }
+        finally { _lock.ExitWriteLock(); }
+    }
+
+    /// <summary>Chunks of one kind currently in memory, per library item — for the library's own consistency check.</summary>
+    public IReadOnlyDictionary<int, int> CountByContextSource(string kind)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _entries.Where(e => e.Kind == kind && e.ContextSourceId is not null)
+                .GroupBy(e => e.ContextSourceId!.Value)
+                .ToDictionary(g => g.Key, g => g.Count());
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
     private static Entry ToEntry(EmbeddingChunk c) => new(
-        c.Id, c.DocumentId, c.OwnerUserId, c.Buyer, c.StyleNumber, c.SourceRef,
+        c.Id, c.DocumentId, c.ContextSourceId, c.Kind, c.OwnerUserId, c.Buyer, c.StyleNumber, c.SourceRef,
         c.Text, VectorOps.FromBlob(c.Vector));
 
     /// <summary>
@@ -102,7 +126,8 @@ public sealed class VectorIndex
         int topK = 5,
         float minScore = 0.25f,
         string? buyer = null,
-        string? styleNumber = null)
+        string? styleNumber = null,
+        string? kind = null)
     {
         // Min-heap of size topK: the weakest surviving hit sits at the root, so a
         // new candidate only needs one comparison to be accepted or discarded.
@@ -114,6 +139,9 @@ public sealed class VectorIndex
             foreach (var e in _entries)
             {
                 // ---- metadata gate (runs first, by design) ----
+                // Kind first: document search (kind null) never sees an HR library
+                // chunk, and HR search never sees a document chunk.
+                if (!string.Equals(e.Kind, kind, StringComparison.Ordinal)) continue;
                 if (e.OwnerUserId is not null && e.OwnerUserId != userId) continue;
                 if (buyer is not null && !string.Equals(e.Buyer, buyer, StringComparison.OrdinalIgnoreCase)) continue;
                 if (styleNumber is not null && !string.Equals(e.StyleNumber, styleNumber, StringComparison.OrdinalIgnoreCase)) continue;
@@ -122,7 +150,7 @@ public sealed class VectorIndex
                 float score = VectorOps.Similarity(queryVector, e.Vector);
                 if (score < minScore) continue;
 
-                var hit = new RetrievalHit(e.ChunkId, score, e.Text, e.SourceRef);
+                var hit = new RetrievalHit(e.ChunkId, score, e.Text, e.SourceRef, e.ContextSourceId);
                 if (heap.Count < topK) heap.Enqueue(hit, score);
                 else if (heap.TryPeek(out _, out float weakest) && score > weakest)
                     heap.DequeueEnqueue(hit, score);

@@ -101,7 +101,19 @@ public class AppDbContext : DbContext
             .HasOne(c => c.Document)
             .WithMany(d => d.Chunks)
             .HasForeignKey(c => c.DocumentId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // An HR library chunk belongs to its library item instead of a document;
+        // deleting the item takes its chunks with it (docs/HR_MODULE_PROMPT.md §3.2).
+        b.Entity<EmbeddingChunk>()
+            .HasOne(c => c.ContextSource)
+            .WithMany()
+            .HasForeignKey(c => c.ContextSourceId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<EmbeddingChunk>().HasIndex(c => c.ContextSourceId);
+        b.Entity<EmbeddingChunk>().HasIndex(c => c.Kind);
 
         // Filterable metadata — keep these indexed (Search gates on them before similarity).
         b.Entity<EmbeddingChunk>().HasIndex(c => c.DocumentId);

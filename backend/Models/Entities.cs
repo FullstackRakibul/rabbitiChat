@@ -73,7 +73,18 @@ public class EmbeddingChunk
 {
 	public int Id { get; set; }
 
-	public int DocumentId { get; set; }
+	/// <summary>The document this chunk was cut from. Null for an HR library chunk.</summary>
+	public int? DocumentId { get; set; }
+
+	/// <summary>The HR library item (a ContextSource) this chunk was cut from. Null for a document chunk.</summary>
+	public int? ContextSourceId { get; set; }
+
+	/// <summary>
+	/// Null for document chunks; "hr" for the HR library. The vector index gates
+	/// on it before scoring, so the two corpora never answer for each other.
+	/// </summary>
+	public string? Kind { get; set; }
+
 	/// <summary>Owner. Null = shared team knowledge base.</summary>
 	public int? OwnerUserId { get; set; }
 
@@ -90,6 +101,7 @@ public class EmbeddingChunk
 	public DateTime CreatedAt { get; set; } = DateTime.Now;
 
 	public Document? Document { get; set; }
+	public ContextSource? ContextSource { get; set; }
 }
 
 public class Message

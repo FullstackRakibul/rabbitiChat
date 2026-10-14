@@ -112,9 +112,9 @@ public static class RbacSeeder
     /// — the same reasoning as the admin secret above: a restart must not undo a
     /// deliberate change.
     ///
-    /// General starts confined to the install's default extraction model; every
-    /// other role starts unrestricted, which is both today's behaviour and the
-    /// safe default for a missing row.
+    /// General and HrAssistant start confined to the install's default extraction
+    /// model; every other role starts unrestricted, which is both today's
+    /// behaviour and the safe default for a missing row.
     /// </summary>
     public static void SeedModelPolicies(AppDbContext db, IConfiguration config, ILogger logger)
     {
@@ -130,7 +130,9 @@ public static class RbacSeeder
         {
             if (existing.Any(r => UserRoles.Normalize(r) == role)) continue;
 
-            var restricted = role == UserRoles.General;
+            // General and HrAssistant start on the one default model
+            // (docs/HR_MODULE_PROMPT.md §3.1); every other role unrestricted.
+            var restricted = role is UserRoles.General or UserRoles.HrAssistant;
             db.RoleModelPolicies.Add(new RoleModelPolicy
             {
                 Role = role,
@@ -145,7 +147,7 @@ public static class RbacSeeder
 
         db.SaveChanges();
         logger.LogInformation(
-            "RBAC: seeded model policies for {Roles} (General limited to {Model}).",
+            "RBAC: seeded model policies for {Roles} (General and HrAssistant limited to {Model}).",
             string.Join(", ", added), generalDefault);
     }
 

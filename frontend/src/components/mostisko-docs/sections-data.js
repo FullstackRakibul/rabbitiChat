@@ -11,7 +11,7 @@
 import {
   BookOpen, Layers, Server, Shield, ShieldCheck,
   MessageSquare, Brain, Globe, ListTodo, Table,
-  GraduationCap, BadgeDollarSign, Settings, Rocket, CircleHelp,
+  GraduationCap, BadgeDollarSign, Settings, Rocket, CircleHelp, Users,
 } from '@lucide/vue'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +86,7 @@ export const SECTIONS = [
   // ── Modules (each documented with Purpose / User Guide / Technical) ──
   { id: 'chat',                 title: 'Chat & Sources',       icon: MessageSquare,   group: 'modules' },
   { id: 'workspace',            title: 'Workspace Studio',     icon: Brain,           group: 'modules' },
+  { id: 'hr',                   title: 'মানব সম্পদ',            icon: Users,           group: 'modules' },
   { id: 'search',               title: 'Search',               icon: Globe,           group: 'modules' },
   { id: 'todorabbit',           title: 'todorabbit',           icon: ListTodo,        group: 'modules' },
   { id: 'json-table',           title: 'JSON → Table',         icon: Table,           group: 'modules' },
@@ -236,6 +237,43 @@ var words = page.GetWords()
 
 // Each column band maps to a PO field (style, color, qty, price)
 // The x-coordinate decides the column — not the word order in the stream`,
+      },
+    ],
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+
+  {
+    id: 'hr',
+    title: 'মানব সম্পদ (HR Assistant)',
+    purpose:
+      'Answers HR\'s questions about final settlement and earned leave from HR\'s own ' +
+      'library — the HR-approved rules document, the CoreERP procedure text and the code ' +
+      'tables — with a citation after each statement. It has no database connection and ' +
+      'runs nothing: procedure files are text for the model to read. Where the library ' +
+      'is silent it says so rather than guessing company policy.',
+    guide: [
+      { step: 'Open মানব সম্পদ',            detail: 'hr-assistant users land here; anyone else needs the tab granted in Access.' },
+      { step: 'Keep the library current',  detail: 'লাইব্রেরি: paste text or upload .md, .txt, .sql or .csv. Rules and code tables are sent whole with every question; procedures are split and searched.' },
+      { step: 'Sign items off',            detail: 'Set "approved by" on an item; the name is shown next to its citations.' },
+      { step: 'Check what will be searched', detail: 'Open a procedure\'s chunks to see exactly which sections and line ranges the assistant can quote.' },
+    ],
+    stack: ['ContextSource (Kind = hr)', 'HrSplitter', 'nomic-embed-text', 'VectorIndex (kind gate)', 'ModelPolicy'],
+    decisions: [
+      {
+        title: 'Commented-out code is removed before splitting',
+        detail:
+          'Old formulas such as the "Ager Formula" block stay in the procedure files as comments. ' +
+          'They are removed before a procedure is split, so the model can never quote a formula ' +
+          'that no longer runs.',
+        variant: 'note',
+      },
+      {
+        title: 'Shared, not personal',
+        detail:
+          'HR items are company knowledge: anyone with the tab reads them, and only hr-assistant ' +
+          'and SystemAdmin users change them. Every other kind of source stays scoped to its owner.',
+        variant: 'note',
       },
     ],
   },

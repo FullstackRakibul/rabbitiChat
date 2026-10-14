@@ -34,6 +34,8 @@ export const MODULE_ROUTES = [
   // own: Documents and Workspace are one tab now, and /documents redirects into
   // its Library section below.
   { key: 'workspace', path: '/workspace' },
+  // মানব সম্পদ (HR Assistant).
+  { key: 'hr', path: '/hr' },
   { key: 'todo', path: '/todo' },
   { key: 'search', path: '/search' },
   { key: 'jsonto', path: '/json-converter' },

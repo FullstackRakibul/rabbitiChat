@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote, Activity, Satellite, Grip
+  Scissors, StickyNote, Activity, Satellite, Grip, Users
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -41,6 +41,7 @@ import SettingsTab from '@/components/tabs/SettingsTab.vue'
 import ComponentSplitterTab from '@/components/tabs/ComponentSplitterTab.vue'
 import RbacTab from '@/components/tabs/RbacTab.vue'
 import NotesTab from '@/components/tabs/NotesTab.vue'
+import HrTab from '@/components/tabs/HrTab.vue'
 import PublicNote from '@/components/notes/PublicNote.vue'
 import LogsTab from '@/components/tabs/LogsTab.vue'
 import OddityTab from '@/components/tabs/OddityTab.vue'
@@ -415,6 +416,8 @@ const ALL_TABS = [
   // `workspace`; the `docs` key still gates /api/documents and /api/buyer-profiles
   // on the server, so existing grants keep working unchanged.
   { id: 'workspace', label: 'Workspace Studio', icon: Brain, group: 'Work' },
+  // মানব সম্পদ (HR Assistant): HR's library and, from Phase 2, its chat.
+  { id: 'hr', label: 'মানব সম্পদ', icon: Users, group: 'Work' },
   { id: 'todo', label: 'To-Do', icon: ListTodo, group: 'Work' },
   { id: 'search', label: 'Search', icon: Globe, group: 'Work' },
   { id: 'jsonto', label: 'JSON to ...', icon: Table, group: 'Tools' },
@@ -1133,6 +1136,10 @@ const notesTabRef = ref(null)
       
       <TabsContent value="notes" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <NotesTab ref="notesTabRef" />
+      </TabsContent>
+
+      <TabsContent value="hr" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <HrTab />
       </TabsContent>
       
       <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
