@@ -123,7 +123,21 @@ internal static class OpenAiChatStream
                 name = m.ToolName ?? "",
                 tool_call_id = m.ToolName ?? "",
             }
-            : new { role = m.Role, content = m.Content });
+            // The assistant turn that asked for tools carries its calls, with the
+            // same name-as-id the tool results answer to.
+            : m.ToolCalls is { Count: > 0 } calls
+                ? new
+                {
+                    role = m.Role,
+                    content = m.Content,
+                    tool_calls = calls.Select(c => new
+                    {
+                        id = c.Name,
+                        type = "function",
+                        function = new { name = c.Name, arguments = c.ArgumentsJson },
+                    }),
+                }
+                : new { role = m.Role, content = m.Content });
 
         if (tools is null || tools.Count == 0)
             return new { model, messages = wireMessages, stream = true };

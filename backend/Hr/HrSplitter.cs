@@ -21,6 +21,7 @@
 // runs them; the "keywords" are only how a commented-out line is recognised.
 
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using RabbitIC.Api.MinimalApis;
 
@@ -36,9 +37,236 @@ public static class HrSplitter
     public static IReadOnlyList<HrChunk> Split(string name, string content)
     {
         var text = (content ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
-        return name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)
-            ? SplitSql(name, text)
-            : SplitText(name, text);
+        if (name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)) return SplitSql(name, text);
+        if (IsJson(name, text)) return SplitJson(name, text);
+        if (name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)) return SplitCsv(name, text);
+        return SplitText(name, text);
+    }
+
+    /// <summary>
+    /// A .json item, or pasted text shaped like JSON (it starts with { or [ and
+    /// ends with } or ]). Such text must parse; <see cref="Validate"/> says why not.
+    /// </summary>
+    public static bool IsJson(string name, string content)
+    {
+        if (name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) return true;
+        var t = content.Trim();
+        return t.Length > 1 && (t[0] == '{' || t[0] == '[') && (t[^1] == '}' || t[^1] == ']');
+    }
+
+    /// <summary>Null when the content can be split as its format says; otherwise the reason, for the person who added it.</summary>
+    public static string? Validate(string name, string content)
+    {
+        if (!IsJson(name, content)) return null;
+        try
+        {
+            using var _ = JsonDocument.Parse(content);
+            return null;
+        }
+        catch (JsonException e)
+        {
+            var reason = e.Message.Split(" LineNumber:")[0].Split(" Path:")[0].TrimEnd('.', ' ');
+            return $"Invalid JSON at line {(e.LineNumber ?? 0) + 1}, column {(e.BytePositionInLine ?? 0) + 1}: {reason}.";
+        }
+    }
+
+    // ───────────────────────── JSON ─────────────────────────
+
+    private static readonly JsonSerializerOptions Pretty = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,   // Bengali stays readable
+    };
+
+    private sealed record JsonUnit(string Path, string Text, int LineFrom, int LineTo);
+
+    /// <summary>
+    /// Along the structure: each element of a top-level array, or each top-level
+    /// property, is a unit; units are packed up to MaxChunkChars, and a unit too
+    /// big on its own is split by its own children. Every chunk carries its JSON
+    /// path ("$[3]", "$[3]-$[5]", "$.categories") and its lines in the original.
+    /// </summary>
+    private static IReadOnlyList<HrChunk> SplitJson(string name, string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        var lineStarts = new List<int> { 0 };
+        for (var i = 0; i < bytes.Length; i++) if (bytes[i] == (byte)'\n') lineStarts.Add(i + 1);
+        int LineAt(long offset)
+        {
+            var idx = lineStarts.BinarySearch((int)offset);
+            return (idx >= 0 ? idx : ~idx - 1) + 1;
+        }
+
+        using var doc = JsonDocument.Parse(bytes);
+        var ranges = TopLevelRanges(bytes);
+        var units = new List<JsonUnit>();
+        var root = doc.RootElement;
+
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            var i = 0;
+            foreach (var el in root.EnumerateArray())
+            {
+                var (from, to) = i < ranges.Count ? ranges[i] : (0, bytes.Length);
+                units.AddRange(Units($"$[{i}]", el, null, LineAt(from), LineAt(Math.Max(to - 1, from))));
+                i++;
+            }
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            var i = 0;
+            foreach (var prop in root.EnumerateObject())
+            {
+                var (from, to) = i < ranges.Count ? ranges[i] : (0, bytes.Length);
+                units.AddRange(Units(PropertyPath("$", prop.Name), prop.Value, prop.Name, LineAt(from), LineAt(Math.Max(to - 1, from))));
+                i++;
+            }
+        }
+        else
+        {
+            units.Add(new JsonUnit("$", JsonSerializer.Serialize(root, Pretty), 1, lineStarts.Count));
+        }
+
+        // Pack neighbouring units into chunks of at most MaxChunkChars.
+        var chunks = new List<HrChunk>();
+        var group = new List<JsonUnit>();
+        var length = 0;
+        void Flush()
+        {
+            if (group.Count == 0) return;
+            var path = group.Count == 1 ? group[0].Path : $"{group[0].Path}-{group[^1].Path}";
+            var body = string.Join("\n", group.Select(u => u.Text));
+            var (from, to) = (group.Min(u => u.LineFrom), group.Max(u => u.LineTo));
+            chunks.Add(new HrChunk(body, path, from, to, $"{name} {path}"));
+            group.Clear();
+            length = 0;
+        }
+        foreach (var u in units)
+        {
+            if (length > 0 && length + 1 + u.Text.Length > MaxChunkChars) Flush();
+            group.Add(u);
+            length += u.Text.Length + (length > 0 ? 1 : 0);
+        }
+        Flush();
+        return chunks;
+    }
+
+    /// <summary>One unit, or — when it is too big — its children as units, recursively; a huge scalar is cut.</summary>
+    private static IEnumerable<JsonUnit> Units(string path, JsonElement el, string? propertyName, int from, int to)
+    {
+        var text = JsonSerializer.Serialize(el, Pretty);
+        if (propertyName is not null) text = $"{JsonSerializer.Serialize(propertyName, Pretty)}: {text}";
+        if (text.Length <= MaxChunkChars)
+        {
+            yield return new JsonUnit(path, text, from, to);
+            yield break;
+        }
+
+        if (el.ValueKind == JsonValueKind.Array)
+        {
+            var i = 0;
+            foreach (var child in el.EnumerateArray())
+                foreach (var u in Units($"{path}[{i++}]", child, null, from, to)) yield return u;
+        }
+        else if (el.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in el.EnumerateObject())
+                foreach (var u in Units(PropertyPath(path, prop.Name), prop.Value, prop.Name, from, to)) yield return u;
+        }
+        else
+        {
+            for (var start = 0; start < text.Length; start += MaxChunkChars)
+                yield return new JsonUnit(path, text.Substring(start, Math.Min(MaxChunkChars, text.Length - start)), from, to);
+        }
+    }
+
+    private static string PropertyPath(string parent, string name) =>
+        Regex.IsMatch(name, "^[A-Za-z_][A-Za-z0-9_]*$") ? $"{parent}.{name}" : $"{parent}['{name.Replace("'", "\\'")}']";
+
+    /// <summary>Byte ranges of the root's direct children (array elements, or properties from name to value end).</summary>
+    private static List<(long From, long To)> TopLevelRanges(byte[] bytes)
+    {
+        var ranges = new List<(long, long)>();
+        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip });
+        long start = -1;
+        while (reader.Read())
+        {
+            var depth = reader.CurrentDepth;
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.PropertyName when depth == 1:
+                    start = reader.TokenStartIndex;
+                    break;
+                case JsonTokenType.StartObject or JsonTokenType.StartArray when depth == 1:
+                    if (start < 0) start = reader.TokenStartIndex;
+                    break;
+                case JsonTokenType.EndObject or JsonTokenType.EndArray when depth == 1:
+                    ranges.Add((start, reader.BytesConsumed));
+                    start = -1;
+                    break;
+                case JsonTokenType.String or JsonTokenType.Number or JsonTokenType.True or JsonTokenType.False or JsonTokenType.Null when depth == 1:
+                    ranges.Add((start < 0 ? reader.TokenStartIndex : start, reader.BytesConsumed));
+                    start = -1;
+                    break;
+            }
+        }
+        return ranges;
+    }
+
+    // ───────────────────────── CSV ─────────────────────────
+
+    /// <summary>
+    /// Rows grouped into chunks with the header repeated at the top of each, so
+    /// every chunk can be read on its own; the SourceRef carries the data-row
+    /// range ("emp-types.csv rows 1-40"). Quoted fields may span lines.
+    /// </summary>
+    private static IReadOnlyList<HrChunk> SplitCsv(string name, string text)
+    {
+        // Records, honouring quotes, each with the lines it occupies.
+        var records = new List<(string Text, int From, int To)>();
+        var sb = new StringBuilder();
+        bool inQuotes = false;
+        int line = 1, recordStart = 1;
+        foreach (var ch in text)
+        {
+            if (ch == '"') inQuotes = !inQuotes;
+            if (ch == '\n' && !inQuotes)
+            {
+                if (sb.ToString().Trim().Length > 0) records.Add((sb.ToString(), recordStart, line));
+                sb.Clear();
+                line++;
+                recordStart = line;
+                continue;
+            }
+            if (ch == '\n') line++;
+            sb.Append(ch);
+        }
+        if (sb.ToString().Trim().Length > 0) records.Add((sb.ToString(), recordStart, line));
+        if (records.Count == 0) return Array.Empty<HrChunk>();
+
+        var header = records[0].Text;
+        if (records.Count == 1) return new[] { new HrChunk(header, null, 1, 1, $"{name} header") };
+
+        var chunks = new List<HrChunk>();
+        var rows = new List<int>();
+        var length = header.Length;
+        void Flush()
+        {
+            if (rows.Count == 0) return;
+            var body = header + "\n" + string.Join("\n", rows.Select(r => records[r].Text));
+            var label = $"rows {rows[0]}-{rows[^1]}";
+            chunks.Add(new HrChunk(body, label, records[rows[0]].From, records[rows[^1]].To, $"{name} {label}"));
+            rows.Clear();
+            length = header.Length;
+        }
+        for (var r = 1; r < records.Count; r++)
+        {
+            if (rows.Count > 0 && length + 1 + records[r].Text.Length > MaxChunkChars) Flush();
+            rows.Add(r);
+            length += 1 + records[r].Text.Length;
+        }
+        Flush();
+        return chunks;
     }
 
     /// <summary>"File §Section L1-9" — the one format citations and the UI parse back.</summary>
@@ -289,25 +517,45 @@ public static class HrSplitter
     private static readonly Regex MarkdownHeading = new(@"^\s{0,3}#{1,6}\s+(?<title>.+?)\s*#*\s*$", RegexOptions.Compiled);
 
     /// <summary>
-    /// Split as documents are (DocumentApis.ChunkText: ~800 characters, ~100
-    /// overlap), then each piece is located in the original to recover its line
-    /// range, and labelled with the nearest heading above it.
+    /// Section by section — a markdown heading, which is also how a PDF page or an
+    /// XLSX sheet arrives ("## Page 2", "## Sheet Rates") — then each section split
+    /// as documents are (DocumentApis.ChunkText: ~800 characters, ~100 overlap).
+    /// Each piece is located in the original to recover its line range, and
+    /// carries its section's heading in the SourceRef.
     /// </summary>
     private static IReadOnlyList<HrChunk> SplitText(string name, string text)
     {
-        var chunks = new List<HrChunk>();
-        var cursor = 0;
-        foreach (var piece in DocumentApis.ChunkText(text))
+        var lines = text.Split('\n');
+        var sections = new List<(string? Title, int FirstLine, int LastLine)>();
+        string? title = null;
+        var first = 0;
+        for (var i = 0; i < lines.Length; i++)
         {
-            var at = text.IndexOf(piece, cursor, StringComparison.Ordinal);
-            if (at < 0) at = text.IndexOf(piece, StringComparison.Ordinal);
-            if (at < 0) at = cursor;
-            cursor = at + 1;
+            var heading = MarkdownHeading.Match(lines[i]);
+            if (!heading.Success || i == first) { if (heading.Success) title = heading.Groups["title"].Value.Trim(); continue; }
+            sections.Add((title, first, i - 1));
+            title = heading.Groups["title"].Value.Trim();
+            first = i;
+        }
+        sections.Add((title, first, lines.Length - 1));
 
-            var from = LineOf(text, at);
-            var to = LineOf(text, at + Math.Max(piece.Length - 1, 0));
-            var section = HeadingAbove(text, at);
-            chunks.Add(new HrChunk(piece, section, from, to, SourceRef(name, section, from, to)));
+        var chunks = new List<HrChunk>();
+        foreach (var (section, firstLine, lastLine) in sections)
+        {
+            var body = string.Join("\n", lines[firstLine..(lastLine + 1)]);
+            if (string.IsNullOrWhiteSpace(body)) continue;
+            var cursor = 0;
+            foreach (var piece in DocumentApis.ChunkText(body))
+            {
+                var at = body.IndexOf(piece, cursor, StringComparison.Ordinal);
+                if (at < 0) at = body.IndexOf(piece, StringComparison.Ordinal);
+                if (at < 0) at = cursor;
+                cursor = at + 1;
+
+                var from = firstLine + LineOf(body, at);
+                var to = firstLine + LineOf(body, at + Math.Max(piece.Length - 1, 0));
+                chunks.Add(new HrChunk(piece, section, from, to, SourceRef(name, section, from, to)));
+            }
         }
         return chunks;
     }
@@ -319,14 +567,4 @@ public static class HrSplitter
         return line;
     }
 
-    private static string? HeadingAbove(string text, int offset)
-    {
-        var lines = text[..Math.Min(offset + 1, text.Length)].Split('\n');
-        for (var i = lines.Length - 1; i >= 0; i--)
-        {
-            var m = MarkdownHeading.Match(lines[i]);
-            if (m.Success) return m.Groups["title"].Value.Trim();
-        }
-        return null;
-    }
 }

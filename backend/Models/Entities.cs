@@ -35,6 +35,13 @@ public class Conversation
 	/// </summary>
 	public string? ActiveSourceIds { get; set; }
 
+	/// <summary>
+	/// Null for a normal chat; "hr" for a conversation of the HR Assistant
+	/// (docs/HR_MODULE_PROMPT.md §3.3). HR conversations are listed only in their
+	/// own tab and never in the main sidebar.
+	/// </summary>
+	public string? Kind { get; set; }
+
 	public DateTime CreatedAt { get; set; } = DateTime.Now;
 
 	public User? User { get; set; }
@@ -93,6 +100,10 @@ public class EmbeddingChunk
 	public string? StyleNumber { get; set; }
 	public string? SourceRef { get; set; }            // e.g. "15901248.pdf p2" — used for citations
 
+	/// <summary>HR chunks: the lines of the library item's text this chunk came from, for opening a citation.</summary>
+	public int? LineFrom { get; set; }
+	public int? LineTo { get; set; }
+
 	public string Text { get; set; } = "";
 
 	/// <summary>L2-normalised float32 vector, raw little-endian bytes.</summary>
@@ -112,6 +123,14 @@ public class Message
 	public string Content { get; set; } = "";
 	/// <summary>True when this reply was grounded on live web results, so history can show the badge.</summary>
 	public bool WebSearchUsed { get; set; }
+
+	/// <summary>
+	/// HR answers only: what was sent with the question (the "Context used"
+	/// receipt), the calculations made and the amounts the number check could
+	/// not verify, so a reopened HR conversation shows the same panel.
+	/// </summary>
+	public string? HrMetaJson { get; set; }
+
 	public DateTime CreatedAt { get; set; } = DateTime.Now;
 
 	public Conversation? Conversation { get; set; }

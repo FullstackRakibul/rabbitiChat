@@ -1,0 +1,3 @@
+# Binary formats: never convert line endings (a PDF's xref offsets would break).
+*.pdf binary
+*.xlsx binary

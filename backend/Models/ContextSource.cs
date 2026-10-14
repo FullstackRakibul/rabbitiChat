@@ -51,6 +51,9 @@ public class ContextSource
     public string? ApprovedBy { get; set; }
     public DateTime? ApprovedAt { get; set; }
 
+    /// <summary>Why the last background embedding of this item failed; null while it is fine. Cleared by Retry.</summary>
+    public string? IndexError { get; set; }
+
     public const string KindSource = "source";
     public const string KindBuyer = "buyer";
     public const string KindHr = "hr";

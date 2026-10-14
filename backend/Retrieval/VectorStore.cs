@@ -127,7 +127,8 @@ public sealed class VectorIndex
         float minScore = 0.25f,
         string? buyer = null,
         string? styleNumber = null,
-        string? kind = null)
+        string? kind = null,
+        IReadOnlySet<int>? contextSources = null)
     {
         // Min-heap of size topK: the weakest surviving hit sits at the root, so a
         // new candidate only needs one comparison to be accepted or discarded.
@@ -142,6 +143,8 @@ public sealed class VectorIndex
                 // Kind first: document search (kind null) never sees an HR library
                 // chunk, and HR search never sees a document chunk.
                 if (!string.Equals(e.Kind, kind, StringComparison.Ordinal)) continue;
+                // HR search scoped to some library items (or to the active ones).
+                if (contextSources is not null && (e.ContextSourceId is not int cs || !contextSources.Contains(cs))) continue;
                 if (e.OwnerUserId is not null && e.OwnerUserId != userId) continue;
                 if (buyer is not null && !string.Equals(e.Buyer, buyer, StringComparison.OrdinalIgnoreCase)) continue;
                 if (styleNumber is not null && !string.Equals(e.StyleNumber, styleNumber, StringComparison.OrdinalIgnoreCase)) continue;

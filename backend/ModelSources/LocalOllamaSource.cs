@@ -78,7 +78,7 @@ public class LocalOllamaSource : IChatModelSource
     public IAsyncEnumerable<ChatStreamEvent> StreamChatAsync(ChatArgs args, CancellationToken ct = default) =>
         OllamaChatStream.StreamAsync(
             _http.CreateClient("ollama"), "/api/chat", args.Model, args.Messages, _log, ct,
-            args.Tools, args.Think);
+            args.Tools, args.Think, args.NumCtx, args.KeepAlive, args.Temperature);
 
     /// <summary>
     /// Asks /api/show what a model can do. Ollama reports capabilities directly

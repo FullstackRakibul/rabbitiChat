@@ -27,7 +27,7 @@ namespace RabbitIC.Api.MinimalApis
         private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
         /// <summary>A contiguous piece of extracted text plus where it came from (for citations).</summary>
-        private sealed record Section(string SourceRef, string Text);
+        internal sealed record Section(string SourceRef, string Text);
 
         public static IEndpointRouteBuilder MapDocumentApis(this IEndpointRouteBuilder app)
         {
@@ -559,7 +559,7 @@ namespace RabbitIC.Api.MinimalApis
 
         // ───────────────────────── text extraction ─────────────────────────
 
-        private static List<Section> ExtractPdf(Stream stream, string fileName)
+        internal static List<Section> ExtractPdf(Stream stream, string fileName)
         {
             var sections = new List<Section>();
             using var pdf = PdfDocument.Open(stream);
@@ -573,7 +573,7 @@ namespace RabbitIC.Api.MinimalApis
         }
 
         // Each sheet becomes "Header: value | Header: value" rows — embeds far better than raw cells.
-        private static List<Section> ExtractXlsx(Stream stream, string fileName)
+        internal static List<Section> ExtractXlsx(Stream stream, string fileName)
         {
             var sections = new List<Section>();
             using var workbook = new XLWorkbook(stream);

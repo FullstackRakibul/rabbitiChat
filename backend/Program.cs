@@ -176,6 +176,10 @@ builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
 
 // ---- মানব সম্পদ (HR Assistant): the HR library (docs/HR_MODULE_PROMPT.md) ----
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
+// Embeddings for the HR library are made in the background, one item at a time;
+// a save or a 200-file upload never waits on Ollama.
+builder.Services.AddSingleton<RabbitIC.Api.Hr.HrIndexer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RabbitIC.Api.Hr.HrIndexer>());
 
 builder.Services.Configure<RabbitIC.Api.ModelSources.OllamaCloudOptions>(
 	builder.Configuration.GetSection(RabbitIC.Api.ModelSources.OllamaCloudOptions.SectionName));
@@ -353,22 +357,6 @@ app.ApplicationNoteApis();
 app.ApplicationOddityApis();
 app.ApplicationHrApis();
 
-// The HR library's chunks are embedded once the app is serving, so start-up
-// never waits on Ollama; anything it cannot embed now waits for the next try.
-app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
-{
-	try
-	{
-		using var embedScope = app.Services.CreateScope();
-		var embedded = await embedScope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>().EmbedPendingAsync();
-		if (embedded > 0) app.Logger.LogInformation("HR library: embedded {Count} chunk(s).", embedded);
-	}
-	catch (Exception e)
-	{
-		app.Logger.LogWarning(e, "HR library: embedding after start-up failed.");
-	}
-}));
-
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);
 
@@ -407,6 +395,9 @@ using (var scope = app.Services.CreateScope())
 	app.Logger.LogInformation("SQLite database: {Path}", sqliteConnectionString);
 	db.Database.EnsureCreated();   // creates everything fresh if the file is new
 	SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
+	// The HR library's keyword index: an FTS5 table EnsureCreated cannot make, so
+	// it is ensured on every start, fresh database or not.
+	RabbitIC.Api.Hr.HrKeywordIndex.EnsureSchema(db);
 
 	// RBAC. Both steps are idempotent, and the order matters: give every existing
 	// row a role before seeding, so the admin count the guardrails read is right

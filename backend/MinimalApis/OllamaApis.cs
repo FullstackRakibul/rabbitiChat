@@ -123,8 +123,9 @@ namespace RabbitIC.Api.MinimalApis
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
 
+                // HR conversations (Kind = "hr") live in the HR tab only, never in this list.
                 return Results.Ok(await db.Conversations
-                    .Where(c => c.UserId == user.Id)
+                    .Where(c => c.UserId == user.Id && c.Kind == null)
                     .OrderByDescending(c => c.CreatedAt)
                     .Select(c => new { c.Id, c.Title, c.CreatedAt })
                     .ToListAsync());
@@ -139,7 +140,7 @@ namespace RabbitIC.Api.MinimalApis
                 if (user is null) return Results.Unauthorized();
 
                 var convo = await db.Conversations
-                    .Where(c => c.Id == id && c.UserId == user.Id)
+                    .Where(c => c.Id == id && c.UserId == user.Id && c.Kind == null)
                     .Select(c => new
                     {
                         c.Id,
@@ -162,7 +163,7 @@ namespace RabbitIC.Api.MinimalApis
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
 
-                var convo = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id && c.UserId == user.Id);
+                var convo = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id && c.UserId == user.Id && c.Kind == null);
                 if (convo is null) return Results.NotFound();
                 db.Conversations.Remove(convo);
                 await db.SaveChangesAsync();

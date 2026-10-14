@@ -184,7 +184,16 @@ public static class SchemaUpgrade
         AddColumnIfMissing(db, "ContextSources", "ApprovedBy", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""ApprovedBy"" TEXT NULL;");
         AddColumnIfMissing(db, "ContextSources", "ApprovedAt", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""ApprovedAt"" TEXT NULL;");
 
-        if (!ColumnIsNotNull(db, "EmbeddingChunks", "DocumentId")) return;
+        // Phase 2: indexing state, HR conversations, citation lines.
+        AddColumnIfMissing(db, "ContextSources", "IndexError", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""IndexError"" TEXT NULL;");
+        AddColumnIfMissing(db, "Conversations", "Kind", @"ALTER TABLE ""Conversations"" ADD COLUMN ""Kind"" TEXT NULL;");
+        AddColumnIfMissing(db, "Messages", "HrMetaJson", @"ALTER TABLE ""Messages"" ADD COLUMN ""HrMetaJson"" TEXT NULL;");
+
+        if (!ColumnIsNotNull(db, "EmbeddingChunks", "DocumentId"))
+        {
+            AddChunkLineColumns(db);
+            return;
+        }
 
         var carried = new[] { "Id", "DocumentId", "OwnerUserId", "Buyer", "StyleNumber", "SourceRef", "Text", "Vector", "CreatedAt" }
             .Where(c => ColumnExists(db, "EmbeddingChunks", c))
@@ -231,6 +240,13 @@ public static class SchemaUpgrade
         {
             db.Database.ExecuteSqlRaw("PRAGMA foreign_keys = ON;");
         }
+        AddChunkLineColumns(db);
+    }
+
+    private static void AddChunkLineColumns(AppDbContext db)
+    {
+        AddColumnIfMissing(db, "EmbeddingChunks", "LineFrom", @"ALTER TABLE ""EmbeddingChunks"" ADD COLUMN ""LineFrom"" INTEGER NULL;");
+        AddColumnIfMissing(db, "EmbeddingChunks", "LineTo", @"ALTER TABLE ""EmbeddingChunks"" ADD COLUMN ""LineTo"" INTEGER NULL;");
     }
 
     private static bool ColumnIsNotNull(AppDbContext db, string table, string column)

@@ -28,6 +28,13 @@ namespace RabbitIC.Api.MinimalApis
         /// </summary>
         private const int MaxToolRounds = 2;
 
+        /// <summary>
+        /// The HR chat's cap (docs/HR_MODULE_PROMPT.md §3.3): an amount can need a
+        /// few `calculate` calls in a row — per-day basic, then the benefit, then a
+        /// total — so it gets more rounds than one web search needs.
+        /// </summary>
+        internal const int HrMaxToolRounds = 4;
+
         public static async Task HandleAsync(
             ChatRequest req,
             HttpContext ctx,
@@ -70,8 +77,9 @@ namespace RabbitIC.Api.MinimalApis
             // ---- Conversation ----
             // Scoped to this user, so you cannot post into someone else's thread.
             Conversation convo;
+            // Never an HR conversation (Kind = "hr"): those belong to the HR tab.
             if (req.ConversationId is int cid &&
-                await db.Conversations.FirstOrDefaultAsync(c => c.Id == cid && c.UserId == user.Id, ct) is { } existing)
+                await db.Conversations.FirstOrDefaultAsync(c => c.Id == cid && c.UserId == user.Id && c.Kind == null, ct) is { } existing)
             {
                 convo = existing;
             }
@@ -102,7 +110,7 @@ namespace RabbitIC.Api.MinimalApis
             var history = await db.Messages
                 .Where(m => m.ConversationId == convo.Id)
                 .OrderBy(m => m.Id)
-                .Select(m => new ChatTurn(m.Role, m.Content, null))
+                .Select(m => new ChatTurn(m.Role, m.Content, null, null))
                 .ToListAsync(ct);
 
             var turns = new List<ChatTurn>();
@@ -170,47 +178,13 @@ namespace RabbitIC.Api.MinimalApis
 
             try
             {
-                for (var round = 0; ; round++)
-                {
-                    var pendingCalls = new List<ToolCallRequest>();
-
-                    await foreach (var e in chat.StreamAsync(
-                        req.Source, new ChatArgs(req.Model, turns, tools, think), ct))
-                    {
-                        switch (e.Kind)
-                        {
-                            case ChatEventKind.Content:
-                                answer.Append(e.Text);
-                                await writer.ContentAsync(e.Text);
-                                break;
-
-                            case ChatEventKind.Thinking:
-                                // Reasoning is shown live but never persisted: it is
-                                // scratch work, not the answer, and re-reading it on
-                                // every future turn would waste the context window.
-                                await writer.ThinkingAsync(e.Text);
-                                break;
-
-                            case ChatEventKind.ToolCall when e.ToolCall is not null:
-                                pendingCalls.Add(e.ToolCall);
-                                break;
-                        }
-                    }
-
-                    // No tool asked for, or the budget is spent — this was the answer.
-                    if (pendingCalls.Count == 0 || round >= MaxToolRounds) break;
-
-                    // The assistant turn that requested the tools has to be in the
-                    // history, or the model sees results answering nothing.
-                    turns.Add(new ChatTurn("assistant", answer.ToString()));
-
-                    foreach (var call in pendingCalls)
+                await RunToolLoopAsync(chat, req.Source, new ChatArgs(req.Model, turns, tools, think), turns,
+                    MaxToolRounds, writer, answer, async call =>
                     {
                         var (result, used) = await RunToolAsync(call, webSearchRunner, writer, log, ct);
                         webSearchUsed |= used;
-                        turns.Add(new ChatTurn("tool", result, call.Name));
-                    }
-                }
+                        return result;
+                    }, ct);
             }
             catch (ChatSourceException ex)
             {
@@ -235,6 +209,60 @@ namespace RabbitIC.Api.MinimalApis
 
             await writer.DoneAsync(webSearchUsed);
             await PersistAsync(db, convo.Id, answer.ToString(), webSearchUsed, ct);
+        }
+
+        /// <summary>
+        /// The one tool loop (docs/HR_MODULE_PROMPT.md §0.6: there is no second).
+        /// Streams the model's answer into <paramref name="answer"/> and the client;
+        /// when the model asks for tools, runs each through <paramref name="runTool"/>,
+        /// hands the results back and asks again, up to <paramref name="maxRounds"/>.
+        /// /api/chat passes web_search; the HR chat passes calculate.
+        /// </summary>
+        internal static async Task RunToolLoopAsync(
+            ChatService chat, string? source, ChatArgs args, List<ChatTurn> turns, int maxRounds,
+            ChatStreamWriter writer, StringBuilder answer, Func<ToolCallRequest, Task<string>> runTool,
+            CancellationToken ct)
+        {
+            for (var round = 0; ; round++)
+            {
+                var pendingCalls = new List<ToolCallRequest>();
+                var roundText = new StringBuilder();
+
+                await foreach (var e in chat.StreamAsync(source, args with { Messages = turns }, ct))
+                {
+                    switch (e.Kind)
+                    {
+                        case ChatEventKind.Content:
+                            answer.Append(e.Text);
+                            roundText.Append(e.Text);
+                            await writer.ContentAsync(e.Text);
+                            break;
+
+                        case ChatEventKind.Thinking:
+                            // Reasoning is shown live but never persisted: it is
+                            // scratch work, not the answer, and re-reading it on
+                            // every future turn would waste the context window.
+                            await writer.ThinkingAsync(e.Text);
+                            break;
+
+                        case ChatEventKind.ToolCall when e.ToolCall is not null:
+                            pendingCalls.Add(e.ToolCall);
+                            break;
+                    }
+                }
+
+                // No tool asked for, or the budget is spent — this was the answer.
+                if (pendingCalls.Count == 0 || round >= maxRounds) break;
+
+                // The assistant turn that requested the tools has to be in the
+                // history, with its calls and only this round's text: without the
+                // calls the model sees results answering nothing and writes its
+                // draft again; the answer so far would repeat earlier rounds.
+                turns.Add(new ChatTurn("assistant", roundText.ToString(), ToolCalls: pendingCalls));
+
+                foreach (var call in pendingCalls)
+                    turns.Add(new ChatTurn("tool", await runTool(call), call.Name));
+            }
         }
 
         /// <summary>
@@ -287,7 +315,7 @@ namespace RabbitIC.Api.MinimalApis
         /// nothing, so every capability-gated feature stays off rather than being
         /// sent upstream and rejected.
         /// </summary>
-        private static async Task<IReadOnlyList<string>> ModelCapabilitiesAsync(
+        internal static async Task<IReadOnlyList<string>> ModelCapabilitiesAsync(
             ChatService chat, string? source, string model, CancellationToken ct)
         {
             var models = await chat.ListAllModelsAsync(ct);

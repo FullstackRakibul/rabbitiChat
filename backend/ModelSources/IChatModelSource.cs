@@ -25,11 +25,17 @@ public record ModelInfo(
 /// Ask the model to expose its reasoning. The caller sets this only for models
 /// that declare the capability, so a source can pass it straight through.
 /// </param>
+/// <param name="NumCtx">The context window to ask for; null keeps the daemon's own.</param>
+/// <param name="KeepAlive">How long the daemon keeps the model loaded (seconds, -1 = always); null keeps its default.</param>
+/// <param name="Temperature">Sampling temperature; null keeps the model's own.</param>
 public record ChatArgs(
     string Model,
     IReadOnlyList<ChatTurn> Messages,
     IReadOnlyList<ToolDefinition>? Tools = null,
-    bool? Think = null);
+    bool? Think = null,
+    int? NumCtx = null,
+    int? KeepAlive = null,
+    double? Temperature = null);
 
 /// <summary>
 /// One message in a chat history.
@@ -37,7 +43,9 @@ public record ChatArgs(
 /// <param name="Role">"system" | "user" | "assistant" | "tool".</param>
 /// <param name="Content">Message text, or a tool's result payload when Role is "tool".</param>
 /// <param name="ToolName">Set on a "tool" turn so the model can match the result to its call.</param>
-public record ChatTurn(string Role, string Content, string? ToolName = null);
+/// <param name="ToolCalls">Set on an "assistant" turn that asked for tools, so the model
+/// sees its own calls before their results instead of an unfinished draft it rewrites.</param>
+public record ChatTurn(string Role, string Content, string? ToolName = null, IReadOnlyList<ToolCallRequest>? ToolCalls = null);
 
 /// <summary>
 /// A place chat models can be listed and streamed from.

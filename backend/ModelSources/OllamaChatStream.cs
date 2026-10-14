@@ -28,11 +28,14 @@ internal static class OllamaChatStream
         ILogger log,
         [EnumeratorCancellation] CancellationToken ct,
         IReadOnlyList<ToolDefinition>? tools = null,
-        bool? think = null)
+        bool? think = null,
+        int? numCtx = null,
+        int? keepAlive = null,
+        double? temperature = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
-            Content = JsonContent.Create(BuildPayload(model, messages, tools, think)),
+            Content = JsonContent.Create(BuildPayload(model, messages, tools, think, numCtx, keepAlive, temperature)),
         };
 
         HttpResponseMessage resp;
@@ -83,44 +86,79 @@ internal static class OllamaChatStream
     /// the caller asks only for models that declare a thinking capability —
     /// sending it to a model that cannot reason is an upstream 400.
     /// </summary>
+    /// <summary>Ollama takes a call's arguments as an object; anything unreadable goes back as {}.</summary>
+    private static JsonElement ArgumentsObject(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object ? doc.RootElement.Clone() : EmptyObject();
+        }
+        catch (JsonException)
+        {
+            return EmptyObject();
+        }
+    }
+
+    private static JsonElement EmptyObject()
+    {
+        using var doc = JsonDocument.Parse("{}");
+        return doc.RootElement.Clone();
+    }
+
     private static object BuildPayload(
         string model, IReadOnlyList<ChatTurn> messages,
-        IReadOnlyList<ToolDefinition>? tools, bool? think)
+        IReadOnlyList<ToolDefinition>? tools, bool? think, int? numCtx, int? keepAlive, double? temperature)
     {
         var wireMessages = messages.Select(m => m.Role == "tool"
             // A tool result carries the name of the call it answers.
             ? (object)new { role = m.Role, content = m.Content, tool_name = m.ToolName ?? "" }
-            : new { role = m.Role, content = m.Content });
+            // The assistant turn that asked for tools carries its calls.
+            : m.ToolCalls is { Count: > 0 } calls
+                ? new
+                {
+                    role = m.Role,
+                    content = m.Content,
+                    tool_calls = calls.Select(c => new { function = new { name = c.Name, arguments = ArgumentsObject(c.ArgumentsJson) } }),
+                }
+                : new { role = m.Role, content = m.Content });
 
-        if (tools is null || tools.Count == 0)
+        // Optional fields are left out, never sent as null: a model that cannot
+        // reason answers 400 to `think` at all, and an unsent num_ctx keeps the
+        // daemon's own window. Insertion order keeps the wire shape as it was.
+        var payload = new Dictionary<string, object?>
         {
-            // An anonymous type cannot drop a property conditionally, so the
-            // shape with `think` and the shape without it are written out
-            // separately rather than sending null and hoping it is ignored.
-            return think is bool withoutTools
-                ? new { model, messages = wireMessages, stream = true, think = withoutTools }
-                : (object)new { model, messages = wireMessages, stream = true };
+            ["model"] = model,
+            ["messages"] = wireMessages,
+            ["stream"] = true,
+        };
+        if (think is bool wantThink) payload["think"] = wantThink;
+
+        if (tools is { Count: > 0 })
+        {
+            payload["tools"] = tools.Select(t => new
+            {
+                type = "function",
+                function = new
+                {
+                    name = t.Name,
+                    description = t.Description,
+                    // The schema is authored as JSON text, so it goes on the wire
+                    // as a parsed node rather than a re-escaped string.
+                    parameters = JsonDocument.Parse(t.ParametersJson).RootElement,
+                },
+            });
         }
 
-        var wireTools = tools.Select(t => new
-        {
-            type = "function",
-            function = new
-            {
-                name = t.Name,
-                description = t.Description,
-                // The schema is authored as JSON text, so it goes on the wire
-                // as a parsed node rather than a re-escaped string.
-                parameters = JsonDocument.Parse(t.ParametersJson).RootElement,
-            },
-        });
+        // Sent by the HR chat only, with the same values every time, so the model
+        // that is already loaded is never reloaded for a different window.
+        var options = new Dictionary<string, object>();
+        if (numCtx is int ctx) options["num_ctx"] = ctx;
+        if (temperature is double t) options["temperature"] = t;
+        if (options.Count > 0) payload["options"] = options;
+        if (keepAlive is int keep) payload["keep_alive"] = keep;
 
-        // Decided exactly as above: the tools path used to send `think`
-        // unconditionally, which meant a false reached models that answer 400
-        // for the field at all.
-        return think is bool wantThink
-            ? new { model, messages = wireMessages, stream = true, think = wantThink, tools = wireTools }
-            : (object)new { model, messages = wireMessages, stream = true, tools = wireTools };
+        return payload;
     }
 
     /// <summary>One NDJSON line to zero or more deltas. Unparsable lines are skipped.</summary>

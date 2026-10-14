@@ -12,12 +12,13 @@
  * Who may change the library is the server's decision, reported as `canEdit`;
  * this component only hides the controls that would be refused.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   BookOpen, Check, ChevronDown, ChevronUp, FileUp, Loader2, Pencil, Plus, RefreshCw, Trash2, X,
 } from '@lucide/vue'
 import {
-  listHrLibrary, getHrItem, getHrChunks, createHrItem, uploadHrFile, updateHrItem, deleteHrItem, embedHrPending,
+  listHrLibrary, getHrItem, getHrChunks, createHrItem, uploadHrFiles, retryHrItem, updateHrItem, deleteHrItem,
+  embedHrPending,
 } from '@/services/hr.service.js'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,7 +48,7 @@ const items = ref([])
 const canEdit = ref(false)
 const types = ref([])
 const modes = ref([])
-const accept = ref('.md,.txt,.sql,.csv')
+const accept = ref('.md,.txt,.sql,.json,.csv,.pdf,.xlsx')
 const busy = ref(0)          // id of the item being changed, -1 for the editor or an upload
 
 /** The editor: null when closed; { id?, name, hrType, mode, content, approvedBy } when open. */
@@ -59,11 +60,30 @@ const previews = ref({})
 
 const fileInput = ref(null)
 
+/** The server's running total: persona plus active always items, against the 8,000 cap. */
+const alwaysTokens = ref(0)
+const alwaysCap = ref(8000)
+
+/** Filters, so a library of hundreds of items stays usable. */
+const filterText = ref('')
+const filterType = ref('all')
+
+/** Per-file results of the last upload that had failures. */
+const uploadErrors = ref([])
+
 const totals = computed(() => ({
   items: items.value.length,
-  always: items.value.filter((i) => i.mode === 'always' && i.isActive).reduce((n, i) => n + i.tokens, 0),
   pending: items.value.reduce((n, i) => n + (i.chunkCount - i.embeddedCount), 0),
+  indexing: items.value.filter((i) => i.indexState === 'indexing').length,
 }))
+
+const shown = computed(() => {
+  const q = filterText.value.trim().toLowerCase()
+  return items.value.filter((i) =>
+    (filterType.value === 'all' || i.hrType === filterType.value) && (!q || i.name.toLowerCase().includes(q)))
+})
+
+let refreshTimer = null
 
 async function load() {
   error.value = ''
@@ -73,15 +93,21 @@ async function load() {
     canEdit.value = !!res.canEdit
     types.value = res.types ?? []
     modes.value = res.modes ?? []
+    alwaysTokens.value = res.alwaysTokens ?? 0
+    alwaysCap.value = res.alwaysCap ?? 8000
     if (res.uploadExtensions?.length) accept.value = res.uploadExtensions.join(',')
   } catch (e) {
     error.value = e.message || 'The library could not be loaded.'
   } finally {
     loading.value = false
   }
+  // Indexing happens in the background; follow it until every item is ready.
+  clearTimeout(refreshTimer)
+  if (items.value.some((i) => i.indexState === 'indexing')) refreshTimer = setTimeout(load, 2000)
 }
 
 onMounted(load)
+onBeforeUnmount(() => clearTimeout(refreshTimer))
 
 // ---- add, edit ----
 
@@ -131,14 +157,30 @@ async function saveEditor() {
   }
 }
 
+/** One or many files in one request; each is answered on its own, so one bad file loses nothing else. */
 async function onFile(event) {
-  const file = event.target.files?.[0]
+  const files = [...(event.target.files ?? [])]
   event.target.value = ''
-  if (!file) return
+  if (!files.length) return
   error.value = ''
+  uploadErrors.value = []
   busy.value = -1
   try {
-    await uploadHrFile(file)
+    const res = await uploadHrFiles(files)
+    uploadErrors.value = (res.results ?? []).filter((r) => !r.ok)
+  } catch (e) {
+    // All refused: the body still lists why, file by file.
+    error.value = e.message
+  } finally {
+    busy.value = 0
+    await load()
+  }
+}
+
+async function retry(item) {
+  busy.value = item.id
+  try {
+    await retryHrItem(item.id)
     await load()
   } catch (e) {
     error.value = e.message
@@ -218,8 +260,10 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
           লাইব্রেরি <span class="text-xs font-normal text-muted-foreground">Library</span>
         </h2>
         <p class="text-xs text-muted-foreground">
-          {{ totals.items }} টি আইটেম · সবসময় পাঠানো হয় {{ totals.always }} টোকেন
-          <span class="text-muted-foreground/80">({{ totals.items }} items · {{ totals.always }} tokens always sent)</span>
+          {{ totals.items }} টি আইটেম · সবসময় পাঠানো হয়
+          <span :class="alwaysTokens > alwaysCap * 0.9 ? 'font-medium text-destructive' : 'font-medium text-foreground'">
+            {{ alwaysTokens.toLocaleString() }} / {{ alwaysCap.toLocaleString() }}</span> টোকেন
+          <span class="text-muted-foreground/80">({{ totals.items }} items · always sent, with the persona, of the cap)</span>
         </p>
       </div>
 
@@ -234,7 +278,7 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
           ফাইল আপলোড
           <span class="text-xs text-muted-foreground">Upload</span>
         </Button>
-        <input ref="fileInput" type="file" class="hidden" :accept="accept" @change="onFile" />
+        <input ref="fileInput" type="file" multiple class="hidden" :accept="accept" @change="onFile" />
       </div>
     </div>
 
@@ -242,8 +286,32 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
       {{ error }}
     </p>
 
+    <ul
+      v-if="uploadErrors.length"
+      class="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+    >
+      <li v-for="u in uploadErrors" :key="u.file"><span class="font-medium">{{ u.file }}</span>: {{ u.error }}</li>
+    </ul>
+
+    <!-- Filters -->
+    <div v-if="items.length" class="flex flex-wrap items-center gap-2">
+      <Input v-model="filterText" class="h-8 w-full sm:w-64" placeholder="নাম দিয়ে খুঁজুন · Filter by name" />
+      <Select v-model="filterType">
+        <SelectTrigger class="h-8 w-full sm:w-48"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">সব ধরন · All types</SelectItem>
+          <SelectItem v-for="t in types" :key="t" :value="t">
+            {{ TYPE_LABELS[t]?.bn ?? t }} · {{ TYPE_LABELS[t]?.en ?? t }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <span v-if="shown.length !== items.length" class="text-xs text-muted-foreground">
+        {{ shown.length }} / {{ items.length }}
+      </span>
+    </div>
+
     <p
-      v-if="totals.pending > 0"
+      v-if="totals.pending > 0 && totals.indexing === 0"
       class="flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
     >
       {{ totals.pending }} টি অংশ এখনও এমবেড হয়নি; সেগুলো খোঁজে আসবে না।
@@ -302,6 +370,10 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
       <div class="space-y-1.5">
         <Label class="text-xs">বিষয়বস্তু <span class="text-muted-foreground">Content</span></Label>
         <Textarea v-model="editor.content" rows="12" class="font-mono text-xs" placeholder="Paste the rules, a procedure, a code table or a note…" />
+        <p class="text-xs text-muted-foreground">
+          JSON পেস্ট করলে প্রতিটি উপাদান আলাদা অংশ হয়; ভুল JSON হলে লাইন ও কলাম দেখানো হবে।
+          <span>(Pasted JSON is split per element; invalid JSON is refused with its line and column.)</span>
+        </p>
       </div>
 
       <p v-if="editorError" class="text-sm text-destructive">{{ editorError }}</p>
@@ -328,7 +400,8 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
 
     <!-- Items -->
     <ul v-else class="space-y-2">
-      <li v-for="item in items" :key="item.id" class="rounded-lg border bg-card">
+      <li v-if="!shown.length" class="px-1 text-sm text-muted-foreground">কিছু মেলেনি। <span>Nothing matches.</span></li>
+      <li v-for="item in shown" :key="item.id" class="rounded-lg border bg-card">
         <div class="flex flex-wrap items-start gap-x-3 gap-y-2 p-3">
           <div class="min-w-0 flex-1 basis-56">
             <p class="truncate text-sm font-medium" :title="item.name">{{ item.name }}</p>
@@ -344,8 +417,15 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
               <span class="text-muted-foreground">v{{ item.version }}</span>
               <span class="text-muted-foreground">· {{ item.tokens.toLocaleString() }} টোকেন / tokens</span>
               <span v-if="item.mode === 'search'" class="text-muted-foreground">
-                · {{ item.chunkCount }} অংশ / chunks<template v-if="item.embeddedCount < item.chunkCount">
-                  ({{ item.embeddedCount }} embedded)</template>
+                · {{ item.chunkCount }} অংশ / chunks
+              </span>
+              <span v-if="item.indexState === 'indexing'" class="flex items-center gap-1 text-muted-foreground">
+                · <Loader2 class="h-3 w-3 animate-spin" />
+                ইনডেক্স হচ্ছে… {{ item.embeddedCount }} / {{ item.chunkCount }}
+                <span>(indexing… {{ item.embeddedCount }} of {{ item.chunkCount }})</span>
+              </span>
+              <span v-else-if="item.indexState === 'failed'" class="text-destructive" :title="item.indexError">
+                · ইনডেক্স ব্যর্থ / indexing failed<template v-if="item.indexError">: {{ item.indexError }}</template>
               </span>
               <span v-if="!item.isActive" class="text-muted-foreground">· বন্ধ / off</span>
             </div>
@@ -370,6 +450,14 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
             </Button>
 
             <template v-if="canEdit">
+              <Button
+                v-if="item.indexState === 'failed'"
+                size="sm" variant="ghost" class="h-8" :disabled="busy !== 0" @click="retry(item)"
+              >
+                <Loader2 v-if="busy === item.id" class="h-3.5 w-3.5 animate-spin" />
+                <RefreshCw v-else class="h-3.5 w-3.5" />
+                আবার চেষ্টা <span class="text-xs text-muted-foreground">Retry</span>
+              </Button>
               <label class="flex h-8 items-center gap-1.5 px-2 text-xs text-muted-foreground" :title="item.isActive ? 'On' : 'Off'">
                 <Switch :model-value="item.isActive" :disabled="busy !== 0" @update:model-value="(v) => setActive(item, v)" />
                 চালু

@@ -54,3 +54,71 @@ export function deleteHrItem(id) {
 export function embedHrPending() {
   return http.post('/hr/library/embed', {})
 }
+
+/** Add one or many files in one request; each is answered on its own: { results: [{ file, ok, item, error }] }. */
+export function uploadHrFiles(files, fields = {}) {
+  const form = new FormData()
+  for (const f of files) form.append('file', f)
+  for (const [k, v] of Object.entries(fields)) if (v) form.append(k, v)
+  return http.postForm('/hr/library/upload', form)
+}
+
+/** Queue an item whose embedding failed again. */
+export function retryHrItem(id) {
+  return http.post(`/hr/library/${id}/retry`, {})
+}
+
+// ───────────────────────── Ask ─────────────────────────
+
+/**
+ * Instant hybrid search, no model: the top 10 chunks with SourceRef, item name
+ * and a snippet whose matches are wrapped in « ». `items` limits it to those ids.
+ */
+export function searchHr(q, items = []) {
+  const scope = items.length ? `&items=${items.join(',')}` : ''
+  return http.get(`/hr/search?q=${encodeURIComponent(q)}${scope}`)
+}
+
+export function listHrConversations() {
+  return http.get('/hr/conversations')
+}
+
+/** One HR conversation: { id, title, messages: [{ role, content, meta: { context, calculations, unverified } }] }. */
+export function getHrConversation(id) {
+  return http.get(`/hr/conversations/${id}`)
+}
+
+export function deleteHrConversation(id) {
+  return http.del(`/hr/conversations/${id}`)
+}
+
+/**
+ * Ask the HR assistant; the answer streams. Frames: `context` (what was sent),
+ * `content`, `tool` (calculate), `error`, `unverified` (amounts the number check
+ * could not trace), `done`. `items` is the "Search in" scope; empty means the
+ * whole library. Resolves with the conversation id.
+ */
+export async function streamHrChat({ conversationId, message, items = [], model }, handlers, signal) {
+  let buffer = ''
+  const consume = (line) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    let frame
+    try { frame = JSON.parse(trimmed) } catch { return }
+    switch (frame.type) {
+      case 'context': handlers.onContext?.(frame); break
+      case 'content': handlers.onContent?.(frame.text ?? ''); break
+      case 'tool': handlers.onTool?.(frame); break
+      case 'error': handlers.onError?.(frame.message ?? 'The model failed.'); break
+      case 'unverified': handlers.onUnverified?.(frame.amounts ?? []); break
+    }
+  }
+  const res = await http.stream('/hr/chat', { conversationId, message, items, model }, (chunk) => {
+    buffer += chunk
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    lines.forEach(consume)
+  }, signal)
+  consume(buffer)
+  return Number(res.headers.get('X-Conversation-Id')) || conversationId
+}

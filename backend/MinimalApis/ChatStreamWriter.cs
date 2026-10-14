@@ -44,6 +44,12 @@ namespace RabbitIC.Api.MinimalApis
         public Task DoneAsync(bool webSearchUsed) =>
             WriteAsync(new { type = "done", webSearchUsed });
 
+        /// <summary>
+        /// Any other frame a surface defines for itself — the HR chat's "context"
+        /// receipt and "unverified" amounts — in the same NDJSON stream.
+        /// </summary>
+        public Task FrameAsync(object frame) => WriteAsync(frame);
+
         private async Task WriteAsync(object frame)
         {
             await _response.WriteAsync(JsonSerializer.Serialize(frame, Json) + "\n", _ct);

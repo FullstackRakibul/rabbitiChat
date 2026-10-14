@@ -2,14 +2,14 @@
 /**
  * মানব সম্পদ (HR Assistant) — the tab (docs/HR_MODULE_PROMPT.md §3.4).
  *
- * Two sections: প্রশ্ন (Ask), the chat with its own conversation list, and
- * লাইব্রেরি (Library), HR's context. Phase 1 builds the Library; the Ask
- * section arrives with the chat in Phase 2 and says so until then.
+ * Two sections: প্রশ্ন (Ask), the HR chat with instant search and its own
+ * conversation list, and লাইব্রেরি (Library), HR's context. Ask is what HR opens
+ * the tab for, so it comes first.
  *
  * Bengali labels with English in smaller text, theme tokens only.
  */
 import { ref } from 'vue'
-import { MessageSquareText } from '@lucide/vue'
+import HrAsk from '@/components/hr/HrAsk.vue'
 import HrLibrary from '@/components/hr/HrLibrary.vue'
 
 const SECTIONS = [
@@ -17,8 +17,7 @@ const SECTIONS = [
   { key: 'library', bn: 'লাইব্রেরি', en: 'Library' },
 ]
 
-// The library first while the chat does not exist yet.
-const section = ref('library')
+const section = ref('ask')
 </script>
 
 <template>
@@ -43,17 +42,14 @@ const section = ref('library')
       </ul>
     </nav>
 
-    <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-      <div class="mx-auto w-full max-w-5xl">
-        <HrLibrary v-if="section === 'library'" />
+    <!-- Ask keeps its own scrolling (the conversation, the list and the search each scroll). -->
+    <div v-show="section === 'ask'" class="min-h-0 flex-1">
+      <HrAsk />
+    </div>
 
-        <div v-else class="rounded-lg border border-dashed px-4 py-12 text-center">
-          <MessageSquareText class="mx-auto h-6 w-6 text-muted-foreground" />
-          <p class="mt-2 text-sm font-medium">প্রশ্ন শীঘ্রই আসছে</p>
-          <p class="text-xs text-muted-foreground">
-            The HR chat arrives in the next phase. The library it will answer from is ready.
-          </p>
-        </div>
+    <div v-if="section === 'library'" class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+      <div class="mx-auto w-full max-w-5xl">
+        <HrLibrary />
       </div>
     </div>
   </div>
