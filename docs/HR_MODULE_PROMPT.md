@@ -1,10 +1,14 @@
-# Mostisko — HR Assist: settlement answers from CoreERP, read-only
+# Mostisko — মানব সম্পদ (HR Assistant): answers from HR's own context
 
 ### Evaluation-based build prompt for Claude Code
 
 > **Before you start.**
-> 1. Copy `HR_SETTLEMENT_RULES.md` to `docs/hr/HR_SETTLEMENT_RULES.md`, and this file to `docs/HR_MODULE_PROMPT.md`. Commit both on `model-policy` (or on whatever branch has model policy and PO Studio).
-> 2. Have a **copy** of CoreERP to point at (UAT or a restored backup). Never production in Phases 1–2.
+> 1. On `main`, commit the earlier uncommitted fixes (the Workspace Studio rename, the `App.vue` restore, the dropdown fix and the one-line `po-eval` change) as their own commit.
+> 2. Leave the `hr-assist` branch (the SQL Server data layer, `bb2bc94`) as it is. It is **not** merged and **not** used by this build.
+> 3. Put these files in the repository and commit them on `main`:
+>    - this prompt → `docs/HR_MODULE_PROMPT.md`
+>    - `HR_SETTLEMENT_RULES.md` → `docs/hr/HR_SETTLEMENT_RULES.md`
+>    - the procedures and functions you want the assistant to know → `docs/hr/procedures/` (for example `ProcessFinalSettelment.sql`, `ProcessSupplementaryFinalSetelment.sql`, `GetSalaryDetails.sql`, `GetDateDurationYear.sql`)
 >
 > **How to start.** Tell Claude Code:
 >
@@ -19,210 +23,210 @@
 1. **One phase at a time.** Each phase ends with the report in §9. Stop and wait.
 2. **A gate is PASS only with evidence**: eval output, a command and its output, a file path and line, or a screenshot. After three failed attempts on one gate, stop and report the blocker.
 3. **Evals first.** Each phase adds its checks to `scripts/hr-eval.mjs` before the code. Run them once while they fail and paste that line.
-4. **Read-only, three times over.**
-   - The database login can only read the `ai` schema (§3.1).
-   - The SQL text is fixed in one file, never built from model output.
-   - A static check fails the build if that file contains a write or `EXEC` keyword.
-
-   The chat must **never** run `ProcessFinalSettelment` or `ProcessSupplementaryFinalSetelment`: both delete and insert, and the second also changes leave deductions.
-5. **The model never invents a number.** Every amount in a reply must come from a tool result. The server checks this (§3.5). Rules come from `docs/hr/HR_SETTLEMENT_RULES.md`, which HR owns.
-6. **Reuse what exists.** The chat tool loop in `ChatEndpoint.cs` (`MaxToolRounds`, `RunToolAsync`, `ToolDefinition`), `ModelPolicy`, `TabCatalog` / `TabAccessMiddleware`, and the existing fake Ollama in `scripts/*-eval.mjs`. A second tool loop, policy check or fake is an automatic FAIL.
-7. **One new package only:** `Microsoft.Data.SqlClient` (a 5.2 release). Nothing else, NuGet or npm. Do not push, merge to `main` or open a pull request. Work on a branch named `hr-assist`, created from the branch in "Before you start", and commit at the end of each phase.
-8. **§2 was verified at `cc95a82` plus the CoreERP code KAKAROT shared on 14 Oct 2026.** Re-confirm every fact you use and report what changed.
+4. **No database connection to CoreERP, and no SQL is ever run.** The assistant knows only what HR gives it: rules documents, procedure text and code tables. Procedure files are **reference text**. Nothing executes them, parses them into queries, or connects anywhere. Do not add `Microsoft.Data.SqlClient` or any other package.
+5. **Answers come from the context.** The model answers from the HR context sent with the question. When the context does not cover a question, it says so; it never fills the gap from general knowledge or guesses company policy. The HR-approved rules document wins over procedure code; when the two disagree, the answer says so.
+6. **Reuse what exists.**
+   - `ContextSource` (its `Kind` is free-form "so a third surface needs no schema change"); `EmbeddingService`, `VectorIndex` and the existing chunker; the chat tool loop in `ChatEndpoint.cs`; `ModelPolicy`; `TabCatalog` / `TabAccessMiddleware`; and the shared fake Ollama in `scripts/*-eval.mjs`.
+   - A second source store, vector index, tool loop or policy check is an automatic FAIL.
+7. Do not push, merge to `main` or open a pull request. Work on a branch named `hr-knowledge`, created from `main` after step 1, and commit at the end of each phase.
+8. Re-confirm every fact in §2 and report what changed.
 
 ---
 
 ## 1. What we are building
 
-An **HR** tab where an HR user asks, in English or Bengali, things like:
-- *"What is 115978's final settlement and why is the service benefit that amount?"*
-- *"How much earned leave does 041122 have, and from which date is it counted?"*
-- *"What is Schedule-A's service benefit after 10 years?"*
+A module named **মানব সম্পদ** (tab key `hr`) for the user type **hr-assistant**. HR keeps a library of context: the rules document, the procedure files, code tables (employee types, separation statuses, attendance codes) and notes. An HR user asks in Bengali or English, and the assistant answers from that library with citations. Example questions:
 
-The model answers by calling a few named, read-only lookups against CoreERP, then explains the numbers using the rules document, with citations.
+- *"Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?"* (How is service benefit worked out for a Schedule-A employee who resigns after 7 years 8 months?)
+- *"Which attendance codes count as worked days for earned leave?"*
+- *"Basic is 12,000, 7 years 8 months, 250 fraction days, resignation in April 2026, Non-Management. What is the service benefit?"*
+- *"What happens when someone in unit 27 separates on the 28th?"*
 
 ```
+HR library (রুলস, procedures, code tables, notes)
+   ├─ "always" items  → sent whole, every question (the rules document, code tables)
+   └─ "search" items  → split, embedded; the best excerpts per question (procedure files)
 HR user ─► /api/hr/chat (tab hr, model policy)
-        ─► model + rules doc + hr_* tools
-        ─► tool call ─► HrToolRunner ─► fixed SQL on the ai schema (read-only login, unit filter)
-        ─► results back to the model ─► answer
-        ─► number check: each amount must appear in a tool result ─► stream to the browser
-        ─► audit row
+        ─► system prompt: HR persona + always items + retrieved excerpts, within the budget
+        ─► model (may call `calculate` for arithmetic)
+        ─► number check ─► answer with citations ─► saved in the HR chat list
 ```
 
 | Phase | Work | Why in this order |
 |---|---|---|
-| **1** | The read-only data layer: `ai` schema script, query catalog, tool runner, unit scope, masking, audit; a test route, no chat | Correct data first; nothing else matters if a number is wrong |
-| **2** | The HR tab and chat: tools wired into the existing loop, the rules document as context, number check, citations | Needs Phase 1's tools |
-| **3** | The golden set from HR, and the live run on the Mac | Proves it with real questions and the real model |
+| **1** | The hr-assistant user type, the মানব সম্পদ tab, and the HR library: add, edit, version, always/search, SQL-aware splitting, seeding from `docs/hr/` | The assistant is only as good as its context |
+| **2** | The HR chat: context assembly within the budget, citations, the `calculate` tool, the number check, the UI | Needs the library |
+| **3** | The golden question set and the live run on the Mac | Proves it with HR's real questions |
 
-**Not in this build:** running or re-running a settlement, a what-if calculator, any write to CoreERP, fine-tuning a model, payroll questions outside final settlement and earned leave.
+**Not in this build:** reading live employee data, running any procedure, writing to any database, fine-tuning a model.
 
 ---
 
-## 2. Established facts (re-confirm, do not assume)
+## 2. Established facts (verified at `cc95a82` — re-confirm, do not assume)
 
 | # | Fact | Evidence |
 |---|---|---|
-| H1 | Chat already runs tools: it offers a `tools` array, collects `ToolCall` events, runs them in `RunToolAsync`, and stops after `MaxToolRounds = 2`. Unknown tool names get a "No tool named …" reply | `backend/MinimalApis/ChatEndpoint.cs:30, 202-234, 346-365` |
-| H2 | A tool is a `ToolDefinition(name, description, jsonSchema)`; `web_search` is the only one today | `backend/ModelSources/ChatStreamEvent.cs:55`, `backend/Services/WebSearchTool.cs` |
-| H3 | `OllamaChatStream.BuildPayload` sends the `tools` array to Ollama | `backend/ModelSources/OllamaChatStream.cs:108-110` |
-| H4 | No SQL Server client is referenced today | `backend/RabbitIC.Api.csproj:13-24` |
-| H5 | Tabs are keyed in `TabCatalog`; `TabAccessMiddleware` gates routes by key; grants are additive | `backend/Rbac/TabCatalog.cs`, `backend/Middleware/TabAccessMiddleware.cs` |
-| H6 | `ModelPolicy.Check` refuses a model the role cannot run (model-policy branch) | `backend/Rbac/ModelPolicy.cs` |
-| C1 | `ProcessFinalSettelment @EmpID, @p_UserId` deletes and re-inserts the employee's `FinalSattlementPayable` row, and calls `ProcessSupplementaryFinalSetelment` | CoreERP |
-| C2 | `ProcessSupplementaryFinalSetelment` inserts `Payroll_MonthlySalarySupplementary` rows and calls `sp_ManageLeaveDeduction` (writes `LeaveDeduction`) | CoreERP |
-| C3 | `dbo.GetSalaryDetails(@EmpId, @Month, @Year, @IsCurrentSalary, @ContStartDate)` is a table-valued function returning gross, basic, basic (original), house rent, medical, conveyance, food, other, special allowance; read-only | CoreERP |
-| C4 | `dbo.GetDateDurationYear/Month/Day(@from, @to)` are scalar functions; the year counts whole anniversaries | CoreERP |
-| C5 | `FinalSattlementPayable` holds one row per settled employee with every component (unpaid salary, EL balance and amount, gratuity, service, termination + removal, retirement, expiration, discharge, death, PF, notice, loan, stamp fee, net) and `BankAccount` | CoreERP |
-| C6 | Lookups: `Common_EmploymentType` (1 Management, 2 Non-Management, 3 Schedule-A, 4 Schedule-B, 5 Day Labour), `Common_EmploymentStatus` (16 statuses, see the rules doc §1) | CoreERP |
-| C7 | Earned-leave inputs: `LeaveAllocation` (LeaveId 3), `LeaveDeduction`, `Earned_Leave_Deduction_By_Date`, `Attendance_DailyAttendance`, and the leave-payment tables `Payroll_AnnualLeave_Payment_JoinYear_Fraction`, `_JoinDate`, `_Monthly` | CoreERP |
-
-The names of the unit, department and designation lookup tables were not shared. Find them in the CoreERP copy, or list them under "Needs KAKAROT".
+| H1 | `ContextSource` has `OwnerUserId`, `Name`, `Kind` (`source`, `buyer`; free-form), `Content` (injected verbatim), `IsActive`, `SortOrder`. Every query is scoped to the owner | `backend/Models/ContextSource.cs` |
+| H2 | `/api/context-sources` has list, get, create, update, reorder and delete | `backend/MinimalApis/ContextSourceApis.cs` |
+| H3 | `EmbeddingService` embeds with `nomic-embed-text`; `VectorIndex` searches with a metadata gate first (owner, buyer, style number); chunks carry a `SourceRef` for citations | `backend/Retrieval/VectorStore.cs` |
+| H4 | Chat runs tools: a `tools` array, `ToolCall` events, `RunToolAsync`, `MaxToolRounds`. Unknown tools get "No tool named …" | `backend/MinimalApis/ChatEndpoint.cs` (the Phase 1 report of the earlier HR build found `MaxToolRounds` at line 29 and `RunToolAsync` at 244) |
+| H5 | Roles are normalised in `Rbac.cs`; tab baselines are in `TabCatalog`; `ModelPolicy` seeds one `RoleModelPolicies` row per role on start, only for roles without one | `backend/Models/Rbac.cs`, `backend/Rbac/TabCatalog.cs`, `backend/Rbac/RbacSeeder.cs` |
+| H6 | The Mac's Ollama runs with a 16,384-token window. Models: `gemma4:12b` (default) and `qwen3.8-27b-q3` | KAKAROT's setup |
+| H7 | Sizes: the rules document is about 2,000 words (about 3,500 tokens). `ProcessFinalSettelment` is 1,200 lines and `ProcessSupplementaryFinalSetelment` 1,400 lines, so neither fits in the window whole, and both contain large commented-out blocks of old formulas | `docs/hr/` |
 
 ---
 
 ## 3. The design contract
 
-### 3.1 The `ai` schema (CoreERP side)
+### 3.1 User type and tab
 
-Write `scripts/hr/coreerp-ai-schema.sql`, run by KAKAROT on the copy:
-- `CREATE SCHEMA ai AUTHORIZATION dbo`, so ownership chaining lets its views read `dbo` tables without granting them.
-- **Views**, columns limited to what §3.3 returns:
-  - `ai.Employee`: code, name, unit, department, designation, type, category, status, joining date, separation date, salary structure id, gross. No bank, phone, NID or address.
-  - `ai.Settlement`: `FinalSattlementPayable` without `BankAccount` or `BankID`.
-  - `ai.LeavePayments`: the three payment tables, one row per payment with its source.
-  - `ai.Attendance`: `EmpID`, `WorkDay`, `AttStatus` only.
-- **Inline functions:**
-  - `ai.SalaryDetails(@EmpId, @Month, @Year)`, wrapping `dbo.GetSalaryDetails(@EmpId, @Month, @Year, 1, <the contract start date the settlement uses>)`.
-  - `ai.ServiceLength(@EmpId, @AsOf)`, returning years, months and days from the three `GetDateDuration*` functions.
-- **A login and user `mostisko_hr_ro`** with `GRANT SELECT ON SCHEMA::ai` and nothing else. No `EXECUTE`, no `dbo` access.
+- **A new role `HrAssistant`,** shown as **hr-assistant**:
+  - Normalised like the others.
+  - Its tab baseline is exactly `hr`, `notes` and `settings`.
+  - It gets a model-policy row on start: allowed `gemma4:12b`, default `gemma4:12b`.
+  - SystemAdmin can still grant it more tabs.
+- **The tab `hr`**, labelled **মানব সম্পদ** everywhere it shows: tab bar, command palette, Access screen, docs page.
+  - SystemAdmin has it.
+  - No other role has it in its baseline; others reach it only through a grant.
+- **Create the user `hr-assistant`** with role `HrAssistant` through the existing admin API, from a seed step that runs only when the user does not exist. The secret comes from the environment variable `HR_ASSISTANT_SECRET`, never from a committed file; with no variable, skip the step and log one line saying so.
 
-The script is idempotent (`CREATE OR ALTER`) and has a matching `coreerp-ai-schema-drop.sql`.
+### 3.2 The HR library
+HR context items are `ContextSource` rows with `Kind = "hr"`, plus these columns:
 
-### 3.2 Connection
-`ConnectionStrings:CoreErpReadOnly` from user-secrets or an environment variable, never `appsettings.json`. Use `ApplicationIntent=ReadOnly`, a command timeout of 15 s, and at most 400 rows per result.
+| Column | Meaning |
+|---|---|
+| `HrType` | `rules`, `procedure`, `codes` or `note` |
+| `Mode` | `always`: sent whole with every question. `search`: split and embedded, best excerpts sent |
+| `Version` | Goes up by one on every content change |
+| `ApprovedBy`, `ApprovedAt` | Optional. Shown next to citations, so users can see which rules HR signed off |
 
-### 3.3 Tools (the whole catalog)
+- **Shared, not personal.** HR items are company knowledge. Anyone with the `hr` tab can read them. People whose role is `HrAssistant` or `SystemAdmin` can add, edit and delete them.
+  - Owner scoping for every other `Kind` is unchanged. Implement the exception once, in the source service, and test it.
+- **Defaults by type:** `rules` and `codes` default to `always`; `procedure` defaults to `search`; `note` defaults to `always`.
+- **Splitting `search` items:**
+  - **SQL files:**
+    - Remove commented-out code first: whole lines starting with `--` that contain a SQL keyword (`SET`, `SELECT`, `IF`, `BEGIN`, `END`, `FROM`, `WHERE`, `DECLARE`, `INSERT`, `DELETE`, `UPDATE`, `EXEC`), and `/* … */` blocks.
+    - Keep section comments such as `--//Gratutity Calculation Start` and short notes such as `--NO Service Benefit for DEATH`.
+    - Then split on those section comments, and below them on blank lines, into chunks of at most 1,500 characters.
+    - Each chunk keeps its file name, its section name and its original line range.
+  - **Other text:** split as the existing chunker does.
+  - The `SourceRef` is `ProcessFinalSettelment.sql §Service Benefit L686-711`.
+- **Embedding:** chunks are embedded on save. Editing or deleting an item removes its old chunks. Retrieval filters on `Kind = hr` before scoring, as the vector index does for owners.
+- **Seed on start** from `docs/hr/*.md` and `docs/hr/procedures/*.sql`, only for files not already in the library (matched by name). An HR edit in the app is never overwritten by the seed.
 
-All SQL lives in `backend/Hr/HrQueryCatalog.cs` as constants.
-
-| Tool | Parameters | Returns |
-|---|---|---|
-| `hr_employee` | `emp_code` | `ai.Employee` row: names, not ids |
-| `hr_settlement` | `emp_code` | The `ai.Settlement` row with labelled components, plus type, status, joining and separation dates, and `special_case: true` for the employees listed in the rules doc §11.10 |
-| `hr_service_length` | `emp_code`, optional `as_of` (default: separation date, else today) | Years, months, days, and fraction days worked since the last anniversary |
-| `hr_salary_breakdown` | `emp_code`, `month`, `year` | `ai.SalaryDetails` row, and which basic the settlement uses (units 1, 27, 45: basic original) |
-| `hr_earned_leave` | `emp_code` | Last leave-payment end date and its table; worked days since then (the codes in the rules doc §1); AL taken; deductions; `estimate = worked ÷ 18` for types 2–5, labelled **estimate**; the cap; and the `ELBalance` stored in `ai.Settlement` if there is one |
-| `hr_attendance_summary` | `emp_code`, `from`, `to` (at most 400 days) | Count per attendance code |
-
-**Parameter rules:**
-- `emp_code` matches `^\d{6}$`.
-- Dates are ISO; month is 1–12; year is 2015 to next year.
-- Anything else is refused before SQL runs, with the reason handed back to the model.
-
-### 3.4 Who sees what
-- **Tab** `hr`: in no role's baseline except SystemAdmin; given through grants.
-- **Unit scope:** a SQLite table `HrUnitAccess(UserId, UnitId)`. Every query filters `UnitID IN (SELECT value FROM STRING_SPLIT(@Units, ','))`. A user with no rows sees nothing; SystemAdmin sees all. An employee outside the user's units gets the same reply as an unknown code: "No employee 123456 in your units." That way the reply doesn't reveal whether the employee exists.
-- **Audit:** a SQLite table `HrQueryLog(UserId, Tool, EmpCode, ParamsJson, Rows, DurationMs, Refused, Reason, AtUtc)`. One row per tool call, including refused ones. No salary values are stored in SQLite.
-
-### 3.5 Chat contract
-- **Route:** `POST /api/hr/chat`, streamed like `/api/chat`. Model choice goes through `ModelPolicy`.
-- **Stateless:** the client sends at most the last 10 turns, and nothing about the HR conversation is saved except the audit rows.
-- **System prompt:** an HR persona, plus the rules document whole (it is about 3,500 tokens; fail with a clear message if the estimate exceeds 6,000), plus the answer rules:
-  - Amounts only from tool results.
-  - Cite the tool after each amount, `[hr_settlement]`, and the rule section after each explanation, `[Rules §5]`.
-  - Say "special case, set by hand in the system" when `special_case` is true.
-  - Never guess an employee code; ask for it.
-  - Answer in the user's language.
-- **Tools offered:** the six `hr_*` tools (no `web_search`). `MaxToolRounds` stays at 2 for normal chat; the HR route may use 3, set where the constant lives.
+### 3.3 The chat
+- **Route:** `POST /api/hr/chat`, streamed like `/api/chat`, gated by tab `hr`. Model choice goes through `ModelPolicy`.
+- **Saved conversations:** HR conversations are saved like normal chats, with a `Kind = "hr"` column on `Conversations`. They appear only in the মানব সম্পদ tab's own list, and never in the main sidebar.
+- **Budget** (a 16,384-token window):
+  - **Reserved for the answer:** 2,000 tokens.
+  - **First:** the HR persona and the `always` items, in `SortOrder`. If these alone exceed 8,000 tokens, refuse with a message naming the largest items, never cut them.
+  - **Next:** retrieved excerpts, top 8 by score above a minimum, whole chunks only, until 4,000 tokens.
+  - **The rest:** recent history, oldest dropped first.
+  - Use the one token estimator the app already has.
+- **System prompt rules:**
+  - Answer only from the HR context.
+  - After each statement, cite its source: `[HR_SETTLEMENT_RULES §5]` or `[ProcessFinalSettelment.sql §Service Benefit L686-711]`.
+  - When the rules document and a procedure disagree, give the rules document's answer and say the code does something else.
+  - When the context does not cover the question, say so in one line and name the item HR would need to add.
+  - For an employee's amount, use only figures the user gave; if a figure is missing (basic, service length, status, type, date), ask for it.
+  - Do every calculation with `calculate` and show the formula.
+  - Answer in the user's language; amounts in digits with ৳.
+- **The `calculate` tool:** one tool, `calculate(expression)`, offered only on the HR route.
+  - It accepts numbers, `+ - * /`, parentheses and `round(x, n)`, and nothing else.
+  - The evaluator is written in C# without packages; anything else is refused with the reason.
+  - `MaxToolRounds` for the HR route is 4, set where the constant lives.
 - **Number check, after the reply:**
-  - Every amount of 100 or more in the reply (after removing commas and `৳`/`Tk`) must equal a value in that turn's tool results, to within 1.
-  - Any that don't are listed in a final stream event `unverified: [...]`, and the UI shows them under the answer as "Not from the database: …".
-- **UI:** the HR tab has an employee-code box, a chat pane, and a card showing the last `hr_employee` and `hr_settlement` results. Theme tokens only, light and dark, usable at 360 px.
+  - Every amount of 100 or more in the reply (commas, `৳` and `Tk` removed) must appear in the user's messages, the context sent, or a `calculate` result in that turn, to within 1.
+  - Any that don't are listed in a final stream event `unverified: [...]`.
+  - The UI shows them under the answer: "এই সংখ্যাগুলো যাচাই করা যায়নি / Not verified: …".
+
+### 3.4 UI (the মানব সম্পদ tab)
+- **Two sections:**
+  - **প্রশ্ন (Ask):** the chat with its own conversation list.
+  - **লাইব্রেরি (Library):** the HR items, each showing type, mode, version, approval, size in tokens and, for `search` items, chunk count.
+- **Library actions:**
+  - Add by pasting text or uploading `.md`, `.txt`, `.sql` or `.csv`.
+  - Edit, switch between always and search, set approval, delete, and preview the chunks of a `search` item.
+  - Library editing is hidden for users who cannot edit (§3.2).
+- **Citations** are clickable and open the cited item at the cited section or lines.
+- **A "Context used" panel** under each answer lists the items and excerpts that were sent, with their token counts.
+- **Bengali labels with English in smaller text.** Theme tokens only, light and dark, usable at 360 px.
 
 ---
 
-## 4. Phase 1 — Read-only data layer
+## 4. Phase 1 — User type, tab and library
 
 **Do**
-- Re-confirm §2. Write `scripts/hr-eval.mjs` and this phase's checks first.
-- Add `Microsoft.Data.SqlClient`.
-- Write the `ai` schema script (§3.1), `HrQueryCatalog`, `HrToolRunner`, `HrUnitAccess`, `HrQueryLog`, and an `IHrDataSource` with two implementations: SQL Server, and a JSON fixture used by the eval (`Hr:DataSource = Fixture`).
-- Add a test route, `POST /api/hr/tools/{name}`, tab `hr`, which runs one tool and returns its JSON.
+- Re-confirm §2. Write `scripts/hr-eval.mjs` (reusing the shared fake Ollama and API start-up) and this phase's checks first.
+- §3.1, §3.2, and the Library section of §3.4.
 
 **Gates**
 
 | Gate | Check |
 |---|---|
-| G1.1 | **Static read-only check.** `hr-eval` fails if `HrQueryCatalog.cs` or any `ai` view contains `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE`, `DROP`, `ALTER`, `EXEC`, `sp_` or `dbo.Process`. Shown passing, and shown failing once on a planted `EXEC` |
-| G1.2 | **Login permissions.** On the copy, as `mostisko_hr_ro`: `SELECT * FROM fn_my_permissions(NULL,'DATABASE')` lists only `CONNECT`; `SELECT TOP 1 * FROM dbo.FinalSattlementPayable` fails; `EXEC dbo.ProcessFinalSettelment 1,0` fails; `SELECT TOP 1 * FROM ai.Settlement` works. Paste all four |
-| G1.3 | **Parameters.** `12345`, `1234567`, `abc123`, `115978; DROP`, month 13, a 401-day range: each refused with its reason, no SQL run (fixture call count unchanged), audit row with `Refused = 1` |
-| G1.4 | **Masking.** No tool result, in fixture or live, contains a key matching `bank|account|nid|phone|mobile|address` (case-insensitive) |
-| G1.5 | **Unit scope.** A user with unit 27 only: an employee of unit 27 is found; one of unit 36 gives exactly the unknown-code message. A user with no units finds nobody. SystemAdmin finds both |
-| G1.6 | **Settlement matches the source.** Live, three settled employees (a Non-Management resignation, a Schedule-A termination, a Management separation): every component of `hr_settlement` equals the `FinalSattlementPayable` row read directly as `dbo`. Paste the side-by-side with codes masked to the last 3 digits |
-| G1.7 | **Salary matches the source.** For the same three, `hr_salary_breakdown` for the separation month equals `SELECT * FROM dbo.GetSalaryDetails(...)` run directly |
-| G1.8 | **Earned-leave estimate.** For 10 settled employees of types 2–4, compare `estimate` (capped) with the stored `ELBalance`. Report the table. Every difference over 0.05 days needs a one-line cause (special case, deduction rule, migrated days…). This gate is about explanation, not equality |
-| G1.9 | **Audit.** Every call in G1.3–G1.7 has one `HrQueryLog` row; no salary value appears in SQLite (`grep` the database file for one of the G1.6 net amounts → no match) |
-| G1.10 | `dotnet build` 0 warnings; `hr-eval --phase 1` summary and the red line; `po-eval`, `oddity-eval`, `model-policy-eval` unchanged |
+| G1.1 | **User type.** With `HR_ASSISTANT_SECRET` set, a fresh database has the user `hr-assistant` with role `HrAssistant`; `/api/me/tabs` is exactly `hr notes settings`; its model-policy row is `gemma4:12b`. Without the variable, the step is skipped with one log line. Restarting does not create a second user |
+| G1.2 | **Tab.** SystemAdmin has `hr`; a General or System user without a grant gets 403 on `/api/hr/*`, and a grant opens it. The label is "মানব সম্পদ" in the tab bar, command palette, Access screen and docs page (screenshot) |
+| G1.3 | **Shared library.** An item added by `hr-assistant` is readable by a second user with the `hr` grant, who cannot edit it; SystemAdmin can edit it. A `source`-kind item of one user is still invisible to another (owner scoping unchanged) |
+| G1.4 | **Seed.** A fresh start loads every file in `docs/hr/` and `docs/hr/procedures/` with the right type and mode. Edit one in the app, restart: the edit is kept and the version did not reset |
+| G1.5 | **SQL splitting.** From `ProcessFinalSettelment.sql`: no chunk contains the commented-out "Ager Formula" block (the `* 14` service-benefit formula); the chunk holding `IF @LengthYear BETWEEN 3 AND 9 AND @EmpStatusID NOT IN (8)` has section "Service Benefit" and a line range that contains line 686; no chunk is over 1,500 characters. Paste the first five `SourceRef`s |
+| G1.6 | **Retrieval.** "How is service benefit calculated for 3 to 9 years?" retrieves a Service Benefit chunk in the top 3; "Which attendance codes count for earned leave?" retrieves the chunk with `'P','LT','LTP','SD','TL','EE','NOP','EXL'` in the top 3. Run against the fake embedding, and live with `nomic-embed-text` |
+| G1.7 | **Edits and deletes.** Editing a `search` item replaces its chunks (old count → new count, no orphans in the index or the database); deleting removes them; the version goes up on each edit |
+| G1.8 | **Library UI.** Add by paste and by `.sql` upload; switch mode; chunk preview. Screenshots, light and dark, 360 px; no hard-coded colours |
+| G1.9 | `dotnet build` 0 warnings; `hr-eval --phase 1` summary and the red line; `po-eval`, `oddity-eval` and `model-policy-eval` unchanged. `git diff main --stat` shows no `Microsoft.Data.SqlClient` and nothing from `hr-assist` |
 
 ---
 
-## 5. Phase 2 — HR tab and chat
+## 5. Phase 2 — The HR chat
 
 **Do**
-- Tab key `hr` in `TabCatalog`, the route group gated by it, and the HR tab UI (§3.5).
-- Register the six tools with the existing loop for the HR route only.
-- The system prompt from the rules document, the number check, and the citations.
+- §3.3 and the Ask section of §3.4.
 
 **Gates**
 
 | Gate | Check |
 |---|---|
-| G2.1 | **Tool use.** With the fake Ollama scripted to call `hr_settlement` with `{"emp_code":"115978"}`, the server runs exactly that query, returns the result to the model, and streams the answer. The fake received the six tools and no `web_search` |
-| G2.2 | **Bad calls.** Scripted calls to `hr_delete_all`, to `hr_settlement` with `"emp_code":"x"`, and a fourth tool round: each is refused or cut off as specified, and the user still gets an answer |
-| G2.3 | **Number check.** A scripted reply with one amount from the tool result and one invented: the stream ends with `unverified` listing only the invented one, and the UI shows the warning line |
-| G2.4 | **Rules in context.** The fake received the rules document in the system message, byte-identical to `docs/hr/HR_SETTLEMENT_RULES.md`, and the token estimate is in the log line |
-| G2.5 | **Access.** No `hr` grant → 403 on `/api/hr/*`. `hr` grant but General role → `ModelPolicy` applies (forbidden model 403). Unit scope applies through chat as in G1.5 |
-| G2.6 | **Nothing saved.** After five HR chat turns, `Conversations` and `Messages` row counts are unchanged; only `HrQueryLog` grew |
-| G2.7 | **UI.** Employee card, answer with tool and rule citations, and the unverified line. Screenshots, light and dark, 360 px; no hard-coded colours (`grep` as in other prompts) |
-| G2.8 | **Live, tools.** On the Mac with `gemma4:12b`, ask the three G1.6 employees' settlements in English and one in Bengali. Each answer calls `hr_settlement`, and every amount is verified. If `gemma4:12b` does not call tools reliably (fewer than 4 of 4), repeat with `qwen3.8-27b-q3` and report both |
+| G2.1 | **Context sent.** For one question, the fake Ollama received the persona, every active `always` item whole and in `SortOrder`, then the retrieved excerpts with their `SourceRef`s. Inactive items were not sent. The receipt's token counts match §3.3's limits |
+| G2.2 | **Never cut.** With `always` items totalling more than 8,000 tokens, the request is refused with the message naming the largest items, and the fake received nothing. With a long history, the oldest turns are dropped first and the `always` items stay byte-identical |
+| G2.3 | **`calculate`.** `round((12000/30)*15*7, 0)` returns `42000`. `12000*` and `system("x")` are refused with a reason. A scripted model calling it gets the result back, and the fake received only the `calculate` tool on the HR route, while `/api/chat` still offers only `web_search` |
+| G2.4 | **Number check.** A scripted reply containing an amount from `calculate`, one from the user's message, and one invented: the final event lists only the invented one, and the UI shows the warning line |
+| G2.5 | **Saved, separately.** HR conversations have `Kind = hr`, appear in the HR list and not in the main sidebar; a normal chat does not appear in the HR list |
+| G2.6 | **Access.** The chat refuses without the `hr` tab; `ModelPolicy` applies (`hr-assistant` naming `qwen3.8-27b-q3` gets 403 while its row allows only `gemma4:12b`) |
+| G2.7 | **UI.** Ask section with clickable citations that open the right item and lines, and the "Context used" panel. Screenshots, light and dark, 360 px |
+| G2.8 | **Live.** On the Mac with `gemma4:12b`, ask the four questions in §1. Each answer cites a source; the third uses `calculate` and shows the formula; no unverified amounts. Paste the four answers |
 | G2.9 | Builds clean; `hr-eval --phase 2`; the other suites unchanged |
 
 ---
 
 ## 6. Phase 3 — Golden set and live run
 
-KAKAROT and HR supply `scripts/hr/golden.json`: 30 questions with the facts a correct answer must contain (amounts, dates, a rule section) and, for refusals, the expected refusal. The mix:
+KAKAROT and HR supply `scripts/hr/golden.json`: 30 questions, each with the facts a correct answer must contain (amounts, a rule, the right source) or the expected "not in the context" reply. Half are in Bengali.
 
 | Kind | Count | Example |
 |---|---|---|
-| Settlement amounts and why | 10 | "Why is 115978's service benefit 84,000?" |
-| Earned leave | 6 | "How many EL days does 041122 have and from which date?" |
-| Rules only, no employee | 6 | "Retrenchment benefit for Schedule-B after 7 years?" |
-| Salary breakdown | 3 | "Basic of 101499 in January 2026?" |
-| Must refuse | 5 | Another unit's employee; a bank account number; "run the settlement for 115978"; "change his joining date"; a code that doesn't exist |
+| Rules | 10 | "Termination benefit for Non-Management after 6 years?" |
+| Worked calculations from given figures | 10 | "Basic 15,000, 11 years 7 months, 250 fraction days, retrenchment, notice 30 days: total?" |
+| Procedure details | 5 | "From which date are earned-leave days counted after a leave payment?" |
+| Not covered or must refuse | 5 | "What is employee 115978's settlement?" (no data: ask for the figures); "Change his joining date"; a policy the library does not contain |
 
-`scripts/hr/run-golden.mjs` posts each question to `/api/hr/chat` as an HR test user, checks the facts, and writes `results/hr-golden-<model>.md` and a summary line.
+`scripts/hr/run-golden.mjs` posts each question to `/api/hr/chat` as `hr-assistant`, checks the facts, and writes `results/hr-golden-<model>.md` and a summary line.
 
 | Gate | Check |
 |---|---|
-| G3.1 | `golden.json` exists with HR's sign-off name and date in its header |
-| G3.2 | With `gemma4:12b`: at least 27 of 30 correct, all 5 refusals correct, **0 unverified amounts** across the run. Paste the summary and every failure |
-| G3.3 | The same run with `qwen3.8-27b-q3`; report both, recommend one |
-| G3.4 | Each failure is classified: wrong tool, wrong rule in the doc, data issue, or model error. Rule-doc problems become an edit list for HR, not code changes |
-| G3.5 | Median time to the first word, and total per answer, for both models |
+| G3.1 | `golden.json` has HR's sign-off name and date in its header |
+| G3.2 | With `gemma4:12b`: at least 26 of 30 correct, all 5 "not covered" cases correct, **0 unverified amounts**. Paste the summary and every failure |
+| G3.3 | The same with `qwen3.8-27b-q3`; recommend one, with time to first word and total time per answer for both |
+| G3.4 | Each failure is classified: missing or wrong context (an edit list for HR), retrieval missed the right chunk, or model error. Context problems are fixed in the library, not in code |
 
 ---
 
 ## 7. Do not
 
-- Do not call, wrap or re-create `ProcessFinalSettelment`, `ProcessSupplementaryFinalSetelment` or any `sp_`.
-- Do not build SQL from model output, or add a "run any query" tool.
-- Do not grant the login anything outside `ai`, or put its secret in a committed file.
-- Do not store salary values, bank details or HR chat text in SQLite.
-- Do not let the model state an amount the number check can't find without the warning showing.
-- Do not change the rules document's meaning. If it is wrong, report it for HR.
+- Do not connect to CoreERP or any SQL Server, or add a package for it.
+- Do not execute, parse into queries, or "simulate" a procedure file. It is text for the model to read.
+- Do not let the model answer company policy from general knowledge when the library is silent.
+- Do not cut an `always` item to fit the window; refuse instead.
+- Do not show HR conversations in the main sidebar, or other users' chats in the HR list.
+- Do not put the `hr-assistant` secret in a committed file.
 - Do not push, merge to `main` or open a pull request.
 
 ---
@@ -230,8 +234,9 @@ KAKAROT and HR supply `scripts/hr/golden.json`: 30 questions with the facts a co
 ## 8. Eval harness
 
 `scripts/hr-eval.mjs`, Node 18+, no dependencies.
-- Reuse the shared fake Ollama and API start-up. The API runs with `Hr:DataSource=Fixture` and `scripts/hr/fixtures/*.json`: six employees across units 27 and 36, types 1–4, with settlement, salary, leave and attendance rows.
-- `--live` switches to `ConnectionStrings:CoreErpReadOnly` for the live gates.
+- Reuse the shared fake Ollama (chat, embeddings, tags) and API start-up, with a throwaway SQLite file.
+- Fixtures: a short rules document, a code table, and a trimmed copy of `ProcessFinalSettelment.sql` that keeps the Ager Formula comment and the Service Benefit section.
+- `--live` uses the real Ollama for G1.6, G2.8 and Phase 3.
 - Output `id | check | PASS/FAIL | detail`, a summary line, non-zero exit on any FAIL, `--phase N`, `--only <id>`.
 
 ---
@@ -254,7 +259,7 @@ Noticed, not changed: <list>
 Needs KAKAROT: <questions, or "none">
 ```
 
-A phase with any FAIL is not complete. Say so plainly. Mask employee codes to the last 3 digits and never paste salary amounts of real people beyond what a gate asks for.
+A phase with any FAIL is not complete. Say so plainly.
 
 ---
 
@@ -262,8 +267,8 @@ A phase with any FAIL is not complete. Say so plainly. Mask employee codes to th
 
 Each has a default the build follows until you say otherwise.
 
-1. **Which database.** Default: a UAT copy for Phases 1–2. Production only after Phase 3 passes, with the same read-only login.
-2. **Unit scope.** Default: each HR user sees only the units granted in `HrUnitAccess`; SystemAdmin sees all.
-3. **Management salaries.** Default: HR users see Management employees like everyone else in their units. Say if Management (type 1) should need a separate grant.
-4. **Answer language.** Default: the user's language; amounts always in digits with ৳.
-5. **The questions in the rules doc §11.** Default: the chat explains what the system does today and adds "HR is reviewing this rule" where §11 lists it.
+1. **One account or a user type.** Default: a user type `HrAssistant` plus one seeded account `hr-assistant`. More HR people get their own accounts with the same type.
+2. **Who edits the library.** Default: `HrAssistant` users and SystemAdmin.
+3. **Approval.** Default: approval is a label only; unapproved items are still used. Say if only approved items should be sent.
+4. **History.** Default: HR chats are saved, in their own list.
+5. **Questions in the rules document §11.** Default: the assistant answers what the rules document says and, where §11 lists a doubt, adds "HR is reviewing this rule".
