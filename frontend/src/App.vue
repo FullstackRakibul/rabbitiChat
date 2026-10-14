@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
@@ -288,10 +288,15 @@ async function send() {
 
   // webSearchUsed starts false and is set only if the server actually grounded
   // the answer — the toggle is a request, not a result.
-  const reply = {
+  //
+  // reactive(), not a plain object: the stream handlers below write to `reply`
+  // directly, and a write to the plain object behind the array's proxy is
+  // invisible to Vue — the answer would sit behind the "…" bubble until the
+  // stream ended, which reads as the model "thinking" with Think switched off.
+  const reply = reactive({
     role: 'assistant', content: '', thinking: '', thinkingDone: false,
     tools: [], webSearchUsed: false,
-  }
+  })
   messages.value.push(reply)
 
   busy.value = true
@@ -623,7 +628,8 @@ async function wsSend() {
   wsInput.value = ''
   wsScrollDown()
 
-  const reply = { role: 'assistant', content: '' }
+  // reactive() for the same reason as in send(): the stream writes to `reply`.
+  const reply = reactive({ role: 'assistant', content: '' })
   wsMessages.value.push(reply)
 
   wsBusy.value = true
