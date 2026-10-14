@@ -1,0 +1,17 @@
+--- page 1 ---
+KOHLS DEPARTMENT STORES        PURCHASE ORDER
+Order #: EVALPO-1        PO Type: PREPACK
+PO Date: 2026-01-05      Cancel Date: 2026-03-01
+Ship Window: 2026-02-01 to 2026-02-14
+Incoterms: FOB
+Vendor: ALPHA GARMENTS LTD   Country: BD
+
+Style        UPC            Unit Price   Packs    Line Total
+MS6SX117RN  400110380823    12.50        100      8750.00
+
+Prepack breakdown (per pack):
+Size S  qty 2   cost 12.50  retail 24.99
+Size M  qty 3   cost 12.50  retail 24.99
+Size L  qty 2   cost 12.50  retail 24.99
+
+Purchase Order Total: 8750.00

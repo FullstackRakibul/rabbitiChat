@@ -35,12 +35,13 @@ const BIN_DIR = path.join(EVAL_ROOT, 'api-bin')
 // ---- Expected values, written by hand ----
 // These mirror the design contract (§3.1), not the code: a check that read them
 // from TabCatalog.cs would only prove the code agrees with itself.
-// jsonto and 5lakhs left General's baseline when the model policy landed
-// (MODEL_POLICY_PROMPT section 1) — both are grantable, and both now start at
-// System, so the tiers above General still hold everything they held before.
-const GENERAL_TABS = ['dashboard', 'todo', 'notes', 'sources', 'settings']
-const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter',
-                      'jsonto', '5lakhs']
+// The model-policy build removed 'jsonto' from the General baseline (it is a
+// grant now, not a default) — see docs/MODEL_POLICY_PROMPT.md §1. These two
+// checks only use this list to build the SYSTEM and Ground Control expectations,
+// which are General's baseline plus their own extras, so the change belongs here
+// rather than in each check.
+const GENERAL_TABS = ['dashboard', 'todo', '5lakhs', 'notes', 'sources', 'settings']
+const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter']
 const ROLE_KEYS = ['General', 'System', 'GroundControl', 'SystemAdmin']
 
 // ─────────────────────────────── fake Ollama ───────────────────────────────
@@ -56,7 +57,7 @@ export const FAKE_USAGE = {
   eval_duration: 300_000_000,
 }
 
-export const FAKE_MODELS = ['fake-ok', 'fake-slow', 'fake-404', 'fake-500', 'fake-midstream-error', 'fake-nothink']
+const FAKE_MODELS = ['fake-ok', 'fake-slow', 'fake-404', 'fake-500', 'fake-midstream-error', 'fake-nothink']
 const EMBED_DIMS = 768
 
 /**
@@ -81,7 +82,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  *   firstWriteAt, lastWriteAt }. `stop()` and `restart()` keep the same port, so
  * the API (which knows only that URL) can be shown an Ollama that has gone away.
  */
-export async function startFakeOllama({ models = FAKE_MODELS } = {}) {
+export async function startFakeOllama() {
   const requests = []
 
   const server = http.createServer(async (req, res) => {
@@ -125,7 +126,7 @@ export async function startFakeOllama({ models = FAKE_MODELS } = {}) {
 
       case 'GET /api/tags':
         return json(200, {
-          models: [...models, 'nomic-embed-text'].map((name, i) => ({
+          models: [...FAKE_MODELS, 'nomic-embed-text'].map((name, i) => ({
             name, model: name, modified_at: '2026-01-01T00:00:00Z',
             size: 1000 + i, digest: `sha256:${String(i).padStart(64, '0')}`,
             details: { format: 'gguf', family: 'fake', parameter_size: '1B', quantization_level: 'Q4' },
@@ -245,7 +246,7 @@ export function buildApi() {
  * is the working directory, so uploads land there too. Reuse `runDir` to restart
  * on the same database.
  */
-export async function startApi({ fakeUrl, runDir, port }) {
+export async function startApi({ fakeUrl, runDir, port, env: extraEnv } = {}) {
   fs.mkdirSync(runDir, { recursive: true })
   // A port someone else holds would answer the readiness check, and every call
   // after it would reach THEIR server and database. Refuse rather than guess.
@@ -268,6 +269,11 @@ export async function startApi({ fakeUrl, runDir, port }) {
     OllamaCloud__BaseUrl: fakeUrl,
     Logging__LogLevel__Default: 'Warning',
     Logging__LogLevel__Microsoft__AspNetCore: 'Warning',
+
+    // A caller's own settings, applied last so a suite can configure a source
+    // this one blanks (model-policy-eval points the cloud source at its fake,
+    // so a refusal there is the policy's and not a missing key).
+    ...extraEnv,
   }
 
   const proc = spawn('dotnet', [

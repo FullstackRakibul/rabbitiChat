@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -89,6 +89,15 @@ builder.Services.AddHttpClient("ollama", c =>
 	c.Timeout = TimeSpan.FromMinutes(10); // local models can be slow on first load
 });
 
+// Extraction streams, so there is no sensible fixed timeout: a 27B model on a
+// cold load can spend longer than ten minutes before the first token, and the
+// request's own cancellation token is what ends the call. See LlmPoFallback.
+builder.Services.AddHttpClient("ollama-extract", c =>
+{
+	c.BaseAddress = new Uri(ollamaUrl);
+	c.Timeout = Timeout.InfiniteTimeSpan;
+});
+
 // Ollama's hosted web search. The key stays server-side — the browser calls our
 // /api/search proxy instead. A missing key is NOT fatal here: the endpoints answer
 // 503 at request time so the rest of the app still boots.
@@ -160,6 +169,11 @@ builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
 // Each source is registered against the shared IChatModelSource abstraction, so
 // the registry (and therefore ChatService and the endpoints) discovers them
 // without naming any concrete type. A third provider is one AddSingleton line.
+// Which models a role may run. Scoped like the DbContext it reads; the row
+// cache behind it is the shared singleton memory cache.
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
+
 builder.Services.Configure<RabbitIC.Api.ModelSources.OllamaCloudOptions>(
 	builder.Configuration.GetSection(RabbitIC.Api.ModelSources.OllamaCloudOptions.SectionName));
 
@@ -250,10 +264,6 @@ builder.Services.AddScoped<RabbitIC.Api.Services.RbacService>();
 // ---- IELTS ----
 // The mistake spine is registered first because the Reading engine depends on
 // it: every wrong answer a sitting produces is logged through IMistakeService.
-// The model policy: one rule, read by every endpoint that runs a model.
-builder.Services.AddScoped<RabbitIC.Api.Rbac.IModelPolicy,
-                           RabbitIC.Api.Rbac.ModelPolicy>();
-
 builder.Services.AddScoped<RabbitIC.Api.Services.IMistakeService,
 							 RabbitIC.Api.Services.MistakeService>();
 builder.Services.AddScoped<RabbitIC.Api.Services.IReadingService,
@@ -329,6 +339,7 @@ app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
 app.ApplicationDocumentApis();
 app.ApplicationBuyerProfileApis();
+app.ApplicationPoStudioApis();
 app.ApplicationSearchApis();
 app.ApplicationContextSourceApis();
 app.ApplicationTodoRabbitApis();
@@ -382,6 +393,10 @@ using (var scope = app.Services.CreateScope())
 	// from the first request. The seed secret is never logged.
 	RbacSeeder.NormalizeExistingRoles(db);
 	RbacSeeder.Run(db, app.Logger);
+
+	// Which models each role may run. After the roles exist, and idempotent: a
+	// row an administrator edited is never overwritten by a restart.
+	RbacSeeder.SeedModelPolicies(db, app.Configuration, app.Logger);
 
 	// Shared IELTS demo content. After RBAC so roles exist first, and idempotent
 	// by SeedKey: restarting never duplicates, and editing a seed in code

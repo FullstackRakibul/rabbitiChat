@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
@@ -23,31 +23,20 @@ namespace RabbitIC.Api.MinimalApis
             // source and a metered flag. Routed through ChatService so this endpoint
             // never names a concrete source.
             group.MapGet("/models", async (
-                ChatService chat, IModelSourceRegistry registry,
-                HttpContext ctx, AppDbContext db,
-                RabbitIC.Api.Rbac.IModelPolicy modelPolicy, CancellationToken ct) =>
+                HttpContext ctx, AppDbContext db, ChatService chat,
+                IModelSourceRegistry registry, Rbac.ModelPolicy modelPolicy,
+                CancellationToken ct) =>
             {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
                 var models = await chat.ListAllModelsAsync(ct);
 
-                // Hiding a model here is convenience, not control — every endpoint
-                // enforces the policy itself. This only keeps the picker honest.
-                var caller = await Authorization.ResolveUser(ctx, db);
-                var locked = false;
-                if (caller is not null)
-                {
-                    var allowed = await modelPolicy.AllowedAsync(caller, ct);
-                    if (allowed.Count > 0)
-                    {
-                        models = models
-                            .Where(m => string.Equals(m.Source, "local", StringComparison.OrdinalIgnoreCase)
-                                     && allowed.Any(a => RabbitIC.Api.Rbac.ModelPolicy.SameModel(a, m.Name)))
-                            .ToList();
-                        locked = allowed.Count == 1;
-                    }
-                }
-
-                // The flag rides in a header rather than the body, so every existing
-                // caller that expects a bare array keeps working unchanged.
+                // Convenience, not control: the picker stops offering what every
+                // endpoint would refuse anyway (rule 4). An unrestricted role's
+                // list is returned untouched.
+                models = await modelPolicy.FilterAsync(user, models, m => (m.Name, m.Source), ct);
+                var locked = await modelPolicy.IsLockedAsync(user, ct);
                 if (locked) ctx.Response.Headers["X-Model-Locked"] = "true";
 
                 // A configured provider names its own picker group; the built-in
@@ -59,7 +48,8 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(models
                     .Select(m => new ModelDto(
                         m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered,
-                        labels.TryGetValue(m.Source, out var label) ? label : null))
+                        labels.TryGetValue(m.Source, out var label) ? label : null,
+                        locked))
                     .ToList());
             });
 

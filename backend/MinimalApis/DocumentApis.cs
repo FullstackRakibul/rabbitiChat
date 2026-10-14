@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
@@ -238,21 +238,11 @@ namespace RabbitIC.Api.MinimalApis
             app.MapPost("/documents/{id:int}/extract", async (
                 int id, ExtractRequest req, HttpContext ctx, AppDbContext db,
                 Extraction.ExtractionDispatcher dispatcher, int? buyerProfileId,
-                RabbitIC.Api.Rbac.IModelPolicy modelPolicy,
+                RabbitIC.Api.Rbac.ModelPolicy modelPolicy,
                 CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                // No model named means the policy's default for this role, falling
-                // back to the existing config chain when the role is unrestricted.
-                var extractPolicy = await modelPolicy.CheckAsync(user, req.Model, "local", ct);
-                if (!string.IsNullOrWhiteSpace(req.Model) && !extractPolicy.IsAllowed)
-                    return Results.Json(new { error = extractPolicy.Message }, statusCode: 403);
-
-                var effectiveModel = string.IsNullOrWhiteSpace(req.Model)
-                    ? await modelPolicy.DefaultForAsync(user, ct)
-                    : req.Model;
-
                 if (!string.IsNullOrWhiteSpace(req.Model) && IsEmbeddingModel(req.Model))
                     return Results.BadRequest(new { error = $"'{req.Model}' is an embedding model — pick a chat model." });
 
@@ -271,7 +261,26 @@ namespace RabbitIC.Api.MinimalApis
                     return string.Join("\n", chunks);
                 }
 
-                var outcome = await dispatcher.DispatchAsync(doc, ChunkText, buyerProfileId, effectiveModel, ct);
+                // The model policy, on the model the pipeline will ACTUALLY use.
+                // Checking req.Model alone would miss the case this build exists
+                // for: a General user names nothing, and the buyer profile points
+                // the run at a model their role cannot run. Checked before the
+                // dispatch, so a refusal writes no run row and calls no model.
+                var (resolvedModel, namingProfile) =
+                    await dispatcher.ResolveModelAsync(doc, ChunkText, buyerProfileId, req.Model, ct);
+
+                var effectiveModel = resolvedModel
+                    ?? await modelPolicy.DefaultForAsync(user, ct);
+
+                var context = namingProfile is not null && !string.IsNullOrWhiteSpace(resolvedModel)
+                    ? $"This buyer profile uses {resolvedModel}."
+                    : null;
+
+                var extractPolicy = await modelPolicy.CheckAsync(user, effectiveModel, context: context, ct: ct);
+                if (!extractPolicy.Allowed)
+                    return Results.Json(new { error = extractPolicy.Error }, statusCode: StatusCodes.Status403Forbidden);
+
+                var outcome = await dispatcher.DispatchAsync(doc, ChunkText, buyerProfileId, req.Model, ct);
 
                 var resultJson = outcome.Result is null
                     ? ""
@@ -294,6 +303,19 @@ namespace RabbitIC.Api.MinimalApis
                     Status = outcome.Status,
                     ResultJson = resultJson,
                     FailedChecks = string.Join("; ", outcome.FailedChecks.Select(c => c.Check)),
+
+                    // How it was made (§3.5) — without these, two runs' accuracy
+                    // cannot be compared across a model or profile change.
+                    Model = outcome.Model,
+                    ProfileVersion = outcome.ProfileVersion,
+                    PromptHash = outcome.PromptHash,
+                    RepairUsed = outcome.RepairUsed,
+                    FirstResultJson = outcome.FirstResult is null
+                        ? null
+                        : JsonSerializer.Serialize(outcome.FirstResult, WebJson),
+                    PromptTokens = outcome.PromptTokens,
+                    OutputTokens = outcome.OutputTokens,
+                    DurationMs = outcome.DurationMs,
                 };
                 db.ExtractionRuns.Add(run);
                 await db.SaveChangesAsync(ct);
@@ -312,6 +334,12 @@ namespace RabbitIC.Api.MinimalApis
                     failedChecks = outcome.FailedChecks.Select(c => new { c.Check, c.Detail }),
                     checks = outcome.Result?.Validation.Select(c => new { c.Check, c.Passed, c.Detail }),
                     data = outcome.Result,
+                    model = outcome.Model,
+                    profileVersion = outcome.ProfileVersion,
+                    repairUsed = outcome.RepairUsed,
+                    promptTokens = outcome.PromptTokens,
+                    outputTokens = outcome.OutputTokens,
+                    durationMs = outcome.DurationMs,
                 };
                 return outcome.Status == "failed"
                     ? Results.Json(payload, statusCode: 422)
@@ -370,22 +398,26 @@ namespace RabbitIC.Api.MinimalApis
                 WorkspaceChatRequest req, HttpContext ctx, AppDbContext db,
                 EmbeddingService embedder, VectorIndex index, IHttpClientFactory http,
                 RabbitIC.Api.Services.IContextSourceService contextSources,
-                RabbitIC.Api.Rbac.IModelPolicy modelPolicy) =>
+                RabbitIC.Api.Rbac.ModelPolicy modelPolicy) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) { ctx.Response.StatusCode = 401; return; }
-                // This endpoint answers in plain text (F5), so the refusal does too —
-                // the same message, in the shape this caller already parses.
-                var wsPolicy = await modelPolicy.CheckAsync(user, req.Model, "local", ctx.RequestAborted);
-                if (!wsPolicy.IsAllowed)
-                { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsync(wsPolicy.Message); return; }
-
                 if (string.IsNullOrWhiteSpace(req.Message) || string.IsNullOrWhiteSpace(req.Model))
                 { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsync("model and message are required."); return; }
                 if (IsEmbeddingModel(req.Model))
                 { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsync($"'{req.Model}' is an embedding model — pick a chat model."); return; }
 
                 var ct = ctx.RequestAborted;
+
+                // The model policy. This endpoint answers in plain text (never JSON),
+                // so the refusal does too — the same message, the same status.
+                var chatPolicy = await modelPolicy.CheckAsync(user, req.Model, ct: ct);
+                if (!chatPolicy.Allowed)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await ctx.Response.WriteAsync(chatPolicy.Error!);
+                    return;
+                }
 
                 // Context: whole document when pinned; otherwise top-K vector search over my chunks.
                 List<(string? SourceRef, string Text)> contextChunks;

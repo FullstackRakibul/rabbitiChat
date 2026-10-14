@@ -42,6 +42,7 @@ public class TabAccessMiddleware
         ("/api/conversations", "chat"),
         ("/api/documents", "docs"),
         ("/api/buyer-profiles", "docs"),
+        ("/api/po-studio", "docs"),
         ("/api/search", "search"),
         ("/api/context-sources", "sources"),
         ("/api/todorabbit", "todo"),

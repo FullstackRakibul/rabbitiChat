@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
@@ -37,7 +37,7 @@ namespace RabbitIC.Api.MinimalApis
             WebSearchRunner webSearchRunner,
             IConfiguration config,
             ILoggerFactory logs,
-            RabbitIC.Api.Rbac.IModelPolicy modelPolicy)
+            Rbac.ModelPolicy modelPolicy)
         {
             var log = logs.CreateLogger("ChatEndpoint");
             var ct = ctx.RequestAborted;
@@ -50,20 +50,20 @@ namespace RabbitIC.Api.MinimalApis
                 return;
             }
 
-            // The policy runs before the conversation is resolved and before the
-            // user turn is saved, so a refused request leaves nothing behind.
-            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct);
-            if (!policy.IsAllowed)
-            {
-                ctx.Response.StatusCode = 403;
-                await ctx.Response.WriteAsJsonAsync(new { error = policy.Message }, ct);
-                return;
-            }
-
             if (string.IsNullOrWhiteSpace(req.Message) || string.IsNullOrWhiteSpace(req.Model))
             {
                 ctx.Response.StatusCode = 400;
                 await ctx.Response.WriteAsync("model and message are required.");
+                return;
+            }
+
+            // The model policy, before the conversation and the user's message are
+            // stored: a refused request must leave no trace (§3.1, §9).
+            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct: ct);
+            if (!policy.Allowed)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await ctx.Response.WriteAsync(policy.Error!);
                 return;
             }
 

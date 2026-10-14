@@ -33,6 +33,14 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        public static WebApplication ApplicationPoStudioApis(this WebApplication app)
+        {
+            var studioApi = app.MapGroup("/api").WithTags("PO Studio");
+
+            studioApi.MapPoStudioApis();
+            return app;
+        }
+
         public static WebApplication ApplicationOllamaApis(this WebApplication app)
         {
             var ollamaApi = app.MapGroup("/api").WithTags("Ollama APIs");

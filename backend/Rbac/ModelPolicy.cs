@@ -1,197 +1,180 @@
+// Which models a role may run. THE rule, in one place.
+//
+// Every endpoint that runs a model calls Check() here. A copy of the comparison
+// in an endpoint would be a second rule that drifts, and the point of a policy
+// is that there is exactly one answer to "may this user run this model".
+//
+// Two things are easy to get wrong and are handled deliberately:
+//
+//   · The model to check is the RESOLVED one, not the one the caller typed.
+//     Extraction falls back request → buyer profile → install default, so a
+//     General user who names nothing can still end up pointed at a 27B by a
+//     profile. Check the result of the fallback, never the input.
+//
+//   · The source matters as much as the name. A metered cloud model can share a
+//     local model's name, so a restricted role is confined to `local` — a name
+//     match alone would be a way around the policy.
+//
+// Rows are cached because this runs on every model request; the cache is dropped
+// on save so a change applies to the next request without a restart.
+
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
 
 namespace RabbitIC.Api.Rbac;
 
-/// <summary>What the policy decided, and why.</summary>
-public enum ModelPolicyOutcome
+/// <summary>The outcome of a policy check: allowed, or refused with the reason to show.</summary>
+public sealed record ModelPolicyResult(bool Allowed, string? Error)
 {
-    /// <summary>Run it.</summary>
-    Allowed,
-
-    /// <summary>The role may not run this model. <see cref="ModelPolicyResult.Message"/> says what it may.</summary>
-    Refused,
+    public static readonly ModelPolicyResult Ok = new(true, null);
+    public static ModelPolicyResult Refused(string error) => new(false, error);
 }
 
-/// <summary>
-/// One decision. <see cref="Message"/> is written for the person who hit it, so
-/// every endpoint can hand it straight back — plain text or JSON — without
-/// restating the rule and drifting from it.
-/// </summary>
-public record ModelPolicyResult(ModelPolicyOutcome Outcome, string Message)
+public sealed class ModelPolicy(AppDbContext db, IMemoryCache cache)
 {
-    public bool IsAllowed => Outcome == ModelPolicyOutcome.Allowed;
+    /// <summary>The only source a restricted role may reach (§3.1).</summary>
+    public const string LocalSource = "local";
 
-    public static readonly ModelPolicyResult Allow = new(ModelPolicyOutcome.Allowed, "");
-    public static ModelPolicyResult Refuse(string message) => new(ModelPolicyOutcome.Refused, message);
-}
-
-/// <summary>
-/// The model policy — §3.1, written once and called from every endpoint that
-/// runs a model.
-///
-/// There is no second copy of this rule anywhere, and deliberately so: a check
-/// repeated at each call site is a check that will eventually be forgotten at
-/// one of them, and the forgotten one is the hole.
-/// </summary>
-public interface IModelPolicy
-{
-    /// <summary>The model names this user may run. Empty means no restriction.</summary>
-    Task<IReadOnlyList<string>> AllowedAsync(User user, CancellationToken ct = default);
-
-    /// <summary>True when the user is held to a single model, which the UI shows locked.</summary>
-    Task<bool> IsLockedAsync(User user, CancellationToken ct = default);
+    private const string CacheKey = "rbac:model-policies";
 
     /// <summary>
-    /// The gate. Call before any model call and before anything is saved.
-    ///
-    /// <paramref name="source"/> matters as much as the name: a restricted role is
-    /// confined to local models, so a metered cloud model cannot be reached by
-    /// naming it.
+    /// The role's allowed models, or an empty list meaning "no restriction".
+    /// SystemAdmin is never restricted, whatever a row says.
     /// </summary>
-    Task<ModelPolicyResult> CheckAsync(
-        User user, string? model, string? source, CancellationToken ct = default);
-
-    /// <summary>
-    /// The model to use when a request names none. Null when the role is
-    /// unrestricted, so the caller keeps its existing config fallback.
-    /// </summary>
-    Task<string?> DefaultForAsync(User user, CancellationToken ct = default);
-
-    /// <summary>Drops the cache so a saved change applies to the next request, with no restart.</summary>
-    void Invalidate();
-}
-
-/// <summary>
-/// EF-backed <see cref="IModelPolicy"/> with a process-wide cache.
-///
-/// The rows change only when an admin saves one, and every model call reads
-/// them, so they are cached until <see cref="Invalidate"/> is called. The cache
-/// is static because the service is scoped per request — a per-instance cache
-/// would be a cache that never hits.
-/// </summary>
-public class ModelPolicy : IModelPolicy
-{
-    /// <summary>Only local models are reachable by a restricted role (§3.1).</summary>
-    private const string LocalSource = "local";
-
-    private static readonly object Gate = new();
-    private static Dictionary<string, RoleModelPolicy>? _cache;
-
-    private readonly AppDbContext _db;
-
-    public ModelPolicy(AppDbContext db) => _db = db;
-
-    public void Invalidate()
-    {
-        lock (Gate) _cache = null;
-    }
-
-    /// <summary>Clears the cache from anywhere that writes a row without this service.</summary>
-    public static void InvalidateAll()
-    {
-        lock (Gate) _cache = null;
-    }
-
     public async Task<IReadOnlyList<string>> AllowedAsync(User user, CancellationToken ct = default)
     {
-        var row = await RowForAsync(user, ct);
-        return Parse(row?.AllowedModels);
-    }
-
-    public async Task<bool> IsLockedAsync(User user, CancellationToken ct = default) =>
-        (await AllowedAsync(user, ct)).Count == 1;
-
-    public async Task<ModelPolicyResult> CheckAsync(
-        User user, string? model, string? source, CancellationToken ct = default)
-    {
-        var allowed = await AllowedAsync(user, ct);
-
-        // No row, or an empty list: today's behaviour, unchanged.
-        if (allowed.Count == 0) return ModelPolicyResult.Allow;
-
         var role = UserRoles.Normalize(user.Role);
+        if (role == UserRoles.SystemAdmin) return Array.Empty<string>();
 
-        // A restricted role is confined to local models. Checked before the name,
-        // so a cloud model that happens to share an allowed name is still refused.
-        if (!string.IsNullOrWhiteSpace(source)
-            && !string.Equals(source, LocalSource, StringComparison.OrdinalIgnoreCase))
-        {
-            return ModelPolicyResult.Refuse(Message(role, allowed));
-        }
-
-        if (!string.IsNullOrWhiteSpace(model) && allowed.Any(a => SameModel(a, model)))
-            return ModelPolicyResult.Allow;
-
-        return ModelPolicyResult.Refuse(Message(role, allowed));
+        var rows = await RowsAsync(ct);
+        return rows.TryGetValue(role, out var row) ? Split(row.AllowedModels) : Array.Empty<string>();
     }
 
+    /// <summary>True when the role is confined to exactly one model — the UI locks its picker.</summary>
+    public async Task<bool> IsLockedAsync(User user, CancellationToken ct = default)
+        => (await AllowedAsync(user, ct)).Count == 1;
+
+    /// <summary>
+    /// The model to use when a request names none, or null when the role is
+    /// unrestricted and the caller should fall back as it always has.
+    /// </summary>
     public async Task<string?> DefaultForAsync(User user, CancellationToken ct = default)
     {
-        var row = await RowForAsync(user, ct);
-        if (row is null) return null;
-
-        var allowed = Parse(row.AllowedModels);
-        if (allowed.Count == 0) return null;   // unrestricted: keep the config chain
-
-        var chosen = row.DefaultModel?.Trim();
-        return string.IsNullOrEmpty(chosen) ? allowed[0] : chosen;
-    }
-
-    /// <summary>
-    /// "Your role (General) can use: qwen3.5:0.8b." — names the role so the reader
-    /// knows why, and the models so they know what to pick instead.
-    /// </summary>
-    public static string Message(string role, IReadOnlyList<string> allowed) =>
-        $"Your role ({role}) can use: {string.Join(", ", allowed)}.";
-
-    /// <summary>
-    /// Case-insensitive, and a bare name equals the same name tagged ":latest" —
-    /// Ollama treats "llama3" and "llama3:latest" as one model, so the policy must
-    /// too, or an untagged request would slip past a tagged allow-list.
-    /// </summary>
-    public static bool SameModel(string? a, string? b)
-    {
-        static string Canon(string? s)
-        {
-            var t = (s ?? "").Trim();
-            if (t.EndsWith(":latest", StringComparison.OrdinalIgnoreCase)) t = t[..^7];
-            return t.ToLowerInvariant();
-        }
-
-        return Canon(a).Length > 0 && Canon(a) == Canon(b);
-    }
-
-    /// <summary>Splits the stored list. Blank entries are dropped rather than stored as "".</summary>
-    public static IReadOnlyList<string> Parse(string? csv) =>
-        (csv ?? "")
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
-
-    private async Task<RoleModelPolicy?> RowForAsync(User user, CancellationToken ct)
-    {
         var role = UserRoles.Normalize(user.Role);
-
-        // SystemAdmin is never restricted (§3.3): an admin who locked themselves
-        // out of every model could not reach the screen that would undo it.
         if (role == UserRoles.SystemAdmin) return null;
 
-        var rows = await LoadAsync(ct);
-        return rows.TryGetValue(role, out var row) ? row : null;
+        var rows = await RowsAsync(ct);
+        if (!rows.TryGetValue(role, out var row)) return null;
+        if (Split(row.AllowedModels).Count == 0) return null;
+        return string.IsNullOrWhiteSpace(row.DefaultModel) ? null : row.DefaultModel.Trim();
     }
 
-    private async Task<Dictionary<string, RoleModelPolicy>> LoadAsync(CancellationToken ct)
+    /// <summary>
+    /// May this user run this model from this source? Call it BEFORE the model
+    /// call and before anything is written, so a refusal leaves no trace.
+    /// </summary>
+    /// <param name="source">
+    /// The model source key ("local", "cloud", …). Null is treated as local,
+    /// which is what the callers that have no source concept mean.
+    /// </param>
+    /// <param name="context">
+    /// Prepended to the refusal when the model was chosen for the user rather
+    /// than by them — e.g. "This buyer profile uses qwen3.8-27b-q3." Without it
+    /// a refusal for a profile's model reads as though the user had asked for it.
+    /// </param>
+    public async Task<ModelPolicyResult> CheckAsync(
+        User user, string? model, string? source = null, string? context = null,
+        CancellationToken ct = default)
     {
-        lock (Gate)
+        var allowed = await AllowedAsync(user, ct);
+        if (allowed.Count == 0) return ModelPolicyResult.Ok;   // unrestricted role
+
+        var role = UserRoles.LabelFor(user.Role);
+        var list = string.Join(", ", allowed);
+        var prefix = string.IsNullOrWhiteSpace(context) ? "" : context!.TrimEnd() + " ";
+
+        // A restricted role may only reach local models: a cloud model could
+        // otherwise be named past the policy, metered and all.
+        if (!string.IsNullOrWhiteSpace(source)
+            && !source!.Equals(LocalSource, StringComparison.OrdinalIgnoreCase))
+            return ModelPolicyResult.Refused(
+                $"{prefix}Your role ({role}) can use: {list}. " +
+                $"Models from the '{source}' source are not available to your role.");
+
+        if (string.IsNullOrWhiteSpace(model))
+            return ModelPolicyResult.Refused($"{prefix}Your role ({role}) can use: {list}.");
+
+        if (allowed.Any(a => SameModel(a, model!))) return ModelPolicyResult.Ok;
+
+        return ModelPolicyResult.Refused($"{prefix}Your role ({role}) can use: {list}.");
+    }
+
+    /// <summary>
+    /// The models of <paramref name="models"/> this user may run. Used by
+    /// /api/models so a picker offers nothing the server would refuse.
+    /// </summary>
+    public async Task<IReadOnlyList<T>> FilterAsync<T>(
+        User user, IEnumerable<T> models, Func<T, (string Name, string Source)> describe,
+        CancellationToken ct = default)
+    {
+        var allowed = await AllowedAsync(user, ct);
+        var all = models.ToList();
+        if (allowed.Count == 0) return all;
+
+        return all.Where(m =>
         {
-            if (_cache is not null) return _cache;
-        }
+            var (name, source) = describe(m);
+            if (!string.IsNullOrWhiteSpace(source)
+                && !source.Equals(LocalSource, StringComparison.OrdinalIgnoreCase))
+                return false;
+            return allowed.Any(a => SameModel(a, name));
+        }).ToList();
+    }
 
-        var rows = await _db.RoleModelPolicies.AsNoTracking().ToListAsync(ct);
-        var map = rows.ToDictionary(r => UserRoles.Normalize(r.Role), StringComparer.OrdinalIgnoreCase);
+    // ---- rows and cache ----
 
-        lock (Gate) _cache = map;
+    /// <summary>Every policy row by canonical role name. Cached; see <see cref="Invalidate"/>.</summary>
+    public async Task<IReadOnlyDictionary<string, RoleModelPolicy>> RowsAsync(CancellationToken ct = default)
+    {
+        if (cache.TryGetValue(CacheKey, out IReadOnlyDictionary<string, RoleModelPolicy>? cached)
+            && cached is not null)
+            return cached;
+
+        var rows = await db.RoleModelPolicies.AsNoTracking().ToListAsync(ct);
+        var map = rows
+            .GroupBy(r => UserRoles.Normalize(r.Role))
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        cache.Set(CacheKey, (IReadOnlyDictionary<string, RoleModelPolicy>)map);
         return map;
+    }
+
+    /// <summary>Drop the cache, so the next request reads the saved rows.</summary>
+    public void Invalidate() => cache.Remove(CacheKey);
+
+    // ---- naming ----
+
+    /// <summary>"a, b" → ["a", "b"], dropping blanks.</summary>
+    public static List<string> Split(string? csv) =>
+        string.IsNullOrWhiteSpace(csv)
+            ? new List<string>()
+            : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /// <summary>
+    /// Model names compare case-insensitively, and a bare name equals the same
+    /// name tagged ":latest" — the two spellings are the same model to Ollama,
+    /// so treating them as different would refuse a model the admin did allow.
+    /// </summary>
+    public static bool SameModel(string a, string b) =>
+        Canonical(a).Equals(Canonical(b), StringComparison.OrdinalIgnoreCase);
+
+    private static string Canonical(string name)
+    {
+        var trimmed = (name ?? "").Trim();
+        return trimmed.EndsWith(":latest", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^":latest".Length]
+            : trimmed;
     }
 }

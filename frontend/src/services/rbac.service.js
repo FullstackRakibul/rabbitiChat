@@ -74,8 +74,9 @@ export function listRoles() {
 
 /**
  * Which models each role may run, plus the installed local models to choose
- * from: { policies: [{ role, allowedModels, defaultModel, locked, editable,
- * updatedAtUtc }], installedModels: [...] }.
+ * from: { policies: [{ role, label, allowedModels, defaultModel, canRestrict,
+ * updatedAtUtc, stale }], installedModels: [...] }. `stale` names the allowed
+ * models that are no longer installed locally.
  *
  * An empty allowedModels means no restriction — that asymmetry is the server's,
  * and the editor shows it as "No restriction" rather than as an empty list.

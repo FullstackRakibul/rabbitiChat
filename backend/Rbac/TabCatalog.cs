@@ -1,4 +1,4 @@
-﻿// RBAC — the tab catalogue and the role → default-tabs map.
+// RBAC — the tab catalogue and the role → default-tabs map.
 //
 // Deliberately a constant map rather than a table: role baselines change when
 // the SHIPPED TAB SET changes, which is a code change anyway. Keeping it here
@@ -107,16 +107,12 @@ public static class TabCatalog
     ///
     /// Chat, workspace, documents, search and IELTS are deliberately NOT here —
     /// they are the model-backed and knowledge-base modules, so they start at
-    /// System. jsonto and 5lakhs run no model either, but they were taken out of
-    /// this baseline too (MODEL_POLICY_PROMPT section 1) to keep a plain account
-    /// to the five core tools; they remain grantable and start at System.
-    ///
-    /// An admin can still grant any of them to one General user without
+    /// System. An admin can still grant any of them to one General user without
     /// promoting them, which is what the additive grant table is for.
     /// </summary>
     private static readonly string[] GeneralTabs =
     {
-        "dashboard", "todo", "notes", "sources", "settings",
+        "dashboard", "todo", "notes", "sources", "settings", "5lakhs",
     };
 
     /// <summary>
@@ -127,9 +123,6 @@ public static class TabCatalog
     private static readonly string[] SystemExtraTabs =
     {
         "chat", "workspace", "docs", "search", "ielts", "component-splitter",
-        // Not model-backed, but they left General's baseline (MODEL_POLICY_PROMPT
-        // section 1) and every tier above General must keep what it had.
-        "jsonto", "5lakhs",
     };
 
     /// <summary>

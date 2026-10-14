@@ -96,9 +96,9 @@ function toggleModel(role, name, next) {
     ? [...d.allowed.filter((m) => m !== name), name]
     : d.allowed.filter((m) => m !== name)
 
-  // Clearing the model that was the default would leave a default outside the
-  // list, which the server refuses; drop it rather than send a known-bad draft.
-  const def = allowed.includes(d.def) ? d.def : ''
+  // A non-empty list needs a default inside it, or the server refuses the save;
+  // keep the current one while it is still ticked, otherwise take the first.
+  const def = allowed.includes(d.def) ? d.def : (allowed[0] ?? '')
   draft.value = { ...draft.value, [role]: { allowed, def } }
 }
 
@@ -119,11 +119,19 @@ function isDirty(role) {
   return !same(stored.allowedModels, d.allowed) || stored.defaultModel !== d.def
 }
 
-const rows = computed(() => policies.value.map((p) => ({
-  ...p,
-  draft: draft.value[p.role] ?? { allowed: [], def: '' },
-  dirty: isDirty(p.role),
-})))
+const rows = computed(() => policies.value.map((p) => {
+  const stale = p.stale ?? []
+  return {
+    ...p,
+    stale,
+    // A stale model (allowed, but no longer installed) is still offered, marked,
+    // so it can be unticked. Leaving it out would post it back on every save,
+    // and the server would refuse the save by its name.
+    choices: [...installed.value, ...stale.filter((m) => !installed.value.includes(m))],
+    draft: draft.value[p.role] ?? { allowed: [], def: '' },
+    dirty: isDirty(p.role),
+  }
+}))
 </script>
 
 <template>
@@ -159,7 +167,7 @@ const rows = computed(() => policies.value.map((p) => ({
         class="rounded-lg border p-3 sm:p-4"
       >
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-sm font-medium">{{ row.role }}</span>
+          <span class="text-sm font-medium">{{ row.label || row.role }}</span>
 
           <Badge v-if="!row.draft.allowed.length" variant="secondary" class="font-normal">
             No restriction
@@ -169,12 +177,12 @@ const rows = computed(() => policies.value.map((p) => ({
             Locked to one model
           </Badge>
 
-          <span v-if="!row.editable" class="text-xs text-muted-foreground">
+          <span v-if="!row.canRestrict" class="text-xs text-muted-foreground">
             Never restricted
           </span>
         </div>
 
-        <template v-if="row.editable">
+        <template v-if="row.canRestrict">
           <Separator class="my-3" />
 
           <div class="space-y-3">
@@ -182,11 +190,12 @@ const rows = computed(() => policies.value.map((p) => ({
               <Label class="text-xs text-muted-foreground">Allowed models</Label>
               <div class="grid gap-2 sm:grid-cols-2">
                 <label
-                  v-for="m in installed"
+                  v-for="m in row.choices"
                   :key="m"
                   :class="cn(
                     'flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-sm',
                     row.draft.allowed.includes(m) && 'bg-accent/50',
+                    row.stale.includes(m) && 'border-destructive/50',
                   )"
                 >
                   <Checkbox
@@ -194,6 +203,9 @@ const rows = computed(() => policies.value.map((p) => ({
                     @update:model-value="(v) => toggleModel(row.role, m, v)"
                   />
                   <span class="min-w-0 flex-1 truncate">{{ m }}</span>
+                  <Badge v-if="row.stale.includes(m)" variant="destructive" class="shrink-0 font-normal">
+                    Not installed
+                  </Badge>
                 </label>
               </div>
             </div>

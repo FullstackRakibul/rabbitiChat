@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
 using RabbitIC.Api.Observability;
@@ -19,10 +19,10 @@ public class AppDbContext : DbContext
     /// <summary>RBAC — explicit per-tab grants that add to a user's role baseline.</summary>
     public DbSet<UserTabPermission> UserTabPermissions => Set<UserTabPermission>();
 
-    /// <summary>Which models each role may run. One row per role; empty list = unrestricted.</summary>
-    public DbSet<RoleModelPolicy> RoleModelPolicies => Set<RoleModelPolicy>();
-
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
+
+    /// <summary>Which models each role may run — see Rbac/ModelPolicy.cs.</summary>
+    public DbSet<RoleModelPolicy> RoleModelPolicies => Set<RoleModelPolicy>();
 
     /// <summary>Connected sources and buyer profiles — one table, split by Kind.</summary>
     public DbSet<ContextSource> ContextSources => Set<ContextSource>();
@@ -81,10 +81,6 @@ public class AppDbContext : DbContext
         b.Entity<UserTabPermission>()
             .HasIndex(p => new { p.UserId, p.TabKey })
             .IsUnique();
-
-        // The role name IS the key: one policy per role, so a second row for the
-        // same role cannot exist to disagree with the first.
-        b.Entity<RoleModelPolicy>().HasKey(p => p.Role);
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)
@@ -168,6 +164,10 @@ public class AppDbContext : DbContext
             .HasForeignKey(a => a.ReadingAttemptId)
             .OnDelete(DeleteBehavior.Cascade);
         b.Entity<ReadingAttemptAnswer>().HasIndex(a => a.ReadingAttemptId);
+
+        // One row per role, keyed by the role name itself: there is nothing else
+        // to identify it by, and a surrogate key would allow two rows for one role.
+        b.Entity<RoleModelPolicy>().HasKey(p => p.Role);
 
         b.Entity<BuyerProfile>().HasIndex(p => p.Name).IsUnique();
         b.Entity<ExtractionRun>().HasIndex(r => r.DocumentId);

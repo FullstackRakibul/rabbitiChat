@@ -60,13 +60,13 @@ public sealed class OddityProxy
     private readonly OdditySettingsService _settings;
     private readonly OddityRecorder _recorder;
     private readonly RbacService _rbac;
-    private readonly RabbitIC.Api.Rbac.IModelPolicy _modelPolicy;
+    private readonly RabbitIC.Api.Rbac.ModelPolicy _modelPolicy;
     private readonly IHttpClientFactory _http;
 
     public OddityProxy(
         AppDbContext db, OddityKeyService keys, OdditySettingsService settings,
         OddityRecorder recorder, RbacService rbac, IHttpClientFactory http,
-        RabbitIC.Api.Rbac.IModelPolicy modelPolicy)
+        RabbitIC.Api.Rbac.ModelPolicy modelPolicy)
     {
         _db = db;
         _keys = keys;
@@ -194,10 +194,10 @@ public sealed class OddityProxy
         // Embedding calls are exempt, as they are everywhere else (§10.3).
         if (!embed)
         {
-            var rolePolicy = await _modelPolicy.CheckAsync(owner, model, "local", ct);
-            if (!rolePolicy.IsAllowed)
+            var rolePolicy = await _modelPolicy.CheckAsync(owner, model, "local", ct: ct);
+            if (!rolePolicy.Allowed)
             {
-                await RejectAsync(ctx, row, StatusCodes.Status403Forbidden, rolePolicy.Message);
+                await RejectAsync(ctx, row, StatusCodes.Status403Forbidden, rolePolicy.Error!);
                 return;
             }
         }

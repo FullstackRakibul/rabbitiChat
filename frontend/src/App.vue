@@ -11,9 +11,13 @@ import {
   listModels, listConversations, getConversation,
   deleteConversation, streamChat,
   uploadDocument, listDocuments, deleteDocument, workspaceChat,
+  listBuyerProfiles, extractDocument,
   login, getToken, getUsername, clearSession, AuthError,
-  listContextSources, myTabs, listModelsWithPolicy
+  listContextSources, myTabs
 } from './services/index.js'
+import {
+  createBuyerProfile, updateBuyerProfile, deleteBuyerProfile, previewPrompt,
+} from './services/po-studio.service.js'
 import { environment } from './environments/environment.js'
 import { useTheme } from '@/composables/useTheme'
 import { useShortcuts } from '@/composables/useShortcuts'
@@ -24,11 +28,9 @@ import ChatSidebar from '@/components/sidebars/ChatSidebar.vue'
 import WorkspaceSidebar from '@/components/sidebars/WorkspaceSidebar.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import NewChatDialog from '@/components/NewChatDialog.vue'
-import ExtractionReview from '@/components/ExtractionReview.vue'
 import DashboardTab from '@/components/tabs/DashboardTab.vue'
 import ChatTab from '@/components/tabs/ChatTab.vue'
-import WorkspaceTab from '@/components/tabs/WorkspaceTab.vue'
-import DocumentsTab from '@/components/tabs/DocumentsTab.vue'
+import PoStudioTab from '@/components/tabs/PoStudioTab.vue'
 import TodoTab from '@/components/tabs/TodoTab.vue'
 import SourcesTab from '@/components/tabs/SourcesTab.vue'
 import TableTab from '@/components/tabs/TableTab.vue'
@@ -109,9 +111,6 @@ function handleAuthError(e) {
 // ---- Chat state ----
 const models = ref([])          // names, for the pickers
 const modelRecords = ref([])    // full records, for capabilities + context length
-// The server says whether this role is held to a single model. Carried to every
-// picker so none of them has to decide, or guess, for itself.
-const modelLocked = ref(false)
 const model = ref('')
 // Which source answers the next send. The picker owns the choice (and persists
 // it); App just carries it to the API.
@@ -146,9 +145,7 @@ async function refreshModels() {
   try {
     // The full records, not just names: the composer gates Think and Search on
     // each model's declared capabilities, and shows its real context window.
-    const served = await listModelsWithPolicy()
-    modelRecords.value = served.models
-    modelLocked.value = served.locked
+    modelRecords.value = await listModels()
     models.value = modelRecords.value.map((m) => m.name)
 
     if (models.value.length) {
@@ -363,6 +360,7 @@ async function bootstrap() {
     refreshModels(),
     refreshConversations(),
     may('docs') || may('workspace') ? refreshDocuments() : Promise.resolve(),
+    may('docs') ? refreshBuyerProfiles() : Promise.resolve(),
     may('sources') ? refreshSources() : Promise.resolve(),
   ])
 }
@@ -413,8 +411,10 @@ const isPublicDocs = computed(() => route.name === 'oddity-docs')
 const ALL_TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Work' },
   { id: 'chat', label: 'Chat', icon: MessageSquare, group: 'Work' },
-  { id: 'workspace', label: 'Workspace', icon: Brain, group: 'Work' },
-  { id: 'docs', label: 'Documents', icon: FileText, group: 'Work' },
+  // One tab for what used to be Workspace and Documents. The key stays
+  // `workspace`; the `docs` key still gates /api/documents and /api/buyer-profiles
+  // on the server, so existing grants keep working unchanged.
+  { id: 'workspace', label: 'PO Studio', icon: Brain, group: 'Work' },
   { id: 'todo', label: 'To-Do', icon: ListTodo, group: 'Work' },
   { id: 'search', label: 'Search', icon: Globe, group: 'Work' },
   { id: 'jsonto', label: 'JSON to ...', icon: Table, group: 'Tools' },
@@ -499,43 +499,15 @@ function askFromSearch(query) {
 // To-Do — todorabbit owns its own server-backed state; nothing to wire here.
 
 // ---- Documents (PO ingestion) ----
+// The upload form that used to live here went with DocumentsTab: PO Studio's
+// Library owns the drop zone now, and its pipeline is `studioRun` below.
 const documents = ref([])
-const docFile = ref(null)          // File chosen in the picker
-const docBuyer = ref('')
-const docUploading = ref(false)
-const docError = ref('')
-const docNotice = ref('')
-const docsTab = ref(null)          // child component, for clearing its file input
-
-function onDocPicked(file) {
-  docFile.value = file
-  docError.value = ''
-  docNotice.value = ''
-}
 
 async function refreshDocuments() {
   try {
     documents.value = await listDocuments()
   } catch (e) {
-    if (!handleAuthError(e)) docError.value = e.message
-  }
-}
-
-async function doUpload() {
-  if (docUploading.value || !docFile.value) return
-  docError.value = ''
-  docNotice.value = ''
-  docUploading.value = true
-  try {
-    const res = await uploadDocument(docFile.value, docBuyer.value.trim())
-    docNotice.value = `“${res.fileName}” ingested — ${res.chunks} chunks indexed.`
-    docFile.value = null
-    docsTab.value?.reset()
-    await refreshDocuments()
-  } catch (e) {
-    if (!handleAuthError(e)) docError.value = e.message
-  } finally {
-    docUploading.value = false
+    if (!handleAuthError(e)) wsError.value = e.message
   }
 }
 
@@ -543,30 +515,50 @@ async function removeDocument(id) {
   if (!confirm('Delete this document and its indexed chunks?')) return
   try {
     await deleteDocument(id)
+    if (reviewDoc.value?.id === id) reviewDoc.value = null
     await refreshDocuments()
   } catch (e) {
-    if (!handleAuthError(e)) docError.value = e.message
+    if (!handleAuthError(e)) wsError.value = e.message
   }
 }
 
-// ---- Extraction review overlay (the human-in-the-loop gate) ----
+// ---- Extraction review (the human-in-the-loop gate) ----
+// Not an overlay any more: it is PO Studio's Review section.
 const reviewDoc = ref(null)          // { id, fileName } | null
 
-function openReview(doc) {
-  reviewDoc.value = { id: doc.id, fileName: doc.fileName }
-}
-function extractDoc(id) {
-  const d = documents.value.find(x => x.id === id)
-  if (d) openReview({ id: d.id, fileName: d.fileName })
-}
 function onReviewConfirmed() {
   refreshDocuments()
 }
 
-// ---- Workspace (agentic PO chat) ----
-// Buyer profiles are local for now; they become backend entities in the next module.
-const buyerProfiles = ['Kohls', 'Walmart', 'Target', 'H&M', 'Generic']
-const wsBuyer = ref('Kohls')
+// ---- PO Studio ----
+// Buyer profiles come from the server (`/api/buyer-profiles`), which has had a
+// BuyerProfiles table with full CRUD all along. The list used to be five names
+// hard-coded here, so adding a buyer meant a release and the dropdown could
+// disagree with the profiles the extraction pipeline actually routes by.
+const buyerProfiles = ref([])
+const profileSaving = ref(false)
+const profileError = ref('')
+
+/** Which PO Studio section is showing — the hash of /workspace#<section>. */
+const studioSection = ref('library')
+
+/**
+ * The install default shown on a profile that names no model of its own. The
+ * server decides it (Extraction:DefaultModel); the preview endpoint reports it,
+ * so the label is whatever the server would really use rather than a guess.
+ */
+const defaultExtractionModel = ref('')
+
+/** Stand-in document text for the prompt preview, so it needs no real upload. */
+const SAMPLE_PO_TEXT = [
+  '--- page 1 ---',
+  'PURCHASE ORDER',
+  'Order #: SAMPLE-1   PO Type: PREPACK',
+  'Style  UPC  Unit Price  Packs',
+].join('\n')
+
+/** '' means auto-detect; otherwise the profile id, as a string for the Select. */
+const wsBuyer = ref('')
 const wsFile = ref(null)
 const wsDoc = ref(null)            // last ingested document for this session
 const wsUploading = ref(false)
@@ -574,7 +566,6 @@ const wsMessages = ref([])         // { role: 'user'|'assistant'|'event', conten
 const wsInput = ref('')
 const wsBusy = ref(false)
 const wsError = ref('')
-const wsExtracting = ref(false)
 const wsTab = ref(null)            // child component, for clearing its file input
 const wsScroller = ref(null)
 let wsController = null
@@ -652,14 +643,6 @@ async function wsSend() {
   }
 }
 
-// Extraction opens the review overlay: detect → parse → validate, then a human
-// confirms (or corrects) before anything is accepted.
-function wsExtract() {
-  if (!wsDoc.value) return
-  wsEvent(`Opened extraction review for “${wsDoc.value.fileName}”.`, 'ingest')
-  openReview(wsDoc.value)
-}
-
 // Pin an already-ingested document and restore its saved thread (chat + extractions).
 async function wsOpenDocument(d) {
   wsController?.abort()
@@ -691,157 +674,181 @@ function wsNewChat() {
   wsTab.value?.reset()
 }
 
-// ---- Connected sources ----
-// Server-backed: the same ContextSource rows the Sources tab edits and the
-// backend prepends to the system prompt. `activeSourceIds` is per-conversation.
-const sources = ref([])
-const activeSourceIds = ref([])
-const sourceSearch = ref('')
-const sourcesTab = ref(null)
+// ---- The upload pipeline, as the six steps the stepper shows ----
+// Each step is a real stage with its own failure: a file that will not upload, a
+// PDF whose text cannot be read, a buyer that matched nothing, a model that
+// returned no JSON, a document longer than the context window. A spinner would
+// hide which one happened; the stepper stops at it and says so.
+const progress = ref({ current: '', failedStep: '', error: '', done: false })
 
-const filteredSources = computed(() => {
-  const q = sourceSearch.value.trim().toLowerCase()
-  return q ? sources.value.filter(s => s.name.toLowerCase().includes(q)) : sources.value
-})
-const activeSources = computed(() =>
-  sources.value.filter(s => activeSourceIds.value.includes(s.id)))
-const activeSourcesCount = computed(() => activeSources.value.length)
+function step(key) {
+  progress.value = { current: key, failedStep: '', error: '', done: false }
+}
+function stepFailed(key, message) {
+  progress.value = { current: key, failedStep: key, error: message, done: false }
+}
 
-async function refreshSources() {
+async function refreshBuyerProfiles() {
   try {
-    sources.value = await listContextSources('source')
+    buyerProfiles.value = await listBuyerProfiles()
 
-    // A source deleted elsewhere must not linger in this chat's active set.
-    const live = new Set(sources.value.map((s) => s.id))
-    activeSourceIds.value = activeSourceIds.value.filter((id) => live.has(id))
-
-    // An untouched new chat follows each source's own default switch.
-    if (currentId.value == null && !activeSourceIds.value.length) {
-      activeSourceIds.value = sources.value.filter((s) => s.isActive).map((s) => s.id)
+    // Ask the server which model it would use when a profile names none, so the
+    // Profiles screen's "install default · …" label cannot drift from reality.
+    if (!defaultExtractionModel.value) {
+      try {
+        const preview = await previewPrompt({ documentText: 'x' })
+        defaultExtractionModel.value = preview.model ?? ''
+      } catch { /* the label just stays generic */ }
     }
   } catch (e) {
-    if (!handleAuthError(e)) { /* keep whatever list we have */ }
+    if (!handleAuthError(e)) profileError.value = e.message
   }
 }
 
-/** The Sources tab saved something — take its list rather than re-fetching. */
-function onSourcesChanged(list) {
-  sources.value = list
-  const live = new Set(list.map((s) => s.id))
-  activeSourceIds.value = activeSourceIds.value.filter((id) => live.has(id))
-}
+/**
+ * Upload → read text → detect → extract → check → ready.
+ *
+ * The server does the first two in one call (`/api/documents` ingests and
+ * indexes) and the next three in another (`/api/documents/{id}/extract`), so the
+ * steps are reported around those two calls rather than polled.
+ */
+async function studioRun() {
+  if (wsUploading.value || !wsFile.value) return
+  wsError.value = ''
+  wsUploading.value = true
 
-// Chat creation flow: pick context + sources, then start a fresh chat.
-const showNewChat = ref(false)
-function openNewChat() {
-  // Reset to each source's own default before the dialog shows them, so the
-  // checkboxes describe the chat about to be started, not the previous one.
-  newChat()
-  refreshSources()
-  showNewChat.value = true
-  closeSidebar()
-}
-function startNewChat() {
-  // newChat() already ran when the dialog opened; re-running it would discard
-  // the source choices just made in it.
-  currentId.value = null
-  messages.value = []
-  error.value = ''
-  showNewChat.value = false
-  activeTab.value = 'chat'
-}
+  const profileId = wsBuyer.value ? Number(wsBuyer.value) : undefined
+  const buyerName = buyerProfiles.value.find((p) => p.id === profileId)?.name
 
-// ─────────────────────────────────────────────────────────────
-// SHELL: command palette + keyboard shortcuts
-// ─────────────────────────────────────────────────────────────
+  try {
+    step('upload')
+    let res
+    try {
+      res = await uploadDocument(wsFile.value, buyerName ?? '')
+    } catch (e) {
+      if (handleAuthError(e)) return
+      stepFailed('upload', e.message)
+      return
+    }
 
-const paletteOpen = ref(false)
+    // Ingestion extracts the text and indexes it; no chunks means no text, which
+    // is a scanned PDF needing OCR — not in this build, so say that plainly.
+    step('text')
+    if (!res.chunks) {
+      stepFailed('text', 'No text could be read from this file. A scanned PDF needs OCR, which this build does not do.')
+      return
+    }
 
-/** Sidebar document pick — reuses the tab's own restore-the-thread flow. */
-function wsPickDocument(doc) {
-  wsOpenDocument(doc)
-  closeSidebar()
-}
+    wsDoc.value = res
+    wsFile.value = null
+    wsTab.value?.reset()
+    await refreshDocuments()
 
-/** Cmd/Ctrl+B — only meaningful where a sidebar exists. */
-function toggleSidebar() {
-  if (!tabHasSidebar.value) return          // no-op on full-bleed tabs
-  if (window.matchMedia('(max-width: 767px)').matches) {
-    mobileSidebarOpen.value = !mobileSidebarOpen.value
-  } else {
-    sidebarCollapsed.value = !sidebarCollapsed.value
+    step('detect')
+    step('extract')
+    let outcome
+    try {
+      outcome = await extractDocument(res.id, {
+        model: model.value || undefined,
+        buyerProfileId: profileId,
+      })
+    } catch (e) {
+      if (handleAuthError(e)) return
+      stepFailed('extract', e.message)
+      return
+    }
+
+    if (outcome.status === 'failed') {
+      stepFailed('extract', outcome.error ?? 'The model did not return usable JSON.')
+      return
+    }
+
+    step('check')
+    progress.value = { current: 'ready', failedStep: '', error: '', done: true }
+    reviewDoc.value = { id: res.id, fileName: res.fileName }
+    studioSection.value = 'review'
+  } finally {
+    wsUploading.value = false
   }
 }
 
-/** Cmd/Ctrl+Enter — the primary action of whichever tab is showing. */
-function primaryAction() {
-  if (activeTab.value === 'chat') send()
-  else if (activeTab.value === 'workspace') wsSend()
-  else if (activeTab.value === 'dashboard') openNewChat()
+/** Retry from the step that failed — the file is still chosen, so re-run it. */
+function studioRetry() {
+  progress.value = { current: '', failedStep: '', error: '', done: false }
+  if (wsFile.value) { studioRun(); return }
+  // The upload itself succeeded; only the extraction needs another go.
+  if (reviewDoc.value || wsDoc.value) studioSection.value = 'review'
 }
 
-function goTab(id) {
-  // Keyboard jumps (g-then-c, and friends) bypass the launcher. The router guard
-  // would redirect a forbidden id anyway; refusing here as well means the URL
-  // never changes at all, so the back button doesn't collect entries the user
-  // never actually visited.
-  if (allowedTabs.value && !allowedTabs.value.includes(id)) return
-  activeTab.value = id
-  closeSidebar()
+function studioReview(d) {
+  reviewDoc.value = { id: d.id, fileName: d.fileName }
+  studioSection.value = 'review'
 }
 
-// Palette rows. Tab navigation first, then the actions worth reaching by name.
-//
-// `tabs` is a computed, so script scope needs .value — the template gets auto
-// unwrapping, script scope does not. Iterating the permission-filtered list is
-// deliberate: the palette offers only tabs this user may actually open, which
-// matches the guard in goTab().
-const commands = computed(() => [
-  ...tabs.value.map(t => ({
-    id: `tab:${t.id}`,
-    label: t.label,
-    group: 'Go to',
-    icon: t.icon,
-    keys: { chat: 'g then c', workspace: 'g then w', docs: 'g then d', todo: 'g then t' }[t.id],
-    run: () => goTab(t.id),
-  })),
-  {
-    // The palette closes itself before running a row; opening the launcher a
-    // frame later keeps the dialog's focus return from closing it again.
-    id: 'action:launcher', label: 'Open module launcher', group: 'Actions', icon: Grip,
-    keys: 'g then m', run: () => requestAnimationFrame(() => shell.value?.openLauncher()),
-  },
-  {
-    id: 'action:new-chat', label: 'New chat', group: 'Actions', icon: Plus,
-    run: () => openNewChat(),
-  },
-  {
-    id: 'action:upload', label: 'Upload a purchase order', group: 'Actions', icon: Upload,
-    run: () => goTab('workspace'),
-  },
-  {
-    id: 'action:new-note', label: 'New note', group: 'Actions', icon: Plus,
-    keys: 'mod + N',
-    run: () => {
-      goTab('notes');
-      setTimeout(() => {
-        notesTabRef.value?.newNote();
-      }, 100);
-    },
-  },
-  {
-    id: 'action:sidebar', label: 'Toggle sidebar', group: 'Actions', icon: PanelLeft,
-    keys: 'mod + B', run: () => toggleSidebar(),
-  },
-  {
-    id: 'action:theme',
-    label: theme.value === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
-    group: 'Actions', icon: Settings, run: () => toggleTheme(),
-  },
-])
+function studioChat(d) {
+  wsPickDocument(d)
+  studioSection.value = 'review'
+}
 
-function runCommand(cmd) {
-  cmd.run?.()
+// ---- Buyer profile editing ----
+
+async function saveProfile(draft) {
+  profileSaving.value = true
+  profileError.value = ''
+  try {
+    await updateBuyerProfile(draft.id, draft)
+    await refreshBuyerProfiles()
+  } catch (e) {
+    // A worked example that is unconfirmed or held out is refused with the
+    // reason — show the server's message rather than a generic failure.
+    if (!handleAuthError(e)) profileError.value = e.message
+  } finally {
+    profileSaving.value = false
+  }
+}
+
+async function addProfile(draft) {
+  profileSaving.value = true
+  profileError.value = ''
+  try {
+    await createBuyerProfile(draft)
+    await refreshBuyerProfiles()
+  } catch (e) {
+    if (!handleAuthError(e)) profileError.value = e.message
+  } finally {
+    profileSaving.value = false
+  }
+}
+
+async function removeProfile(p) {
+  if (!confirm(`Delete the buyer profile “${p.name}”?`)) return
+  profileError.value = ''
+  try {
+    await deleteBuyerProfile(p.id)
+    await refreshBuyerProfiles()
+  } catch (e) {
+    if (!handleAuthError(e)) profileError.value = e.message
+  }
+}
+
+/**
+ * The prompt this profile's current version would actually produce, kept in
+ * state so the Profiles screen can show it rather than an alert box. Includes
+ * the budget's decisions: how many tokens each part took, and what was dropped.
+ */
+const promptPreview = ref(null)
+
+async function showPromptPreview(p) {
+  profileError.value = ''
+  promptPreview.value = null
+  try {
+    promptPreview.value = await previewPrompt({
+      buyer: p.name,
+      documentText: SAMPLE_PO_TEXT,
+    })
+  } catch (e) {
+    if (!handleAuthError(e)) profileError.value = e.message
+  }
 }
 
 useShortcuts({
@@ -895,7 +902,7 @@ const notesTabRef = ref(null)
 
         <WorkspaceSidebar v-show="activeTab === 'workspace'" :documents="documents" :active-doc="wsDoc"
           :messages="wsMessages" :busy="wsBusy" @new-session="wsNewChat" @open-document="wsPickDocument"
-          @go-documents="activeTab = 'docs'; closeSidebar()" />
+          @go-documents="studioSection = 'library'; closeSidebar()" />
       </template>
 
       <!-- Panels -->
@@ -912,18 +919,22 @@ const notesTabRef = ref(null)
           @manage-sources="goTab('sources')" @scroller="el => scroller = el" />
       </TabsContent>
 
+      <!-- PO Studio: what used to be the Workspace and Documents tabs. -->
       <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <WorkspaceTab ref="wsTab" v-model:buyer="wsBuyer" v-model:model="model" v-model:input="wsInput"
-          :buyer-profiles="buyerProfiles" :models="models" :model-locked="modelLocked" :doc="wsDoc" :file="wsFile" :messages="wsMessages"
-          :busy="wsBusy" :uploading="wsUploading" :extracting="wsExtracting" :error="wsError"
-          @file-picked="onWsFilePicked" @upload="wsUpload" @extract="wsExtract" @send="wsSend" @new-chat="wsNewChat"
-          @scroller="el => wsScroller = el" />
-      </TabsContent>
-
-      <TabsContent value="docs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <DocumentsTab ref="docsTab" v-model:buyer="docBuyer" :documents="documents" :file="docFile"
-          :uploading="docUploading" :error="docError" :notice="docNotice" @file-picked="onDocPicked"
-          @upload="doUpload" @delete="removeDocument" @review="extractDoc" />
+        <PoStudioTab ref="wsTab" v-model:section="studioSection" v-model:buyer="wsBuyer"
+          v-model:chat-input="wsInput"
+          :can-docs="allowedTabs?.includes('docs') ?? false"
+          :can-workspace="allowedTabs?.includes('workspace') ?? false"
+          :documents="documents" :profiles="buyerProfiles" :file="wsFile" :progress="progress"
+          :busy="wsUploading" :library-error="wsError"
+          :review-doc="reviewDoc" :model="model" :chat-messages="wsMessages" :chat-busy="wsBusy"
+          :models="models" :default-model="defaultExtractionModel"
+          :profile-saving="profileSaving" :profile-error="profileError" :prompt-preview="promptPreview"
+          @file-picked="onWsFilePicked" @upload="studioRun" @retry="studioRetry"
+          @delete="removeDocument" @review="studioReview" @chat="studioChat"
+          @send="wsSend" @confirmed="onReviewConfirmed" @close-review="studioSection = 'library'"
+          @profile-save="saveProfile" @profile-create="addProfile"
+          @profile-delete="removeProfile" @profile-preview="showPromptPreview" />
       </TabsContent>
 
       <TabsContent value="todo" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
@@ -988,9 +999,6 @@ const notesTabRef = ref(null)
     <NewChatDialog v-model:open="showNewChat" v-model:active-source-ids="activeSourceIds"
       :sources="sources" @start="startNewChat" />
 
-    <!-- Human-in-the-loop extraction review -->
-    <ExtractionReview v-if="reviewDoc" :doc="reviewDoc" :model="model"
-      @close="reviewDoc = null" @confirmed="onReviewConfirmed" />
   </Tabs>
   </template>
 </template>

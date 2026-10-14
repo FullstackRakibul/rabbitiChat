@@ -1,4 +1,4 @@
-﻿// RBAC — wire contracts for the admin surface.
+// RBAC — wire contracts for the admin surface.
 //
 // Entities never cross the boundary: no secret hash, salt or token appears in
 // any shape here, so an admin listing users cannot leak credential material.
@@ -54,18 +54,30 @@ public record SetRoleInput(string? Role);
 /// </summary>
 public record SetTabsInput(List<string>? TabKeys);
 
-// ---- Model policy ----
+/// <summary>
+/// One role's model policy, as the Access screen's "Models by role" shows it.
+/// An empty <paramref name="AllowedModels"/> means every local model.
+/// </summary>
+/// <param name="CanRestrict">
+/// False for SystemAdmin, whose row is read-only: an administrator locked out of
+/// every model could not undo it through a UI that needs one.
+/// </param>
+/// <param name="Stale">
+/// Allowed models that are no longer installed locally. They stay in
+/// <paramref name="AllowedModels"/> — hiding them would make the editor post
+/// them back unchanged — but the UI marks them and an admin can untick them.
+/// </param>
+public record RoleModelPolicyDto(
+    string Role,
+    string Label,
+    List<string> AllowedModels,
+    string DefaultModel,
+    bool CanRestrict,
+    DateTime? UpdatedAtUtc,
+    List<string> Stale);
 
-/// <summary>One role's model policy, as the Access screen shows it.</summary>
-/// <param name="AllowedModels">Empty means every local model — no restriction.</param>
-/// <param name="Locked">True when the role is held to a single model.</param>
-/// <param name="Editable">False for SystemAdmin, which can never be restricted.</param>
-public record ModelPolicyDto(
-    string Role, List<string> AllowedModels, string DefaultModel,
-    bool Locked, bool Editable, DateTime UpdatedAtUtc);
-
-/// <summary>Every role's policy plus the installed models to choose from.</summary>
-public record ModelPolicyPageDto(List<ModelPolicyDto> Policies, List<string> InstalledModels);
-
-/// <summary>Replaces one role's policy. An empty list clears the restriction.</summary>
-public record SetModelPolicyInput(List<string>? AllowedModels, string? DefaultModel);
+/// <summary>
+/// A saved policy. An empty list clears the restriction, and then the default is
+/// cleared too — the caller's own fallback decides, as it always has.
+/// </summary>
+public record RoleModelPolicyInput(List<string>? AllowedModels, string? DefaultModel);
