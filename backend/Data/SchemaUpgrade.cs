@@ -469,7 +469,11 @@ public static class SchemaUpgrade
     /// </summary>
     private static void EnsureRoleModelPolicyTable(AppDbContext db)
     {
-        if (TableExists(db, "RoleModelPolicies")) return;
+        if (TableExists(db, "RoleModelPolicies"))
+        {
+            RelaxRoleModelPolicyUpdatedBy(db);
+            return;
+        }
 
         db.Database.ExecuteSqlRaw(@"
             CREATE TABLE ""RoleModelPolicies"" (
@@ -479,6 +483,38 @@ public static class SchemaUpgrade
                 ""UpdatedAtUtc""    TEXT NOT NULL,
                 ""UpdatedByUserId"" INTEGER NULL
             );");
+    }
+
+    /// <summary>
+    /// A RoleModelPolicies table made by the earlier local model-policy code
+    /// declares UpdatedByUserId NOT NULL, with 0 for a seeded row. The model now
+    /// says NULL for "written by the seeder", so seeding a role added later (the
+    /// HrAssistant row) failed on such a database and the API did not start.
+    ///
+    /// SQLite cannot relax a NOT NULL in place, so the table is copied once, while
+    /// the column is still NOT NULL. Every row is kept — an administrator's edits
+    /// included — and the old seeder marker 0 becomes NULL.
+    /// </summary>
+    private static void RelaxRoleModelPolicyUpdatedBy(AppDbContext db)
+    {
+        if (!ColumnIsNotNull(db, "RoleModelPolicies", "UpdatedByUserId")) return;
+
+        using var tx = db.Database.BeginTransaction();
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE ""RoleModelPolicies_new"" (
+                ""Role""            TEXT NOT NULL CONSTRAINT ""PK_RoleModelPolicies"" PRIMARY KEY,
+                ""AllowedModels""   TEXT NOT NULL DEFAULT '',
+                ""DefaultModel""    TEXT NOT NULL DEFAULT '',
+                ""UpdatedAtUtc""    TEXT NOT NULL,
+                ""UpdatedByUserId"" INTEGER NULL
+            );");
+        db.Database.ExecuteSqlRaw(@"
+            INSERT INTO ""RoleModelPolicies_new"" (""Role"", ""AllowedModels"", ""DefaultModel"", ""UpdatedAtUtc"", ""UpdatedByUserId"")
+            SELECT ""Role"", ""AllowedModels"", ""DefaultModel"", ""UpdatedAtUtc"", NULLIF(""UpdatedByUserId"", 0)
+            FROM ""RoleModelPolicies"";");
+        db.Database.ExecuteSqlRaw(@"DROP TABLE ""RoleModelPolicies"";");
+        db.Database.ExecuteSqlRaw(@"ALTER TABLE ""RoleModelPolicies_new"" RENAME TO ""RoleModelPolicies"";");
+        tx.Commit();
     }
 
     private static void EnsureExtractionTables(AppDbContext db)

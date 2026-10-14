@@ -151,6 +151,42 @@ check('G1.1', 1, 'fake', 'without the variable the step is skipped with one log 
   } finally { await api.stop() }
 })
 
+check('G1.1', 1, 'fake', 'a database from the earlier model-policy build (UpdatedByUserId NOT NULL) starts, gains its HrAssistant row, keeps its edits', async () => {
+  // Reported on KAKAROT's own database: RoleModelPolicies created by the local
+  // model-policy code (3a08328) declares UpdatedByUserId NOT NULL, so seeding
+  // the new role's row (UpdatedByUserId NULL) failed and the API did not start.
+  const runDir = fs.mkdtempSync(path.join(EVAL_ROOT, 'legacy-policy-'))
+  let api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: ctx.env })
+  await api.stop()
+
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(api.dbPath)
+  db.exec(`
+    CREATE TABLE "RoleModelPolicies_legacy" (
+      "Role" TEXT NOT NULL CONSTRAINT "PK_RoleModelPolicies" PRIMARY KEY,
+      "AllowedModels" TEXT NOT NULL, "DefaultModel" TEXT NOT NULL,
+      "UpdatedAtUtc" TEXT NOT NULL, "UpdatedByUserId" INTEGER NOT NULL);
+    INSERT INTO "RoleModelPolicies_legacy" SELECT "Role", "AllowedModels", "DefaultModel", "UpdatedAtUtc", COALESCE("UpdatedByUserId", 0)
+      FROM "RoleModelPolicies" WHERE "Role" <> 'HrAssistant';
+    UPDATE "RoleModelPolicies_legacy" SET "AllowedModels" = 'qwen3.8-27b-q3', "DefaultModel" = 'qwen3.8-27b-q3', "UpdatedByUserId" = 3
+      WHERE "Role" = 'System';
+    DROP TABLE "RoleModelPolicies";
+    ALTER TABLE "RoleModelPolicies_legacy" RENAME TO "RoleModelPolicies";`)
+  db.close()
+
+  let started = true, error = ''
+  try { api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: ctx.env }) } catch (e) { started = false; error = e.message.split('\n')[0] }
+  try {
+    const rows = started ? await sqlite('SELECT Role, AllowedModels, UpdatedByUserId FROM RoleModelPolicies ORDER BY Role', api.dbPath) : []
+    const nullable = started ? (await sqlite(`PRAGMA table_info("RoleModelPolicies")`, api.dbPath)).find((c) => c.name === 'UpdatedByUserId')?.notnull === 0 : false
+    const hr = rows.find((r) => r.Role === 'HrAssistant'), sys = rows.find((r) => r.Role === 'System')
+    const failed = started && /Failed executing DbCommand/.test(fs.readFileSync(api.logPath, 'utf8'))
+    return ok(started && !failed && nullable && hr?.AllowedModels === HR_ASSISTANT_MODEL && sys?.AllowedModels === 'qwen3.8-27b-q3' && sys?.UpdatedByUserId === 3,
+      `started ${started}${error ? ` (${error})` : ''}; failed command in log ${failed}; UpdatedByUserId nullable ${nullable}; `
+      + `HrAssistant → ${hr?.AllowedModels}; System's edit kept → ${sys?.AllowedModels} by ${sys?.UpdatedByUserId}; ${rows.length} rows`)
+  } finally { if (started) await api.stop() }
+})
+
 check('G1.1', 1, 'fake', 'restarting does not create a second hr-assistant', async () => {
   await restartApi()
   const rows = await sqlite(`SELECT Role FROM Users WHERE Username = '${HR_ASSISTANT}'`)
