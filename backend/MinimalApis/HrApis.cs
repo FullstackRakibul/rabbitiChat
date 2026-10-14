@@ -13,9 +13,9 @@
 //   GET    /api/hr/library/index-stats     chunks in memory / database / keyword index (SystemAdmin)
 // Ask
 //   GET    /api/hr/search?q=…&items=…      instant hybrid search, no model
-//   GET    /api/hr/retrieve?q=…            Phase 1's retrieval shape, same search
+//   GET    /api/hr/retrieve?q=…            the excerpts a question would be sent with
 //   POST   /api/hr/chat                    the HR chat, streamed (HrChatEndpoint)
-//   POST   /api/hr/calculate               the calculate tool on its own
+//   POST   /api/hr/calculate               the formula evaluator on its own
 //   GET    /api/hr/conversations           this user's HR conversations
 //   GET    /api/hr/conversations/{id}      one, with each answer's receipt
 //   DELETE /api/hr/conversations/{id}
@@ -188,12 +188,12 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(new { hits, tookMs = clock.ElapsedMilliseconds });
             });
 
-            app.MapGet("/hr/retrieve", async (string? q, int? top, HttpContext ctx, AppDbContext db, HrLibrary library, CancellationToken ct) =>
+            app.MapGet("/hr/retrieve", async (string? q, HttpContext ctx, AppDbContext db, HrLibrary library, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
                 if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { error = "q is required." });
-                return Results.Ok(new { hits = await library.RetrieveAsync(q, Math.Clamp(top ?? 8, 1, 20), ct) });
+                return Results.Ok(new { hits = await library.RetrieveAsync(q, ct) });
             });
 
             app.MapPost("/hr/chat", HrChatEndpoint.HandleAsync);

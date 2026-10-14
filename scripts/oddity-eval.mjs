@@ -88,7 +88,7 @@ export async function startFakeOllama() {
   const requests = []
   // Opt-in hooks for suites that need a scripted model (scripts/hr-eval.mjs).
   // Unset, the fake behaves exactly as it always has.
-  let chatScript = null      // (body) => null | { words: string[], gap?: ms } | { toolCalls: [{ name, arguments }] }
+  let chatScript = null      // (body) => null | { words: string[], gap?: ms } | { toolCalls: [{ name, arguments }], words?: string[] }
   let embedFailure = false   // true: embedding calls answer 500
 
   const server = http.createServer(async (req, res) => {
@@ -179,6 +179,8 @@ export async function startFakeOllama() {
         const scripted = isChat && chatScript ? chatScript(body) : null
         if (scripted?.toolCalls) {
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
+          // Text before the call, as a model writes a draft and then asks for a tool.
+          for (const w of scripted.words ?? []) write(JSON.stringify(piece(w)) + '\n')
           write(JSON.stringify({
             model, created_at: '2026-01-01T00:00:00Z', done: false,
             message: { role: 'assistant', content: '', tool_calls: scripted.toolCalls.map((t) => ({ function: { name: t.name, arguments: t.arguments } })) },

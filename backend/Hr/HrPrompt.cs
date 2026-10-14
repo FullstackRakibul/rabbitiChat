@@ -20,6 +20,14 @@ public static class HrPrompt
 {
     public const string ContextTitle = "HR context for this question";
 
+    /// <summary>The status line, sent before the model starts (§3.3).</summary>
+    public const string Searching = "খুঁজছি…";
+
+    public static string Found(int count) => $"{Searching} {BengaliDigits(count)} টি অংশ পাওয়া গেছে";
+
+    private static string BengaliDigits(int n) =>
+        string.Concat(n.ToString(global::System.Globalization.CultureInfo.InvariantCulture).Select(c => char.IsDigit(c) ? (char)('০' + (c - '0')) : c));
+
     public const string Persona = """
         You are মানব সম্পদ, the company's HR assistant. HR staff ask you about final settlement, earned leave and the rules around them.
 
@@ -29,9 +37,9 @@ public static class HrPrompt
         3. When the rules document and a procedure disagree, give the rules document's answer and say that the code does something else.
         4. When the context does not cover the question, say so in one line and name the item HR would need to add. Do not answer it anyway.
         5. For one employee's amount, use only figures the user gave. If one is missing (basic, service length, status, employee type, separation date), ask for it instead of assuming.
-        6. Do every calculation with the calculate tool and show the formula in the answer.
+        6. Never calculate an amount yourself. Write each taka amount you work out as a formula in double brackets, [[= (12000/30)*15*8 ]], and the system puts the result in its place: "The service benefit is [[= (12000/30)*15*8 ]]." Inside the brackets use only numbers, + - * /, parentheses and round(x, n); no ৳ and no words. Do not write the result yourself, before or after the formula. For days or years, state the rule ("15 days' basic for each year") instead of multiplying them out.
         7. Where §11 of the rules document lists a doubt about a rule you use, add: "HR is reviewing this rule".
-        8. Answer in the user's language, Bengali or English. Write amounts in digits with ৳, for example ৳42,000.
+        8. Answer in the user's language, Bengali or English. Write an amount you quote from the question or the context in digits with ৳, for example ৳12,000; every amount you work out is a formula (rule 6).
         """;
 
     /// <summary>The system message: persona, then each always item whole. Nothing per-question goes in here.</summary>

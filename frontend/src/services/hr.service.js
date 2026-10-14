@@ -83,7 +83,7 @@ export function listHrConversations() {
   return http.get('/hr/conversations')
 }
 
-/** One HR conversation: { id, title, messages: [{ role, content, meta: { context, calculations, unverified } }] }. */
+/** One HR conversation: { id, title, messages: [{ role, content, meta: { context, formulas, unverified, unverifiedFormulas } }] }. */
 export function getHrConversation(id) {
   return http.get(`/hr/conversations/${id}`)
 }
@@ -93,10 +93,12 @@ export function deleteHrConversation(id) {
 }
 
 /**
- * Ask the HR assistant; the answer streams. Frames: `context` (what was sent),
- * `content`, `tool` (calculate), `error`, `unverified` (amounts the number check
- * could not trace), `done`. `items` is the "Search in" scope; empty means the
- * whole library. Resolves with the conversation id.
+ * Ask the HR assistant; the answer streams. Frames: `status` (the line shown until
+ * the first word), `context` (what was sent), `content`, `formula` (where a
+ * calculated amount sits in the answer, and its formula), `error`, `unverified`
+ * (amounts the number check could not trace, and formulas that could not be
+ * calculated), `done`. `items` is the "Search in" scope; empty means the whole
+ * library. Resolves with the conversation id.
  */
 export async function streamHrChat({ conversationId, message, items = [], model }, handlers, signal) {
   let buffer = ''
@@ -106,11 +108,12 @@ export async function streamHrChat({ conversationId, message, items = [], model 
     let frame
     try { frame = JSON.parse(trimmed) } catch { return }
     switch (frame.type) {
+      case 'status': handlers.onStatus?.(frame.text ?? ''); break
       case 'context': handlers.onContext?.(frame); break
       case 'content': handlers.onContent?.(frame.text ?? ''); break
-      case 'tool': handlers.onTool?.(frame); break
+      case 'formula': handlers.onFormula?.(frame); break
       case 'error': handlers.onError?.(frame.message ?? 'The model failed.'); break
-      case 'unverified': handlers.onUnverified?.(frame.amounts ?? []); break
+      case 'unverified': handlers.onUnverified?.(frame.amounts ?? [], frame.formulas ?? []); break
     }
   }
   const res = await http.stream('/hr/chat', { conversationId, message, items, model }, (chunk) => {

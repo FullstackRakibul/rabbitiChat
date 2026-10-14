@@ -422,6 +422,9 @@ using (var scope = app.Services.CreateScope())
 			.SeedAsync(hrSeedDir, hrSeedOwner).GetAwaiter().GetResult();
 		if (added > 0) app.Logger.LogInformation("HR library: seeded {Count} item(s) from {Dir}.", added, hrSeedDir);
 	}
+	// Items split by an older splitter are re-split once; their embeddings follow in the background.
+	var hrResplit = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>().ResplitOutdatedAsync().GetAwaiter().GetResult();
+	if (hrResplit > 0) app.Logger.LogInformation("HR library: re-split {Count} item(s) for the new chunk size.", hrResplit);
 
 	// Shared IELTS demo content. After RBAC so roles exist first, and idempotent
 	// by SeedKey: restarting never duplicates, and editing a seed in code

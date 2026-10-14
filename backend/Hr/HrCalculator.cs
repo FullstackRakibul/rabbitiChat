@@ -1,11 +1,12 @@
-// মানব সম্পদ — the `calculate` tool (docs/HR_MODULE_PROMPT.md §3.3).
+// মানব সম্পদ — the evaluator behind inline formulas (docs/HR_MODULE_PROMPT.md §3.3).
 //
 // Every amount in an HR answer is computed here rather than by the model, which
-// is unreliable at arithmetic. The language is deliberately tiny: numbers,
-// + - * /, parentheses and round(x, n). Nothing else parses — no names, no
-// functions, no thousands separators — and a refusal says exactly what was found
-// and where, so the model can correct its call. Decimal arithmetic, so money
-// does not pick up binary-fraction noise.
+// is unreliable at arithmetic: the model writes [[= expression ]] and HrFormulas
+// brings the result. The language is deliberately tiny: numbers, + - * /,
+// parentheses and round(x, n). Nothing else parses — no names, no functions —
+// and a refusal says exactly what was found and where. Decimal arithmetic, so
+// money does not pick up binary-fraction noise. /api/hr/calculate exposes it
+// directly.
 
 using System.Globalization;
 
@@ -13,14 +14,7 @@ namespace RabbitIC.Api.Hr;
 
 public static class HrCalculator
 {
-    public const string ToolName = "calculate";
     public const int MaxLength = 500;
-
-    public static readonly RabbitIC.Api.ModelSources.ToolDefinition Definition = new(
-        ToolName,
-        "Evaluate arithmetic for an HR amount. Use it for every calculation and show the formula in the answer. "
-        + "Allowed: numbers (no thousands separators), + - * /, parentheses and round(x, n).",
-        """{ "type": "object", "properties": { "expression": { "type": "string", "description": "e.g. round((12000/30)*15*7, 0)" } }, "required": ["expression"] }""");
 
     /// <summary>The value, or the reason the expression was refused.</summary>
     public static (decimal? Value, string? Error) Evaluate(string? expression)

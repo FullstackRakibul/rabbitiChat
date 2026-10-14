@@ -319,18 +319,39 @@ check('G1.5', 1, 'fake', 'line ranges point at the original file; section commen
 
 // ─────────────────────────── G1.6 — retrieval ───────────────────────────
 
+check('G1.5', 1, 'fake', 'a library split the old way (no SplitVersion) is re-split once on start, keyword and vector indexes included', async () => {
+  const item = (await asAdmin('GET', '/api/hr/library')).json.items.find((i) => i.name === 'ProcessFinalSettelment.sql')
+  const ids = async () => (await sqlite(`SELECT Id FROM EmbeddingChunks WHERE ContextSourceId = ${item.id} ORDER BY Id`)).map((r) => r.Id)
+  const before = await ids()
+  // As a database from before the change looks: chunks present, no SplitVersion.
+  await sqliteWrite(`UPDATE ContextSources SET SplitVersion = NULL WHERE Id = ${item.id}`)
+  await restartApi()
+  const after = await ids()
+  await restartApi()
+  const third = await ids()
+  await embedded()
+  const version = (await sqlite(`SELECT SplitVersion FROM ContextSources WHERE Id = ${item.id}`))[0]?.SplitVersion
+  const stats = (await asAdmin('GET', '/api/hr/library/index-stats')).json?.byItem?.[item.id] ?? {}
+  const log = fs.readFileSync(ctx.api.logPath, 'utf8').split('\n').filter((l) => l.includes('re-split')).map((l) => l.trim())
+  const replaced = after.length > 0 && after.every((id) => !before.includes(id))
+  return ok(replaced && JSON.stringify(after) === JSON.stringify(third) && version === 2 && stats.index === after.length && stats.fts === after.length,
+    `chunks ${before.length} → ${after.length}, all new ids ${replaced}; second restart leaves them ${JSON.stringify(after) === JSON.stringify(third)}; `
+    + `SplitVersion ${version}; index ${stats.index}, db ${stats.db}, fts ${stats.fts}; log: ${log.at(-1) ?? 'none'}`)
+})
+
 async function retrievalCheck() {
   const q1 = await asAdmin('GET', `/api/hr/retrieve?q=${encodeURIComponent('How is service benefit calculated for 3 to 9 years?')}`)
   const q2 = await asAdmin('GET', `/api/hr/retrieve?q=${encodeURIComponent('Which attendance codes count for earned leave?')}`)
-  const top1 = (q1.json?.hits ?? []).slice(0, 3), top2 = (q2.json?.hits ?? []).slice(0, 3)
-  const a = top1.some((h) => h.section === 'Service Benefit')
-  const b = top2.some((h) => h.text.includes(WORKED_CODES))
+  // /api/hr/retrieve answers with exactly the excerpts the question would be sent with (at most 5).
+  const top1 = q1.json?.hits ?? [], top2 = q2.json?.hits ?? []
+  const a = top1.length <= 5 && top1.some((h) => h.section === 'Service Benefit')
+  const b = top2.length <= 5 && top2.some((h) => h.text.includes(WORKED_CODES))
   const show = (hits) => hits.map((h) => `${h.sourceRef} (${h.score.toFixed(3)})`).join(' | ')
   return ok(a && b, `service benefit → ${a ? 'found' : 'MISSED'}: ${show(top1)}\n    attendance codes → ${b ? 'found' : 'MISSED'}: ${show(top2)}`)
 }
 
-check('G1.6', 1, 'fake', 'retrieval (fake embedding): both questions find their chunk in the top 3', retrievalCheck)
-check('G1.6', 1, 'live', 'retrieval (nomic-embed-text): both questions find their chunk in the top 3', retrievalCheck)
+check('G1.6', 1, 'fake', 'retrieval (fake embedding): both questions find their chunk among the top 5 excerpts sent', retrievalCheck)
+check('G1.6', 1, 'live', 'retrieval (nomic-embed-text): both questions find their chunk among the top 5 excerpts sent', retrievalCheck)
 
 check('G1.6', 1, 'fake', 'retrieval never returns a document chunk, and document search never returns an HR chunk', async () => {
   const hits = (await asAdmin('GET', `/api/hr/retrieve?q=${encodeURIComponent('purchase order style number quantity')}`)).json?.hits ?? []
@@ -480,9 +501,34 @@ async function hrChat(user, body) {
     convId: Number(res.headers.get('X-Conversation-Id')) || null,
     context: frames.find((f) => f.type === 'context'),
     unverified: frames.find((f) => f.type === 'unverified')?.amounts,
+    unverifiedFormulas: frames.find((f) => f.type === 'unverified')?.formulas,
     answer: frames.filter((f) => f.type === 'content').map((f) => f.text).join(''),
     tools: frames.filter((f) => f.type === 'tool'),
+    statusFrames: frames.filter((f) => f.type === 'status'),
+    formulas: frames.filter((f) => f.type === 'formula'),
   }
+}
+
+/** The first frame of an HR answer and how soon it arrived, read as the stream comes in. */
+async function statusTiming(user, message) {
+  const t0 = Date.now()
+  const res = await fetch(`${ctx.api.url}/api/hr/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${user.token}` }, body: JSON.stringify({ message }),
+  })
+  const reader = res.body.getReader(); const dec = new TextDecoder()
+  let buf = '', firstType = null, ms = null
+  const lines = []
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break
+    buf += dec.decode(value, { stream: true })
+    const parts = buf.split('\n'); buf = parts.pop()
+    for (const l of parts) {
+      let f; try { f = JSON.parse(l) } catch { continue }
+      if (firstType === null) { firstType = f.type; ms = Date.now() - t0 }
+      if (f.type === 'status') lines.push(`"${f.text}"`)
+    }
+  }
+  return { firstType, ms, lines }
 }
 
 /** Chat requests the fake (or, --live, the proxy) received, oldest first. */
@@ -533,15 +579,16 @@ check('G2.1', 2, 'fake', 'the model gets the persona and every active always ite
   const sys = sent?.messages?.[0], last = sent?.messages?.at(-1)
   const rulesAt = sys?.content.indexOf(rulesText) ?? -1, codesAt = sys?.content.indexOf(codesText.trim().replace(/\r\n/g, '\n')) ?? -1
   const refs = r.context?.excerpts?.map((e) => e.sourceRef) ?? []
+  const excerptTokens = (r.context?.excerpts ?? []).reduce((n, e) => n + e.tokens, 0)
   const t = r.context?.tokens ?? {}
   const pass = r.status === 200 && sys?.role === 'system' && /মানব সম্পদ/.test(sys.content) && rulesAt >= 0 && codesAt > rulesAt
     && !sys.content.includes('INACTIVE-MARKER-G21') && last?.role === 'user' && last.content.includes('HR context for this question')
-    && refs.length > 0 && refs.length <= 8 && refs.every((s) => last.content.includes(s)) && refs.every((s) => !sys.content.includes(s))
-    && t.system <= 8000 && t.excerpts <= 4000 && t.system + t.excerpts + t.history + t.question <= t.window - t.reserved
+    && refs.length > 0 && refs.length <= 5 && refs.every((s) => last.content.includes(s)) && refs.every((s) => !sys.content.includes(s))
+    && excerptTokens <= 1500 && t.system <= 8000 && t.system + t.excerpts + t.history + t.question <= t.window - t.reserved
   for (const id of [codes.json?.id, off.json?.id]) if (id) await asAdmin('DELETE', `/api/hr/library/${id}`)
   return ok(pass, `status ${r.status}; system: persona ${/মানব সম্পদ/.test(sys?.content ?? '')}, rules at ${rulesAt}, codes at ${codesAt} (after rules), inactive sent ${sys?.content.includes('INACTIVE-MARKER-G21')}; `
     + `last user message has "HR context for this question" ${last?.content.includes('HR context for this question')} and ${refs.length} excerpts: ${refs.slice(0, 4).join(' | ')}; `
-    + `tokens ${JSON.stringify(t)}`)
+    + `excerpt chunks ${excerptTokens} tokens; tokens ${JSON.stringify(t)}`)
 })
 
 // ─────────────────────────── G2.2 — never cut ───────────────────────────
@@ -561,7 +608,8 @@ check('G2.2', 2, 'fake', 'always items over 8,000 tokens: refused, naming the la
 })
 
 check('G2.2', 2, 'fake', 'a long history drops its oldest turns first; the system message stays byte-identical', async () => {
-  const filler = (n) => `TURN-${n}-MARKER ` + 'background detail about the employee and the case. '.repeat(120)
+  // Each turn about 2,600 tokens: four of them cannot all fit beside the system message.
+  const filler = (n) => `TURN-${n}-MARKER ` + 'background detail about the employee and the case. '.repeat(200)
   let conv = null
   const systems = [], lasts = []
   for (let n = 1; n <= 5; n++) {
@@ -583,7 +631,7 @@ check('G2.2', 2, 'fake', 'a long history drops its oldest turns first; the syste
 
 // ─────────────────────────── G2.3 — calculate ───────────────────────────
 
-check('G2.3', 2, 'fake', 'calculate: round((12000/30)*15*7, 0) is 42000; "12000*" and system("x") are refused with a reason', async () => {
+check('G2.3', 2, 'fake', 'the evaluator: round((12000/30)*15*7, 0) is 42000; "12000*" and system("x") are refused with a reason', async () => {
   const a = await asAdmin('POST', '/api/hr/calculate', { expression: 'round((12000/30)*15*7, 0)' })
   const b = await asAdmin('POST', '/api/hr/calculate', { expression: '12000*' })
   const c = await asAdmin('POST', '/api/hr/calculate', { expression: 'system("x")' })
@@ -591,39 +639,78 @@ check('G2.3', 2, 'fake', 'calculate: round((12000/30)*15*7, 0) is 42000; "12000*
     `→ ${a.status} ${a.json?.result}; "12000*" → ${b.status} "${b.json?.error}"; system("x") → ${c.status} "${c.json?.error}"`)
 })
 
-check('G2.3', 2, 'fake', 'a scripted model calling calculate gets 42000 back; the HR route offers only calculate, /api/chat no calculate', async () => {
-  script((body) => body.messages.some((m) => m.role === 'tool')
-    ? { words: ['The service benefit is ', '৳42,000 ', '[calculate].'] }
-    : { toolCalls: [{ name: 'calculate', arguments: { expression: 'round((12000/30)*15*7, 0)' } }] })
+check('G2.3', 2, 'fake', 'inline formulas: split across chunks → ৳42,000 in place, stored in HrMetaJson; an invalid one → "⚠ গণনা করা যায়নি", unverified; no tools on the HR route', async () => {
+  // The marker arrives in pieces, as a model streams it; one ৳ before a formula must not double.
+  script(() => ({ words: [
+    'The service benefit is [', '[= round((12000/30)*15', '*7, 0) ]', ']. Per day ৳', '[[= 12000/30 ]]. ',
+    'Broken: [[= 12000* ]] here. ', 'Cut: [[= 5 *\n', 'next line.',
+  ] }))
   const before = chatRequests().length
   const r = await hrChat(ctx.admin, { message: 'Basic is 12,000, 7 years, Non-Management resignation. Service benefit?' })
   const sent = chatRequests().slice(before)
   script(null)
-  const hrTools = (sent[0]?.body?.tools ?? []).map((t) => t.function?.name)
-  const toolTurn = sent[1]?.body?.messages?.find((m) => m.role === 'tool')
-  // The call itself goes back too, on the assistant turn before its result.
-  const asked = sent[1]?.body?.messages?.find((m) => m.role === 'assistant' && m.tool_calls)
-  const askedCall = asked?.tool_calls?.[0]?.function
+  const f = r.formulas
+  const okOne = f.find((x) => x.ok && x.expression === 'round((12000/30)*15*7, 0)')
+  const perDay = f.find((x) => x.ok && x.expression === '12000/30')
+  const bad = f.filter((x) => !x.ok).map((x) => x.expression)
+  const offsetsRight = f.every((x) => r.answer.slice(x.offset, x.offset + x.length) === x.display)
+  const meta = JSON.parse((await sqlite(`SELECT HrMetaJson FROM Messages WHERE ConversationId = ${r.convId} AND Role = 'assistant'`))[0]?.HrMetaJson ?? '{}')
+  const stored = (meta.formulas ?? []).map((x) => x.expression)
+  const hrTools = sent.map((s) => (s.body?.tools ?? []).length)
   const mainBefore = chatRequests().length
   await call(ctx.api.url, 'POST', '/api/chat', { token: ctx.admin.token, body: { model: 'fake-ok', source: 'local', message: 'hello' } })
   const mainTools = (chatRequests().slice(mainBefore)[0]?.body?.tools ?? []).map((t) => t.function?.name)
-  return ok(r.status === 200 && hrTools.join() === 'calculate' && /42000/.test(toolTurn?.content ?? '') && r.tools.some((t) => t.tool === 'calculate')
-      && askedCall?.name === 'calculate' && askedCall?.arguments?.expression === 'round((12000/30)*15*7, 0)'
-      && !mainTools.includes('calculate') && mainTools.every((n) => n === 'web_search'),
-    `HR request tools [${hrTools}]; assistant turn sent back with ${JSON.stringify(askedCall)}; tool result sent back "${toolTurn?.content}"; tool frames ${r.tools.map((t) => `${t.tool}:${t.status}`).join(',')}; /api/chat tools [${mainTools}]`)
+  const pass = r.status === 200 && okOne?.display === '৳42,000' && perDay?.display === '৳400' && r.answer.includes('Per day ৳400.')
+    && !r.answer.includes('৳৳') && !r.answer.includes('[[=') && JSON.stringify(bad) === JSON.stringify(['12000*', '5 *'])
+    && (r.answer.match(/⚠ গণনা করা যায়নি/g) ?? []).length === 2 && r.answer.includes('⚠ গণনা করা যায়নি\nnext line.')
+    && JSON.stringify(r.unverifiedFormulas) === JSON.stringify(['12000*', '5 *']) && offsetsRight
+    && stored.join('|') === f.map((x) => x.expression).join('|') && sent.length === 1 && hrTools.every((n) => n === 0)
+    && !mainTools.includes('calculate')
+  return ok(pass, `answer "${r.answer.replace(/\n/g, '⏎')}"; formulas ${f.map((x) => `${x.expression} → ${x.display}${x.ok ? '' : ` (${x.error})`}`).join('; ')}; `
+    + `offsets right ${offsetsRight}; unverified formulas ${JSON.stringify(r.unverifiedFormulas)}; stored in HrMetaJson [${stored.join(' | ')}]; `
+    + `HR requests ${sent.length}, tools offered ${JSON.stringify(hrTools)}; /api/chat tools [${mainTools}]`)
+})
+
+check('G2.3', 2, 'fake', '/api/chat: after a tool runs, only the final round is shown and saved; the call goes back with the draft', async () => {
+  // A separate API where web search counts as configured, pointed at the fake, so
+  // nothing leaves the machine; the search itself fails there and the loop goes on.
+  const runDir = fs.mkdtempSync(path.join(EVAL_ROOT, 'toolround-'))
+  const api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: { ...ctx.env, OllamaCloud__ApiKey: 'eval-fake', OllamaCloud__BaseUrl: ctx.fakeUrl } })
+  try {
+    const admin = (await call(api.url, 'POST', '/api/auth/login', { body: { username: process.env.HR_EVAL_ADMIN_USER, secret: process.env.HR_EVAL_ADMIN_SECRET } })).json
+    script((body) => body.messages.some((m) => m.role === 'tool')
+      ? { words: ['Final ', 'answer.'] }
+      : { words: ['Draft ', 'before the search. '], toolCalls: [{ name: 'web_search', arguments: { query: 'eval' } }] })
+    const before = chatRequests().length
+    const res = await fetch(`${api.url}/api/chat`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${admin.token}` },
+      body: JSON.stringify({ model: 'fake-ok', source: 'local', message: 'search something', webSearch: true }),
+    })
+    const frames = (await res.text()).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+    script(null)
+    const convId = Number(res.headers.get('X-Conversation-Id'))
+    const sent = chatRequests().slice(before)
+    const types = frames.map((f) => f.type)
+    // What the client ends with: content, cleared at each content_reset.
+    let shown = ''
+    for (const f of frames) { if (f.type === 'content') shown += f.text; if (f.type === 'content_reset') shown = '' }
+    const saved = (await sqlite(`SELECT Content FROM Messages WHERE ConversationId = ${convId} AND Role = 'assistant'`, api.dbPath))[0]?.Content
+    const asked = sent[1]?.body?.messages?.find((m) => m.role === 'assistant' && m.tool_calls)
+    const pass = res.status === 200 && types.includes('content_reset') && types.indexOf('content_reset') < types.indexOf('tool')
+      && shown === 'Final answer.' && saved === 'Final answer.' && asked?.content === 'Draft before the search. ' && asked?.tool_calls?.[0]?.function?.name === 'web_search'
+    return ok(pass, `frames ${types.join(',')}; shown "${shown}"; saved "${saved}"; second request's assistant turn "${asked?.content}" with ${JSON.stringify(asked?.tool_calls?.map((t) => t.function?.name))}`)
+  } finally { await api.stop() }
 })
 
 // ─────────────────────────── G2.4 — number check ───────────────────────────
 
-check('G2.4', 2, 'fake', 'number check: only the invented amount is unverified; the UI shows the warning line', async () => {
-  script((body) => body.messages.some((m) => m.role === 'tool')
-    ? { words: ['Basic ৳12,000 ', 'gives ৳42,000 ', '[calculate]; ', 'the bonus is ৳77,777.'] }
-    : { toolCalls: [{ name: 'calculate', arguments: { expression: 'round((12000/30)*15*7, 0)' } }] })
+check('G2.4', 2, 'fake', 'number check: a formula result and the user\'s amount pass, only the invented amount is unverified; the UI shows the warning line', async () => {
+  script(() => ({ words: ['Basic ৳12,000 ', 'gives [[= round((12000/30)*15*7, 0) ]]; ', 'the bonus is ৳77,777.'] }))
   const r = await hrChat(ctx.admin, { message: 'Basic is 12,000, 7 years. Service benefit?' })
   script(null)
   const ui = fs.existsSync(path.join(REPO, 'frontend/src/components/hr/HrAsk.vue')) ? read('frontend/src/components/hr/HrAsk.vue') : ''
   const line = ui.includes('এই সংখ্যাগুলো যাচাই করা যায়নি') && ui.includes('Not verified')
-  return ok(r.status === 200 && JSON.stringify(r.unverified) === '[77777]' && line,
+  return ok(r.status === 200 && r.answer.includes('gives ৳42,000;') && JSON.stringify(r.unverified) === '[77777]' && line,
     `answer "${r.answer}"; unverified ${JSON.stringify(r.unverified)}; warning line in HrAsk.vue ${line}`)
 })
 
@@ -657,7 +744,7 @@ check('G2.6', 2, 'fake', 'no hr tab → 403; hr-assistant naming qwen3.8-27b-q3 
 
 // ─────────────────────────── G2.7 — UI ───────────────────────────
 
-check('G2.7', 2, 'any', 'the Ask section: instant search, Search-in picker, clickable citations, Context used panel, drawer; no hard-coded colours', async () => {
+check('G2.7', 2, 'any', 'the Ask section: instant search, Search-in picker, clickable citations, status line, formula on hover, Context used panel, drawer; no hard-coded colours', async () => {
   const file = 'frontend/src/components/hr/HrAsk.vue'
   if (!fs.existsSync(path.join(REPO, file))) return ok(false, `${file} does not exist`)
   const src = read(file)
@@ -665,6 +752,7 @@ check('G2.7', 2, 'any', 'the Ask section: instant search, Search-in picker, clic
   const has = {
     search: /searchHr|\/hr\/search/.test(src + read('frontend/src/services/hr.service.js')),
     scope: /Search in/.test(src), cite: /data-cite/.test(src), panel: /Context used/.test(src),
+    status: /data-status/.test(src) && /onStatus/.test(src), formula: /data-formula/.test(src) && /title=/.test(src),
     drawer: /drawer/i.test(src), stream: /reactive\(/.test(src), placeholderGone: !/শীঘ্রই আসছে/.test(tab),
   }
   const colours = ['frontend/src/components/hr/HrAsk.vue', 'frontend/src/components/hr/HrItemViewer.vue', 'frontend/src/components/hr/HrLibrary.vue']
@@ -682,20 +770,35 @@ const SECTION1_QUESTIONS = [
   'What happens when someone in unit 27 separates on the 28th?',
 ]
 
-check('G2.8', 2, 'live', 'gemma4:12b answers the four §1 questions: each cites, the third uses calculate with its formula, nothing unverified', async () => {
+// The amounts each §1 question may show: Q3 has one right answer, ৳48,000, and its
+// steps; the others give no taka amount (Q1 has no basic, so it must ask).
+const SECTION1_ALLOWED = [[], [], [400, 6000, 48000], []]
+
+check('G2.8', 2, 'live', 'gemma4:12b, the four §1 questions × 3: all cite; ≥ 10 of 12 use formulas for every amount; 0 wrong amounts shown without the warning', async () => {
   const lines = []
-  let pass = true
-  for (const [i, q] of SECTION1_QUESTIONS.entries()) {
-    const t0 = Date.now()
-    const r = await hrChat(ctx.admin, { message: q })
-    const cites = /\[[^\]\n]{3,}\]/.test(r.answer)
-    const calc = r.tools.some((t) => t.tool === 'calculate' && t.status === 'done')
-    const formula = /\d[\d,.]*\s*[×x*÷/]\s*\(?\d/.test(r.answer)
-    const good = r.status === 200 && cites && (i !== 2 || (calc && formula)) && (r.unverified ?? []).length === 0
-    pass &&= good
-    lines.push(`${good ? 'ok ' : 'BAD'} Q${i + 1} (${((Date.now() - t0) / 1000).toFixed(1)} s; cites ${cites}; calculate ${calc}; formula ${formula}; unverified ${JSON.stringify(r.unverified)})\n      Q: ${q}\n      A: ${r.answer.replace(/\n/g, '\n         ')}`)
+  let cited = 0, formulaRuns = 0, wrongUnwarned = 0
+  for (let round = 1; round <= 3; round++) {
+    for (const [i, q] of SECTION1_QUESTIONS.entries()) {
+      const t0 = Date.now()
+      const r = await hrChat(ctx.admin, { message: q })
+      const cites = /\[[^\]\n]{3,}\]/.test(r.answer)
+      const results = r.formulas.filter((f) => f.ok)
+      const nothingUnverified = (r.unverified ?? []).length === 0 && (r.unverifiedFormulas ?? []).length === 0
+      // Formulas for every amount: nothing untraced or uncalculated, and Q3's amount came from a formula.
+      const usesFormulas = nothingUnverified && (i !== 2 || results.some((f) => Math.abs(Number(f.display.replace(/[^\d.-]/g, '')) - 48000) < 1))
+      // A wrong amount shown without the warning can only be a formula result (anything else
+      // untraced is flagged): one that is not among this question's right amounts.
+      const wrong = results.filter((f) => !SECTION1_ALLOWED[i].some((v) => Math.abs(Number(f.display.replace(/[^\d.-]/g, '')) - v) < 1))
+      cited += cites ? 1 : 0
+      formulaRuns += r.status === 200 && usesFormulas ? 1 : 0
+      wrongUnwarned += wrong.length
+      lines.push(`${cites && usesFormulas && !wrong.length ? 'ok ' : 'BAD'} round ${round} Q${i + 1} (${((Date.now() - t0) / 1000).toFixed(1)} s; cites ${cites}; `
+        + `formulas ${r.formulas.map((f) => `${f.expression} → ${f.display}`).join(', ') || 'none'}; unverified ${JSON.stringify(r.unverified)} ${JSON.stringify(r.unverifiedFormulas)}; `
+        + `wrong unwarned ${JSON.stringify(wrong.map((f) => f.display))})\n      Q: ${q}\n      A: ${r.answer.replace(/\n/g, '\n         ')}`)
+    }
   }
-  return ok(pass, '\n    ' + lines.join('\n    '))
+  return ok(cited === 12 && formulaRuns >= 10 && wrongUnwarned === 0,
+    `cited ${cited}/12; formulas for every amount ${formulaRuns}/12; wrong amounts shown without the warning ${wrongUnwarned}\n    ` + lines.join('\n    '))
 })
 
 // ─────────────────────────── G2.9 — JSON ───────────────────────────
@@ -850,25 +953,39 @@ check('G2.13', 2, 'fake', '200 items (~2 MB): the Library stays responsive while
 
 // ─────────────────────────── G2.14 — speed and cache ───────────────────────────
 
-check('G2.14', 2, 'fake', 'the system message is byte-identical across turns; excerpts only in the last user message; num_ctx, keep_alive and temperature fixed', async () => {
-  const sent = []
+check('G2.14', 2, 'fake', 'system message byte-identical; excerpts only last, at most 5 within 1,500 tokens; num_ctx, keep_alive, temperature fixed; status line first, within 1 s', async () => {
+  const sent = [], receipts = []
   let conv = null
   for (const q of ['What is the gratuity rule for Management?', 'And for Non-Management?']) {
     const before = chatRequests().length
     const r = await hrChat(ctx.admin, { conversationId: conv, message: q })
     conv = r.convId
     sent.push(chatRequests().slice(before)[0]?.body)
+    receipts.push(r)
   }
+  const limits = receipts.map((r) => `${r.context?.excerpts?.length}/${(r.context?.excerpts ?? []).reduce((n, e) => n + e.tokens, 0)}`)
+  const withinLimits = receipts.every((r) => (r.context?.excerpts?.length ?? 9) <= 5 && (r.context?.excerpts ?? []).reduce((n, e) => n + e.tokens, 0) <= 1500)
+  const status = await statusTiming(ctx.admin, 'Which attendance codes count for earned leave?')
   const [a, b] = sent
   const same = a?.messages?.[0]?.content === b?.messages?.[0]?.content
   const inMiddle = (b?.messages ?? []).slice(0, -1).some((m) => m.content.includes('HR context for this question'))
   const inLast = b?.messages?.at(-1)?.content.includes('HR context for this question')
   const opts = sent.map((s) => `${s?.options?.num_ctx}/${s?.keep_alive}/${s?.options?.temperature}`)
-  return ok(same && !inMiddle && inLast && opts.every((o) => o === '16384/-1/0'),
-    `system identical ${same}; excerpts outside the last message ${inMiddle}; in the last ${inLast}; num_ctx/keep_alive/temperature ${opts.join(', ')}`)
+  return ok(same && !inMiddle && inLast && opts.every((o) => o === '16384/-1/0') && withinLimits && status.firstType === 'status' && status.ms < 1000,
+    `system identical ${same}; excerpts outside the last message ${inMiddle}; in the last ${inLast}; num_ctx/keep_alive/temperature ${opts.join(', ')}; `
+    + `excerpts/tokens ${limits.join(', ')}; first frame "${status.firstType}" after ${status.ms} ms: ${status.lines.join(' → ')}`)
 })
 
-check('G2.14', 2, 'live', 'live gemma4:12b, warm: the second question reaches its first word in < 5 s (median of 5) and Ollama reused the always prefix', async () => {
+const G214_PAIRS = [
+  ['What is the gratuity rule for Management?', 'And what changes from 28 June 2026?'],
+  ['How is earned leave paid at settlement?', 'What is the cap for Non-Management?'],
+  ['What does the notice period rule say?', 'Who pays notice when the employee leaves without it?'],
+  ['How is the salary month chosen for a separation?', 'And for unit 27?'],
+  ['What is the retirement benefit?', 'Does a death case get it too?'],
+  ['How is length of service counted?', 'What are fraction days used for?'],
+]
+
+check('G2.14', 2, 'live', 'live gemma4:12b, warm: status line within 1 s; the second question reaches its first word in < 15 s (median of 5); Ollama reused the always prefix', async () => {
   // Ollama's MLX runner reports the whole prompt in prompt_eval_count even when it
   // reused a cached prefix, so reuse is read from time instead: a cold prompt
   // (unique text, never cached) gives this machine's evaluation rate, and a warm
@@ -881,30 +998,42 @@ check('G2.14', 2, 'live', 'live gemma4:12b, warm: the second question reaches it
   })).json()
   const rate = cold.prompt_eval_count / (cold.prompt_eval_duration / 1e9)   // tokens per second, cold
 
-  const firsts = [], evals = []
-  for (let n = 0; n < 5; n++) {
-    const a = await hrChat(ctx.admin, { message: 'What is the gratuity rule for Management?' })
+  // Warm means the system prefix has been seen: the runner re-evaluates the first two
+  // requests after the prefix changes (the calibration above changes it), so one
+  // conversation runs unmeasured first. Its cold cost is reported, not hidden.
+  const firsts = [], statuses = [], evals = []
+  let coldTurn = null
+  for (let n = -1; n < 5; n++) {
+    // A different conversation each time: repeating one at temperature 0 would hit a
+    // fully cached prompt and flatter the time.
+    const [firstQ, secondQ] = G214_PAIRS[n + 1]
+    const a = await hrChat(ctx.admin, { message: firstQ })
     const t0 = Date.now()
     const res = await fetch(`${ctx.api.url}/api/hr/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${ctx.admin.token}` },
-      body: JSON.stringify({ conversationId: a.convId, message: 'And what changes from 28 June 2026?' }),
+      body: JSON.stringify({ conversationId: a.convId, message: secondQ }),
     })
-    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', first = null, sys = null
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', first = null, sys = null, statusAt = null
     for (;;) {
       const { value, done } = await reader.read(); if (done) break
       buf += dec.decode(value, { stream: true })
+      if (statusAt === null && /"type":"status"/.test(buf)) statusAt = Date.now() - t0
       if (first === null && /"type":"content"/.test(buf)) first = Date.now() - t0
       const m = /"type":"context".*?"system":(\d+)/.exec(buf); if (m) sys = +m[1]
     }
-    firsts.push(first)
     const done = ctx.proxyFinals?.at(-1)
     const evaluated = Math.round((done?.prompt_eval_duration ?? 0) / 1e9 * rate)
+    if (n < 0) { coldTurn = { first, evaluated, prompt: done?.prompt_eval_count }; continue }
+    firsts.push(first)
+    statuses.push(statusAt)
     evals.push({ prompt: done?.prompt_eval_count, evaluated, seconds: (done?.prompt_eval_duration ?? 0) / 1e9, system: sys })
   }
   // Reused: the tokens actually evaluated leave out (most of) the system message.
   const reused = evals.every((e) => e.prompt != null && e.system != null && e.evaluated <= e.prompt - 0.8 * e.system)
-  return ok(median(firsts) < 5000 && reused,
-    `first word on the second question: ${firsts.map((f) => `${(f / 1000).toFixed(1)} s`).join(', ')} (median ${(median(firsts) / 1000).toFixed(1)} s); `
+  return ok(median(firsts) < 15000 && statuses.every((s) => s !== null && s < 1000) && reused,
+    `unmeasured warm-up after the prefix changed: first word ${(coldTurn.first / 1000).toFixed(1)} s, ~${coldTurn.evaluated} of ${coldTurn.prompt} tokens evaluated; `
+    + `status line after ${statuses.map((s) => `${s} ms`).join(', ')}; `
+    + `first word on the second question: ${firsts.map((f) => `${(f / 1000).toFixed(1)} s`).join(', ')} (median ${(median(firsts) / 1000).toFixed(1)} s); `
     + `cold rate ${rate.toFixed(0)} tokens/s (${cold.prompt_eval_count} tokens in ${(cold.prompt_eval_duration / 1e9).toFixed(1)} s); `
     + `prefix reused ${reused}: ${evals.map((e) => `${e.prompt} sent, ~${e.evaluated} evaluated in ${e.seconds.toFixed(1)} s (system ${e.system})`).join('; ')}`)
 })

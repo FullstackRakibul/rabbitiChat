@@ -4,11 +4,14 @@
  *
  * At the top, instant search: the hybrid search with no model, so HR can find
  * where something is written in under a second, and "Ask about this" to start a
- * question scoped to that item. Below, the chat: answers stream word by word
- * (the reply object is reactive(), as in the main chat), every citation opens
- * the cited item at its lines, a "Context used" panel lists exactly what was
- * sent, and any amount the server's number check could not trace is shown
- * under the answer. The HR conversation list sits at the side, a drawer on phones.
+ * question scoped to that item. Below, the chat: a status line appears at once
+ * ("খুঁজছি… N টি অংশ পাওয়া গেছে"), then the answer streams word by word (the
+ * reply object is reactive(), as in the main chat). Every citation opens the
+ * cited item at its lines; every amount the server calculated from an inline
+ * formula shows its formula on hover or tap; a "Context used" panel lists exactly
+ * what was sent; and any amount the number check could not trace, or formula it
+ * could not calculate, is shown under the answer. The HR conversation list sits
+ * at the side, a drawer on phones.
  *
  * Nothing here decides what is allowed or what counts as verified — the server
  * does, and this component shows its answer.
@@ -80,8 +83,10 @@ async function openConversation(id) {
     messages.value = c.messages.map((m) => reactive({
       role: m.role, content: m.content,
       context: m.meta?.context ?? null,
-      tools: (m.meta?.calculations ?? []).map((x) => ({ tool: 'calculate', status: 'done', detail: `${x.expression} = ${x.result}` })),
+      formulas: m.meta?.formulas ?? [],
       unverified: m.meta?.unverified ?? [],
+      unverifiedFormulas: m.meta?.unverifiedFormulas ?? [],
+      shownFormula: null,
     }))
     scrollDown()
   } catch (e) { error.value = e.message }
@@ -117,7 +122,10 @@ async function send(text = input.value) {
   // reactive(), not a plain object: the stream writes to `reply` directly, and a
   // write to the plain object behind the array's proxy is invisible to Vue — the
   // answer would sit behind the "…" until the stream ended.
-  const reply = reactive({ role: 'assistant', content: '', context: null, tools: [], unverified: [], error: '' })
+  const reply = reactive({
+    role: 'assistant', content: '', status: '', context: null, formulas: [],
+    unverified: [], unverifiedFormulas: [], shownFormula: null, error: '',
+  })
   messages.value.push(reply)
   scrollDown()
 
@@ -125,14 +133,11 @@ async function send(text = input.value) {
   controller = new AbortController()
   try {
     const id = await streamHrChat({ conversationId: currentId.value, message: question, items: scope.value }, {
+      onStatus: (text) => { reply.status = text },
       onContext: (c) => { reply.context = c },
       onContent: (chunk) => { reply.content += chunk; scrollDown() },
-      onTool: (t) => {
-        const same = reply.tools.find((x) => x.tool === t.tool && x.detail === t.detail)
-        if (same) same.status = t.status
-        else reply.tools.push({ tool: t.tool, status: t.status, detail: t.detail })
-      },
-      onUnverified: (amounts) => { reply.unverified = amounts },
+      onFormula: (f) => { reply.formulas.push(f) },
+      onUnverified: (amounts, formulas) => { reply.unverified = amounts; reply.unverifiedFormulas = formulas },
       onError: (message) => { reply.error = message },
     }, controller.signal)
     if (currentId.value == null) {
@@ -182,10 +187,33 @@ const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
 /** "…«match»…" → highlighted, with everything else escaped. */
 const snippetHtml = (s) => escapeHtml(s ?? '').replace(/«/g, '<mark class="rounded-sm bg-primary/15 px-0.5 text-foreground">').replace(/»/g, '</mark>')
 
+/** For a title attribute: escaped, and without brackets the citation pass would read as a citation. */
+const attr = (s) => escapeHtml(s).replace(/\[/g, '&#91;').replace(/\]/g, '&#93;')
+
+/**
+ * Each amount the server calculated, wrapped where it sits (the server sends its
+ * offset), so hovering or tapping it shows the formula. Inserted from the end, so
+ * the earlier offsets stay valid.
+ */
+function withFormulas(content, formulas) {
+  let text = content || ''
+  const list = (formulas ?? []).map((f, i) => ({ ...f, i }))
+    .filter((f) => f.offset >= 0 && f.offset + f.length <= text.length)
+    .sort((a, b) => b.offset - a.offset)
+  for (const f of list) {
+    const title = f.ok ? `= ${f.expression}` : `${f.expression} — ${f.error ?? ''}`
+    const cls = f.ok
+      ? 'cursor-help rounded-sm bg-primary/10 px-0.5 font-medium underline decoration-dotted underline-offset-2'
+      : 'cursor-help rounded-sm bg-destructive/10 px-0.5 text-destructive dark:text-foreground'
+    text = `${text.slice(0, f.offset)}<span data-formula="${f.i}" title="${attr(title)}" class="${cls}">${escapeHtml(text.slice(f.offset, f.offset + f.length))}</span>${text.slice(f.offset + f.length)}`
+  }
+  return text
+}
+
 /**
  * The answer's markdown with every [citation] made a button that opens the cited
  * place. MarkdownBody renders it through the same sanitizer as the main chat,
- * which keeps <button> and data-* attributes.
+ * which keeps <button>, <span> and data-* attributes.
  */
 function withCites(content) {
   return (content || '').replace(/\[([^[\]\n]{2,200})\](?!\()/g, (all, label) => label === 'calculate'
@@ -212,6 +240,12 @@ function resolveCite(message, label) {
 }
 
 function onAnswerClick(message, event) {
+  const formula = event.target.closest?.('[data-formula]')
+  if (formula) {
+    const i = Number(formula.dataset.formula)
+    message.shownFormula = message.shownFormula === i ? null : i
+    return
+  }
   const el = event.target.closest?.('[data-cite]')
   if (!el) return
   const target = resolveCite(message, el.dataset.cite)
@@ -338,32 +372,38 @@ const contextTokens = (c) => c ? c.tokens.system + c.tokens.excerpts + c.tokens.
             </div>
 
             <div v-else class="flex min-w-0 flex-col gap-2" data-role="assistant">
-              <!-- calculate, shown as it runs -->
-              <div v-for="(t, ti) in m.tools" :key="ti"
-                class="flex items-center gap-2 rounded-lg border bg-muted/40 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
-                <Loader2 v-if="t.status === 'running'" class="h-3.5 w-3.5 shrink-0 animate-spin" />
-                <TriangleAlert v-else-if="t.status === 'failed'" class="h-3.5 w-3.5 shrink-0 text-destructive" />
-                <Calculator v-else class="h-3.5 w-3.5 shrink-0" />
-                <span class="min-w-0 break-all">{{ t.detail }}</span>
-              </div>
-
               <div v-if="m.content" class="min-w-0 wrap-break-word text-sm" @click="onAnswerClick(m, $event)">
-                <MarkdownBody :content="withCites(m.content)" />
+                <MarkdownBody :content="withCites(withFormulas(m.content, m.formulas))" />
               </div>
 
+              <!-- Until the first word: what the server is doing, within a second of asking. -->
               <span v-if="busy && i === messages.length - 1 && !m.content && !m.error"
-                class="inline-flex items-center gap-1 text-muted-foreground" aria-label="Waiting for the model">
-                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
+                class="inline-flex items-center gap-2 text-sm text-muted-foreground" aria-label="Waiting for the model" data-status>
+                <Loader2 class="h-3.5 w-3.5 animate-spin" />
+                {{ m.status || 'খুঁজছি…' }}
               </span>
+
+              <!-- The formula behind a tapped amount (hover shows it too). -->
+              <p v-if="m.shownFormula != null && m.formulas[m.shownFormula]"
+                class="flex items-start gap-1.5 rounded-md border bg-muted/40 px-3 py-1.5 font-mono text-xs" data-formula-line>
+                <Calculator class="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span class="min-w-0 wrap-break-word">
+                  <span class="font-sans text-muted-foreground">সূত্র · Formula:</span>
+                  {{ m.formulas[m.shownFormula].expression }}
+                  <template v-if="m.formulas[m.shownFormula].ok"> = {{ m.formulas[m.shownFormula].display }}</template>
+                  <template v-else> — {{ m.formulas[m.shownFormula].error }}</template>
+                </span>
+              </p>
 
               <p v-if="m.error" class="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ m.error }}</p>
 
               <!-- The number check's verdict, in the answer's own place. -->
-              <p v-if="m.unverified?.length" class="flex items-start gap-1.5 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2 text-xs text-destructive dark:bg-destructive/30 dark:text-foreground">
+              <p v-if="m.unverified?.length || m.unverifiedFormulas?.length" class="flex items-start gap-1.5 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2 text-xs text-destructive dark:bg-destructive/30 dark:text-foreground">
                 <TriangleAlert class="mt-px h-3.5 w-3.5 shrink-0" />
-                <span>এই সংখ্যাগুলো যাচাই করা যায়নি / Not verified: {{ m.unverified.map(formatAmount).join(', ') }}</span>
+                <span>
+                  এই সংখ্যাগুলো যাচাই করা যায়নি / Not verified:
+                  {{ [...(m.unverified ?? []).map(formatAmount), ...(m.unverifiedFormulas ?? []).map((x) => `গণনা করা যায়নি (could not calculate): ${x}`)].join(', ') }}
+                </span>
               </p>
 
               <!-- Context used: exactly what this answer was given. -->

@@ -188,6 +188,8 @@ public static class SchemaUpgrade
         AddColumnIfMissing(db, "ContextSources", "IndexError", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""IndexError"" TEXT NULL;");
         AddColumnIfMissing(db, "Conversations", "Kind", @"ALTER TABLE ""Conversations"" ADD COLUMN ""Kind"" TEXT NULL;");
         AddColumnIfMissing(db, "Messages", "HrMetaJson", @"ALTER TABLE ""Messages"" ADD COLUMN ""HrMetaJson"" TEXT NULL;");
+        // Phase 2 decision: smaller chunks; a library split the old way is re-split once.
+        AddColumnIfMissing(db, "ContextSources", "SplitVersion", @"ALTER TABLE ""ContextSources"" ADD COLUMN ""SplitVersion"" INTEGER NULL;");
 
         if (!ColumnIsNotNull(db, "EmbeddingChunks", "DocumentId"))
         {

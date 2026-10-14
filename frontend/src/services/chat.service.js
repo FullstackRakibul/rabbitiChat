@@ -28,6 +28,7 @@ export async function getModels() {
  * @param {{
  *   onContent?: (text: string) => void,
  *   onThinking?: (text: string) => void,
+ *   onContentReset?: () => void,   // a tool is about to run; the text so far was a draft
  *   onTool?: (tool: {tool: string, status: string, detail?: string}) => void,
  *   onError?: (message: string) => void,
  * }} handlers
@@ -56,6 +57,7 @@ export async function streamChat(
     switch (frame.type) {
       case 'content': handlers.onContent?.(frame.text ?? ''); break
       case 'thinking': handlers.onThinking?.(frame.text ?? ''); break
+      case 'content_reset': handlers.onContentReset?.(); break
       case 'tool': handlers.onTool?.(frame); break
       case 'error': handlers.onError?.(frame.message ?? 'The model failed.'); break
       // 'done' carries no UI-visible payload the caller doesn't already know.

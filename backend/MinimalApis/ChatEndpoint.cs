@@ -28,13 +28,6 @@ namespace RabbitIC.Api.MinimalApis
         /// </summary>
         private const int MaxToolRounds = 2;
 
-        /// <summary>
-        /// The HR chat's cap (docs/HR_MODULE_PROMPT.md §3.3): an amount can need a
-        /// few `calculate` calls in a row — per-day basic, then the benefit, then a
-        /// total — so it gets more rounds than one web search needs.
-        /// </summary>
-        internal const int HrMaxToolRounds = 4;
-
         public static async Task HandleAsync(
             ChatRequest req,
             HttpContext ctx,
@@ -253,6 +246,14 @@ namespace RabbitIC.Api.MinimalApis
 
                 // No tool asked for, or the budget is spent — this was the answer.
                 if (pendingCalls.Count == 0 || round >= maxRounds) break;
+
+                // Text written before a tool call is a draft the model rewrites once it
+                // has the result; only the final round is shown and saved.
+                if (roundText.Length > 0)
+                {
+                    answer.Length -= roundText.Length;
+                    await writer.FrameAsync(new { type = "content_reset" });
+                }
 
                 // The assistant turn that requested the tools has to be in the
                 // history, with its calls and only this round's text: without the

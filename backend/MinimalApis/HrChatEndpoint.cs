@@ -8,20 +8,24 @@
 //      SortOrder. Over 8,000 tokens it is refused, naming the largest items —
 //      never cut. (The Library's always cap keeps a library built through the
 //      UI from ever getting here.)
-//   3. Excerpts: hybrid search, scoped to the "Search in" items when given, top 8,
-//      whole chunks only, until 4,000 tokens.
+//   3. Excerpts (HrLibrary.SelectExcerptsAsync): hybrid search, scoped to the
+//      "Search in" items when given, the best 5, whole chunks, up to 1,500 tokens.
+//      A status line goes out before retrieval and again when it is done, so the
+//      person sees something within a second.
 //   4. History fills what is left of the 16,384-token window after 2,000 are
 //      reserved for the answer, the oldest turns dropped first.
 //   5. The message order is fixed for Ollama's prompt cache: the unchanged system
 //      message, then history, then one last user message with the excerpts and
-//      the question. num_ctx and keep_alive are sent the same every time.
-//   6. The model runs in the one shared tool loop (ChatEndpoint) with one tool,
-//      `calculate`, up to 4 rounds.
-//   7. The number check runs on the finished answer; amounts it cannot trace are
-//      streamed as a final "unverified" frame and kept with the answer.
+//      the question. num_ctx, keep_alive and temperature are sent the same every time.
+//   6. No tools. The model writes amounts as [[= expression ]]; HrFormulaStream
+//      puts each result in its place as the answer streams.
+//   7. The number check runs on the finished answer, with formula results counted
+//      as verified; amounts it cannot trace, and formulas that could not be
+//      calculated, are streamed as a final "unverified" frame and kept with the answer.
 //
-// Frames: "context" (the receipt the "Context used" panel shows) first, then the
-// usual content/tool/error frames, then "unverified", then "done".
+// Frames: "status" (twice), "context" (the receipt the "Context used" panel
+// shows), then content frames with a "formula" frame after each result, "error",
+// "unverified", and "done".
 
 using System.Text;
 using System.Text.Json;
@@ -42,8 +46,6 @@ namespace RabbitIC.Api.MinimalApis
     public static class HrChatEndpoint
     {
         public const int ReservedForAnswer = 2000;
-        public const int ExcerptBudget = 4000;
-        public const int MaxExcerpts = 8;
 
         private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -75,7 +77,7 @@ namespace RabbitIC.Api.MinimalApis
             var window = int.TryParse(config["Hr:NumCtx"], out var w) && w > 0 ? w : 16384;
             var keepAlive = int.TryParse(config["Hr:KeepAlive"], out var k) ? k : -1;
             // The same question gets the same answer, and the model keeps to the rules
-            // (calculate for every amount) rather than sampling around them.
+            // (a formula for every amount) rather than sampling around them.
             var temperature = double.TryParse(config["Hr:Temperature"], System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var tv) ? tv : 0;
 
@@ -117,16 +119,15 @@ namespace RabbitIC.Api.MinimalApis
             db.Messages.Add(new Message { ConversationId = convo.Id, Role = "user", Content = question });
             await db.SaveChangesAsync(ct);
 
-            // ---- 3. excerpts: whole chunks, top 8, until 4,000 tokens ----
-            var excerpts = new List<HrExcerpt>();
-            var excerptTokens = 0;
-            foreach (var hit in await library.SearchAsync(question, req.Items, MaxExcerpts, ct))
-            {
-                var tokens = PoPromptBuilder.EstimateTokens(hit.Text);
-                if (excerptTokens + tokens > ExcerptBudget) continue;   // whole chunks only; a smaller one may still fit
-                excerpts.Add(new HrExcerpt(hit.ChunkId, hit.ItemId, hit.ItemName, hit.Version, hit.SourceRef, hit.LineFrom, hit.LineTo, hit.Text, tokens, hit.Score));
-                excerptTokens += tokens;
-            }
+            // The stream starts here, before retrieval, so the status line is on screen at once.
+            ctx.Response.Headers["X-Conversation-Id"] = convo.Id.ToString();
+            ctx.Response.ContentType = "application/x-ndjson; charset=utf-8";
+            var writer = new ChatStreamWriter(ctx.Response, ct);
+            await writer.FrameAsync(new { type = "status", text = HrPrompt.Searching, found = (int?)null });
+
+            // ---- 3. excerpts: the best 5, whole chunks, up to 1,500 tokens ----
+            var excerpts = await library.SelectExcerptsAsync(question, req.Items, ct);
+            await writer.FrameAsync(new { type = "status", text = HrPrompt.Found(excerpts.Count), found = (int?)excerpts.Count });
             var excerptBlock = HrPrompt.Excerpts(excerpts);
             var last = HrPrompt.Question(excerpts, question);
             var questionTokens = PoPromptBuilder.EstimateTokens(question);
@@ -170,84 +171,66 @@ namespace RabbitIC.Api.MinimalApis
                 },
             };
 
-            ctx.Response.Headers["X-Conversation-Id"] = convo.Id.ToString();
-            ctx.Response.ContentType = "application/x-ndjson; charset=utf-8";
-            var writer = new ChatStreamWriter(ctx.Response, ct);
             await writer.FrameAsync(receipt);
 
-            // ---- 6. the shared tool loop, with calculate ----
+            // ---- 6. the model, no tools; formulas evaluated as the answer streams ----
             var capabilities = await ChatEndpoint.ModelCapabilitiesAsync(chat, Rbac.ModelPolicy.LocalSource, model, ct);
             bool? think = capabilities.Any(c => c.Equals("thinking", StringComparison.OrdinalIgnoreCase)
                                              || c.Equals("reasoning", StringComparison.OrdinalIgnoreCase)) ? false : null;
-            var args = new ChatArgs(model, turns, new[] { HrCalculator.Definition }, think, window, keepAlive, temperature);
+            var args = new ChatArgs(model, turns, Tools: null, think, window, keepAlive, temperature);
 
             var answer = new StringBuilder();
-            var calculations = new List<(string Expression, string Result)>();
-            var calculated = new List<decimal>();
+            var formulas = new HrFormulaStream();
 
-            async Task<string> RunTool(ToolCallRequest call)
+            async Task SendAsync(IEnumerable<HrFormulaPiece> pieces)
             {
-                if (!string.Equals(call.Name, HrCalculator.ToolName, StringComparison.OrdinalIgnoreCase))
+                foreach (var piece in pieces)
                 {
-                    await writer.ToolAsync(call.Name, "failed", "Unknown tool.");
-                    return $"No tool named '{call.Name}' is available.";
+                    answer.Append(piece.Text);
+                    await writer.ContentAsync(piece.Text);
+                    if (piece.Formula is { } f)
+                        await writer.FrameAsync(new
+                        {
+                            type = "formula", offset = f.Offset, length = f.Display.Length,
+                            expression = f.Expression, display = f.Display, ok = f.Ok, error = f.Error,
+                        });
                 }
-                var expression = ReadExpression(call.ArgumentsJson);
-                var (value, error) = HrCalculator.Evaluate(expression);
-                if (value is null)
-                {
-                    await writer.ToolAsync(HrCalculator.ToolName, "failed", $"{expression} — {error}");
-                    return $"calculate refused \"{expression}\": {error}";
-                }
-                var result = HrCalculator.Format(value.Value);
-                calculations.Add((expression ?? "", result));
-                calculated.Add(value.Value);
-                await writer.ToolAsync(HrCalculator.ToolName, "done", $"{expression} = {result}");
-                return $"{expression} = {result}";
             }
 
             try
             {
-                await ChatEndpoint.RunToolLoopAsync(chat, Rbac.ModelPolicy.LocalSource, args, turns,
-                    ChatEndpoint.HrMaxToolRounds, writer, answer, RunTool, ct);
+                await foreach (var e in chat.StreamAsync(Rbac.ModelPolicy.LocalSource, args, ct))
+                    if (e.Kind == ChatEventKind.Content) await SendAsync(formulas.Push(e.Text));
+                await SendAsync(formulas.Finish());
             }
             catch (ChatSourceException ex)
             {
+                await SendAsync(formulas.Finish());
                 answer.Append($"\n\n_{ex.Message}_");
                 await writer.ErrorAsync(ex.Message);
             }
             catch (OperationCanceledException)
             {
-                await SaveAsync(db, convo.Id, answer.ToString(), receipt, calculations, Array.Empty<decimal>(), CancellationToken.None);
+                await SaveAsync(db, convo.Id, answer.ToString(), receipt, formulas.Formulas, Array.Empty<decimal>(), Array.Empty<string>(), CancellationToken.None);
                 return;
             }
 
-            // ---- 7. the number check ----
+            // ---- 7. the number check: formula results count as verified ----
             var userText = earlier.Where(m => m.Role == "user").Select(m => m.Content).Append(question);
+            var calculated = formulas.Formulas.Where(f => f.Ok).Select(f => f.Value!.Value);
             var unverified = HrNumberCheck.Unverified(answer.ToString(), userText.Concat(new[] { system, excerptBlock }), calculated);
-            await writer.FrameAsync(new { type = "unverified", amounts = unverified });
+            var failed = formulas.Formulas.Where(f => !f.Ok).Select(f => f.Expression).ToList();
+            await writer.FrameAsync(new { type = "unverified", amounts = unverified, formulas = failed });
             await writer.DoneAsync(false);
 
-            await SaveAsync(db, convo.Id, answer.ToString(), receipt, calculations, unverified, ct);
-            log.LogInformation("HR chat: {Excerpts} excerpts, {History} history turns ({Dropped} dropped), {Calcs} calculations, {Unverified} unverified.",
-                excerpts.Count, history.Count, dropped, calculations.Count, unverified.Count);
+            await SaveAsync(db, convo.Id, answer.ToString(), receipt, formulas.Formulas, unverified, failed, ct);
+            log.LogInformation("HR chat: {Excerpts} excerpts, {History} history turns ({Dropped} dropped), {Formulas} formulas ({Failed} failed), {Unverified} unverified.",
+                excerpts.Count, history.Count, dropped, formulas.Formulas.Count, failed.Count, unverified.Count);
         }
 
-        private static string? ReadExpression(string argumentsJson)
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
-                return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("expression", out var e)
-                    ? e.ValueKind == JsonValueKind.String ? e.GetString() : e.ToString()
-                    : null;
-            }
-            catch (JsonException) { return null; }
-        }
-
-        /// <summary>The answer, with what the "Context used" panel and the warning line need on reopening.</summary>
+        /// <summary>The answer, with what the "Context used" panel, the formulas and the warning line need on reopening.</summary>
         private static async Task SaveAsync(AppDbContext db, int conversationId, string answer, object receipt,
-            List<(string Expression, string Result)> calculations, IReadOnlyList<decimal> unverified, CancellationToken ct)
+            IReadOnlyList<HrFormula> formulas, IReadOnlyList<decimal> unverified, IReadOnlyList<string> failedFormulas, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(answer)) return;
             db.Messages.Add(new Message
@@ -258,8 +241,13 @@ namespace RabbitIC.Api.MinimalApis
                 HrMetaJson = JsonSerializer.Serialize(new
                 {
                     context = receipt,
-                    calculations = calculations.Select(c => new { expression = c.Expression, result = c.Result }),
+                    formulas = formulas.Select(f => new
+                    {
+                        offset = f.Offset, length = f.Display.Length, expression = f.Expression,
+                        display = f.Display, ok = f.Ok, error = f.Error,
+                    }),
                     unverified,
+                    unverifiedFormulas = failedFormulas,
                 }, Json),
             });
             await db.SaveChangesAsync(ct);

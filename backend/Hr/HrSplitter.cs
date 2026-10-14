@@ -32,7 +32,14 @@ public sealed record HrChunk(string Text, string? Section, int LineFrom, int Lin
 
 public static class HrSplitter
 {
+    /// <summary>Pieces are packed up to about this size: short excerpts keep the prompt small, so the first word comes sooner.</summary>
+    public const int TargetChunkChars = 800;
+
+    /// <summary>The hard limit: a single unit (one JSON value, one paragraph's line) up to this size stays whole.</summary>
     public const int MaxChunkChars = 1500;
+
+    /// <summary>Raised whenever the splitting changes, so a library split the old way is re-split once on start.</summary>
+    public const int SplitVersion = 2;
 
     public static IReadOnlyList<HrChunk> Split(string name, string content)
     {
@@ -127,7 +134,7 @@ public static class HrSplitter
             units.Add(new JsonUnit("$", JsonSerializer.Serialize(root, Pretty), 1, lineStarts.Count));
         }
 
-        // Pack neighbouring units into chunks of at most MaxChunkChars.
+        // Pack neighbouring units into chunks of about TargetChunkChars.
         var chunks = new List<HrChunk>();
         var group = new List<JsonUnit>();
         var length = 0;
@@ -143,7 +150,7 @@ public static class HrSplitter
         }
         foreach (var u in units)
         {
-            if (length > 0 && length + 1 + u.Text.Length > MaxChunkChars) Flush();
+            if (length > 0 && length + 1 + u.Text.Length > TargetChunkChars) Flush();
             group.Add(u);
             length += u.Text.Length + (length > 0 ? 1 : 0);
         }
@@ -261,7 +268,7 @@ public static class HrSplitter
         }
         for (var r = 1; r < records.Count; r++)
         {
-            if (rows.Count > 0 && length + 1 + records[r].Text.Length > MaxChunkChars) Flush();
+            if (rows.Count > 0 && length + 1 + records[r].Text.Length > TargetChunkChars) Flush();
             rows.Add(r);
             length += 1 + records[r].Text.Length;
         }
@@ -448,7 +455,7 @@ public static class HrSplitter
         return paragraphs;
     }
 
-    /// <summary>Packs paragraphs into pieces of at most MaxChunkChars; an oversized paragraph is cut by line.</summary>
+    /// <summary>Packs paragraphs into pieces of about TargetChunkChars; a paragraph longer than that is cut by line.</summary>
     private static List<List<int>> Pack(List<List<int>> paragraphs, string[] lines)
     {
         var pieces = new List<List<int>>();
@@ -465,9 +472,9 @@ public static class HrSplitter
         foreach (var paragraph in paragraphs)
         {
             var size = paragraph.Sum(i => lines[i].Length + 1);
-            if (length > 0 && length + 1 + size > MaxChunkChars) Flush();
+            if (length > 0 && length + 1 + size > TargetChunkChars) Flush();
 
-            if (size <= MaxChunkChars)
+            if (size <= TargetChunkChars)
             {
                 current.AddRange(paragraph);
                 length += size + (length > 0 ? 1 : 0);
@@ -477,7 +484,7 @@ public static class HrSplitter
             // Too long for one chunk on its own: line by line.
             foreach (var i in paragraph)
             {
-                if (length > 0 && length + lines[i].Length + 1 > MaxChunkChars) Flush();
+                if (length > 0 && length + lines[i].Length + 1 > TargetChunkChars) Flush();
                 current.Add(i);
                 length += lines[i].Length + 1;
             }

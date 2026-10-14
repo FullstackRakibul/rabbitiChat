@@ -1,233 +1,129 @@
-# G2.8 live runs (gemma4:12b on the Mac), 2026-10-14
+# Phase 2 live runs (gemma4:12b and nomic-embed-text on the Mac), 2026-10-14, after the Phase 2 decisions
 
-## eval-p2-live.log
-G2.8 | gemma4:12b answers the four §1 questions: each cites, the third uses calculate with its formula, nothing unverified | PASS | 
-    ok  Q1 (76.8 s; cites true; calculate false; formula false; unverified [])
+## G2.8 — the four §1 questions × 3
+G2.8 | gemma4:12b, the four §1 questions × 3: all cite; ≥ 10 of 12 use formulas for every amount; 0 wrong amounts shown without the warning | PASS | cited 12/12; formulas for every amount 10/12; wrong amounts shown without the warning 0
+    BAD round 1 Q1 (52.8 s; cites true; formulas (Basic / 30) * 7 * 15 → ⚠ গণনা করা যায়নি; unverified [] ["(Basic / 30) * 7 * 15"]; wrong unwarned [])
       Q: Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?
-      A: Schedule-A (Type 3) কর্মীদের জন্য সার্ভিস বেনিফিট হিসাবের নিয়ম নিচে দেওয়া হলো:
+      A: Schedule-A কর্মীদের জন্য সার্ভিস বেনিফিট নিচের নিয়ম অনুযায়ী নির্ধারিত হয়:
          
-         **পরিচালনা বিধি অনুযায়ী:**
-         Schedule-A কর্মীদের জন্য (Type 3), ইস্তফা (Resignation) বা অন্য কোনোভাবে চাকরি ছাড়লে (যেমন Left, UA, Dismiss, Contract Expiration, Discontinuation, others) অন্তত ১ বছর চাকরির জন্য সার্ভিস বেনিফিট প্রদান করা হয় [HR_SETTLEMENT_RULES §5 (Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) - Resignation (3), Left (5), UA (7), Dismiss (9), Contract Expiration (12), Discontinuation (15), others)]।
+         **সার্ভিস বেনিফিট গণনা:**
+         Schedule-A কর্মীদের জন্য ৩ থেকে ৯ বছরের চাকরির ক্ষেত্রে প্রতি বছর ১৫ দিনের বেসিক (basic) প্রদান করা হয় [HR_SETTLEMENT_RULES §5]। যেহেতু এই কর্মী ৭ বছর ৮ মাস চাকরি করেছেন, তাই তিনি ৭ বছরের জন্য বেনিফিট পাবেন।
          
-         আপনার দেওয়া তথ্য অনুযায়ী (৭ বছর ৮ মাস):
-         ১. ৩ থেকে ৯ বছরের জন্য নিয়ম হলো: ১৫ দিনের বেসিক × বছরের সংখ্যা [HR_SETTLEMENT_RULES §5 (Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) - Resignation (3), Left (5), UA (7), Dismiss (9), Contract Expiration (12), Discontinuation (15), others)]।
-         ২. এখানে যেহেতু মোট ৭ বছর পূর্ণ হয়েছে, তাই হিসাবটি হবে নিম্নরূপ:
-         ৩. **হিসাব:** ১৫ * ৭ = ১০৫ দিন।
-         ৪. **পরিচালিত নিয়ম:** ৩–৯ বছরের ক্ষেত্রে নির্দিষ্টভাবে ১৫ দিনের বেসিক × বছরের সংখ্যা প্রদান করা হয় [HR_SETTLEMENT_RULES §5 (Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) - Resignation (1) - 3–9 yrs: 15 days' basic × yrs)]।
+         **অতিরিক্ত বছর (Extra Year):**
+         যদি অতিরিক্ত মাস ৬ বা তার বেশি হয় এবং ফ্র্যাকশন দিন (fraction days) ২৪০ বা তার বেশি হয়, তবে ১ বছর অতিরিক্ত যোগ হয় [HR_SETTLEMENT_RULES §5]। এই ক্ষেত্রে আপনার তথ্য অনুযায়ী ৮ মাস এবং ফ্র্যাকশন দিন উল্লেখ নেই।
          
-         আপনার জন্য মোট ১০৫ দিনের বেসিক (Basic × 7) প্রদান করা হবে।
+         **হিসাব:**
+         আপনার জন্য বেনিফিট হবে ⚠ গণনা করা যায়নি।
          
-         *দ্রষ্টব্য: অতিরিক্ত ১ বছর যোগ করার জন্য আরও শর্ত রয়েছে (যেমন ৬ মাসের বেশি অতিরিক্ত সময় এবং ২৪০+ ফ্র্যাকশন দিন), যা আপনার বর্তমান ৭ বছর ৮ মাসের ক্ষেত্রে প্রযোজ্য হতে পারে যদি ফ্র্যাকশন দিন ২৪০ বা তার বেশি হয় [HR_SETTLEMENT_RULES §5 (Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) - Resignation (3), Left (5), UA (7), Dismiss (9), Contract Expiration (12), Discontinuation (15), others)]।*
-    ok  Q2 (61.3 s; cites true; calculate false; formula false; unverified [])
-      Q: Which attendance codes count as worked days for earned leave?
-      A: The following attendance codes are counted as worked days for earned leave: `P, LT, LTP, SD, TL, EE, NOP, EXL` [HR_SETTLEMENT_RULES §1].
+         **গুরুত্বপূর্ণ তথ্য:**
+         আপনার বেসিক (Basic) বেতন এবং চাকরির মেয়াদ (Service length) নিশ্চিত করার জন্য অনুগ্রহ করে আপনার বেসিক বেতন এবং সঠিক সার্ভিস মেয়াদ প্রদান করুন।
          
-         Additionally, for the last part-year of service, `SL` also counts [HR_SETTLEMENT_RULES §1].
-    ok  Q3 (41.3 s; cites true; calculate true; formula true; unverified [])
-      Q: Basic is 12,000, 7 years 8 months, 250 fraction days, resignation in April 2026, Non-Management. What is the service benefit?
-      A: To calculate the service benefit for this employee, we first identify the applicable rules based on the provided data.
-         
-         The employee is Non-Management (Type 2, 3, or 4) and is resigning (Status 3) in April 2026. According to the rules for Non-Management and others for separations from 1 March 2026 onwards, the benefit for 3–9 years of service is 15 days' basic × years [ProcessFinalSettelment.sql §Service Benefit L737-809]. Additionally, because the length of service is 7 years and 8 months (greater than 6 months) and the fraction days are 250 (greater than 240), one extra year is added to the calculation [ProcessFinalSettelment.sql §Service Benefit L737-809].
-         
-         **Calculation:**
-         The formula is: ((Basic / 30) * 15) * (Years + 1)
-         ((12000 / 30) * 15) * (7 + 1)
-         
-         To calculate the service benefit for this employee, we first identify the applicable rules based on the provided data.
-         
-         The employee is Non-Management (Type 2, 3, or 4) and is resigning (Status 3) in April 2026. According to the rules for Non-Management and others for separations from 1 March 2026 onwards, the benefit for 3–9 years of service is 15 days' basic × years [ProcessFinalSettelment.sql §Service Benefit L737-809]. Additionally, because the length of service is 7 years and 8 months (greater than 6 months) and the fraction days are 250 (greater than 240), one extra year is added to the calculation [ProcessFinalSettelment.sql §Service Benefit L737-809].
-         
-         **Calculation:**
-         The formula is: ((Basic / 30) * 15) * (Years + 1)
-         ((12000 / 30) * 15) * (7 + 1)
-         
-         The service benefit is ৳48,000.
-    ok  Q4 (37.5 s; cites true; calculate false; formula false; unverified [])
-      Q: What happens when someone in unit 27 separates on the 28th?
-      A: In Unit 27, if a separation occurs on the 28th, the following logic applies:
-         
-         *   **Salary Month Calculation:** For Unit 27, a separation on the 28th is not considered part of the "27th–31st" range that would push the calculation to the next month. Therefore, the system uses the calendar month of the separation date. Specifically, the `SalaryMonth` is determined as the month of the separation date, and the `SalaryYear` is the current working year [ProcessFinalSettelment.sql L120-144].
-         *   **Separation Status:** The system checks if the separation status is active for the current salary month. Since the 28th does not fall within the specific "27th–31st" or "1st" criteria for Unit 27, it follows the standard calendar month logic [ProcessSupplementaryFinalSetelment.sql L164-201].
-         *   **Salary Processing:** The salary will be processed up to the separation effect date [ProcessSupplementaryFinalSetelment.sql L329-335].
-         
-         HR is reviewing this rule. [HR_SETTLEMENT_RULES §11] (The code handles the month calculation as the calendar month, but the rules document indicates a discrepancy in how certain dates are handled).
-
-## eval-p2-live2.log
-G2.8 | gemma4:12b answers the four §1 questions: each cites, the third uses calculate with its formula, nothing unverified | FAIL | 
-    ok  Q1 (83.3 s; cites true; calculate false; formula true; unverified [])
-      Q: Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?
-      A: Schedule-A (Type 3) কর্মীদের জন্য ইস্তফা (Resignation) বা অন্য কোনো কারণে (যেমন- Left, UA, Dismiss, ইত্যাদি) চাকরি ছাড়ার ক্ষেত্রে সার্ভিস বেনিফিট হিসাবের নিয়ম নিচে দেওয়া হলো:
-         
-         ১. **শর্ত (Condition):** এই সুবিধা পাওয়ার জন্য অন্তত ১ বছর চাকরির মেয়াদ থাকতে হবে এবং মার্চ ২০২৬ তারিখের পর থেকে বিচ্ছিন্ন (Separation) হতে হবে [HR_SETTLEMENT_RULES §5 - Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) | Status: Resignation (3), Left (5), UA (7), Dismiss (9), Contract Expiration (12), Discontinuation (15), others]।
-         
-         ২. **হিসাবের নিয়ম (Calculation Rule):**
-         *   ৩ থেকে ৯ বছরের মধ্যে চাকরির জন্য: ১৫ দিনের বেসিক (days' basic) × মোট বছর (years) [HR_SETTLEMENT_RULES §5 - Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) | Status: Resignation (3), Left (5), UA (7), Dismiss (9), Contract Expiration (12), Discontinuation (15), others]।
-         *   **অতিরিক্ত বছর (Additional Year):** যদি চাকরির মেয়াদ ৬ মাসের বেশি হয় এবং ফ্র্যাকশন ডে (fraction days) ২৪০ বা তার বেশি হয়, তবে আরও ১ বছর যোগ হবে [HR_SETTLEMENT_RULES §5 - Non-Management, Schedule-A, Schedule-B (types 2, 3, 4) | Status: Resignation (3), Left (5), UA (7), Dismiss (9), Contract Expiration (12), Discontinuation (15), others]।
-         
-         ৩. **আপনার নির্দিষ্ট হিসাব:**
-         আপনার ক্ষেত্রে চাকরির মেয়াদ ৭ বছর ৮ মাস। যেহেতু এই মেয়াদ ৩ থেকে ৯ বছরের মধ্যে পড়ে, তাই হিসাব হবে নিম্নরূপ:
-         *   **বছরের সংখ্যা:** ৭ বছর।
-         *   **অতিরিক্ত বছর:** যেহেতু ৮ মাস (৬ মাসের বেশি) এবং ফ্র্যাকশন ডে ২৪০-এর বেশি (ধরে নিচ্ছি ২০২৪ বা ২০২৫ এর জন্য প্রযোজ্য নিয়ম অনুযায়ী), তাই এটি ৮ বছর হিসেবে গণ্য হবে।
-         *   **সূত্র:** 15 (দিন) × 8 (বছর) = ১২০ দিনের বেসিক।
-         
-         **Calculation:**
-         আপনার বেসিক বেতন বা নির্দিষ্ট পরিমাণটি প্রদান করলে আমি সঠিক টাকা হিসাব করে দিতে পারব। আপাতত নিয়ম অনুযায়ী হিসাবটি হলো:
-         `15 * 8 = 120`
-         
-         আপনার মোট সার্ভিস বেনিফিট হবে ১২০ দিনের বেসিক বেতন।
-         
-         **Note:** যেহেতু এই নিয়মটি নির্দিষ্ট করার জন্য প্রয়োজনীয় ডাটা (যেমন- বর্তমান বেসিক বেতন) এখনও প্রদান করা হয়নি, তাই আমি শুধু নিয়মটি উল্লেখ করছি।
-    ok  Q2 (64.3 s; cites true; calculate false; formula false; unverified [])
+         HR is reviewing this rule [HR_SETTLEMENT_RULES §11, Item 2] (Dismiss এবং UA এর জন্য একই বেনিফিট প্রযোজ্য কি না)।
+    ok  round 1 Q2 (42.2 s; cites true; formulas none; unverified [] []; wrong unwarned [])
       Q: Which attendance codes count as worked days for earned leave?
       A: The attendance codes counted as worked days for earned leave are `P, LT, LTP, SD, TL, EE, NOP, EXL` [HR_SETTLEMENT_RULES §1].
          
-         Additionally, for the last part-year of service, `SL` also counts [HR_SETTLEMENT_RULES §1].
-    BAD Q3 (30.4 s; cites true; calculate false; formula true; unverified [400,6000,48000])
+         For the last part-year of service, `SL` also counts [HR_SETTLEMENT_RULES §1].
+    ok  round 1 Q3 (21.8 s; cites true; formulas (12000/30)*15*8 → ৳48,000; unverified [] []; wrong unwarned [])
       Q: Basic is 12,000, 7 years 8 months, 250 fraction days, resignation in April 2026, Non-Management. What is the service benefit?
-      A: To calculate the service benefit for this employee, I will use the rules and code provided in the documents.
+      A: For a Non-Management employee (Type 2, 3, or 4) with a resignation status (Status 3) and a service length of 7 years and 8 months, the service benefit is calculated based on the following rules:
          
-         For a Non-Management employee (Type 2, 3, or 4) with a resignation (Status 3) and a separation date after March 1, 2026, the system checks the length of service. Since the service length is 7 years and 8 months, and the fraction days are 250 (which is $\ge$ 240), the calculation follows the rule for 3–9 years.
+         For employees with 3–9 years of service, the benefit is 15 days' basic for each year [HR_SETTLEMENT_RULES §5]. However, an extra year is added when there are 6+ extra months **and** 240+ fraction days [HR_SETTLEMENT_RULES §5]. HR is reviewing this rule [HR_SETTLEMENT_RULES §11].
          
-         The formula used is:
-         `((BasicSalary / 30) * 15) * (LengthYear + 1)` [ProcessFinalSettelment.sql §Service Benefit L737-809]
+         The code for this calculation performs a different calculation: it checks if the length of service is between 3 and 9 years and if the months are 8 or more, and if the fraction days are 240 or more, it sets the benefit to 15 days' basic for each year, including the extra year [ProcessFinalSettelment.sql §Service Benefit L653-694].
          
-         **Calculation:**
-         ((12000 / 30) * 15) * (7 + 1)
-         = (400 * 15) * 8
-         = 6,000 * 8
-         = 48,000
-         
-         The service benefit is ৳48,000.
-    ok  Q4 (42.3 s; cites true; calculate false; formula false; unverified [])
+         Based on the rules, the service benefit is ৳48,000.
+    ok  round 1 Q4 (24.9 s; cites true; formulas none; unverified [] []; wrong unwarned [])
       Q: What happens when someone in unit 27 separates on the 28th?
-      A: For a separation in unit 27 on the 28th, the following rules apply:
+      A: For an employee in unit 27 who separates on the 28th, the following rules apply:
          
-         *   **Salary Month Calculation:** Since the unit is 27 and the separation date is the 28th, the separation counts in the current month because it is not between the 27th–31st or the 1st [ProcessFinalSettelment.sql L120-144].
-         *   **Separation Status:** The separation status is checked against the current salary month and year. Because the separation date (28th) is not within the specific window of 27th–31st or the 1st for unit 27, and the separation check date (27th) is compared against the current month, the status is processed accordingly [ProcessSupplementaryFinalSetelment.sql L164-201].
-         *   **Earned Leave Calculation:** For an employee in unit 27, the allocation is calculated based on the number of working days from January 1st of the current year until the separation date [ProcessFinalSettelment.sql §Cacculate Current Year Leave L223-259].
-         *   **Salary Source:** The system identifies the basic salary by calling `GetSalaryDetails` specifically using `BasicSalaryOrg` for unit 27 [ProcessFinalSettelment.sql §Calculate Salary Stracture L548-575].
-         
-         The context does not cover the specific day-by-day breakdown of which days are counted as "working days" for unit 27.
-
-## eval-g28-t0-1.log
-G2.8 | gemma4:12b answers the four §1 questions: each cites, the third uses calculate with its formula, nothing unverified | FAIL | 
-    ok  Q1 (45.2 s; cites true; calculate false; formula false; unverified [])
+         *   **Salary Month Calculation:** For units 1, 27, 45, and 111, a separation on the 27th–31st or the 1st counts in the **next** month [HR_SETTLEMENT_RULES §2.2]. The code determines the salary month by adding 5 days to the separation date and extracting the month and year [ProcessFinalSettelment.sql L120-133].
+         *   **Supplementary Settlement:** The system checks if the separation date falls between the 27th and 31st (or the 1st) for units 1, 27, 45, and 111 to determine the separation status for the supplementary settlement [ProcessSupplementaryFinalSetelment.sql L174-182].
+         *   **Management Leave Allocation:** If the employee is of Management type (Type 1) in unit 27, the leave allocation is calculated as days since 1 January × 16 ÷ 360 [HR_SETTLEMENT_RULES §4]. The code calculates this using the difference in days from January 1st of the separation year to the separation date [ProcessFinalSettelment.sql §Cacculate Current Year Leave L240-259].
+         *   **Salary Details:** For units 1, 27, and 45, the system retrieves the `BasicSalaryOrg` and `GrossSalary` from the `GetSalaryDetails` procedure [ProcessFinalSettelment.sql §Calculate Salary Stracture L550-571].
+    ok  round 2 Q1 (15.2 s; cites true; formulas none; unverified [] []; wrong unwarned [])
       Q: Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?
-      A: Schedule-A (Type 3) কর্মীদের জন্য সার্ভিস বেনিফিট হিসাবের নিয়ম নিচে দেওয়া হলো:
+      A: Schedule-A কর্মীদের জন্য সার্ভিস বেনিফিট হিসাবের নিয়ম নিচে দেওয়া হলো:
+         
+         Schedule-A কর্মীদের জন্য সার্ভিস বেনিফিট নির্ধারিত হয় তাদের চাকরির সময় এবং বিচ্ছেদের অবস্থার ওপর ভিত্তি করে। যেহেতু এই কর্মী ইস্তফা (Resignation) দিয়েছেন, তাই তিনি নিম্নোক্ত নিয়ম অনুযায়ী বেনিফিট পাবেন:
+         
+         ১. **বিনিময়ের নিয়ম:** ৩ থেকে ৯ বছরের জন্য ১৫ দিনের বেসিক (basic) × বছর (yrs) [HR_SETTLEMENT_RULES §5]
+         ২. **অতিরিক্ত বছর:** যদি অতিরিক্ত মাস ৬ বা তার বেশি হয় এবং ফ্র্যাকশন দিন (fraction days) ২৪০ বা তার বেশি হয়, তবে আরও ১ বছর যোগ হবে [HR_SETTLEMENT_RULES §5]।
+         ৩. **হিসাব:** এই ক্ষেত্রে ৩ থেকে ৯ বছরের নিয়ম প্রযোজ্য হবে। যেহেতু ৭ বছর ৮ মাস চাকরি করেছেন, তাই তিনি ৭ বছরের জন্য বেনিফিট পাবেন এবং যেহেতু ৮ মাস (৬ মাসের বেশি) এবং ফ্র্যাকশন দিন ২৪০ বা তার বেশি হলে অতিরিক্ত ১ বছর যোগ হয়, তাই তিনি মোট ৮ বছরের জন্য বেনিফিট পাবেন।
+         
+         এই হিসাবের জন্য আপনার প্রতিষ্ঠানের নির্দিষ্ট তথ্য প্রয়োজন:
+         - এই কর্মীর মাসিক বেসিক বেতন (Basic Salary) কত?
+         - এই কর্মীর ফ্র্যাকশন দিন (Fraction days) কত?
+         
+         এই তথ্যগুলো দিলে আমি সঠিক পরিমাণটি হিসাব করতে পারব।
+    ok  round 2 Q2 (2.7 s; cites true; formulas none; unverified [] []; wrong unwarned [])
+      Q: Which attendance codes count as worked days for earned leave?
+      A: The attendance codes counted as worked days for earned leave are `P, LT, LTP, SD, TL, EE, NOP, EXL` [HR_SETTLEMENT_RULES §1].
+         
+         For the last part-year of service, `SL` also counts [HR_SETTLEMENT_RULES §1].
+    ok  round 2 Q3 (10.7 s; cites true; formulas (12000/30)*15*8 → ৳48,000; unverified [] []; wrong unwarned [])
+      Q: Basic is 12,000, 7 years 8 months, 250 fraction days, resignation in April 2026, Non-Management. What is the service benefit?
+      A: For a Non-Management employee (Type 2, 3, or 4) with a resignation status (Status 3) and a service length of 7 years and 8 months, the service benefit is calculated based on the following rules:
+         
+         For employees with 3–9 years of service, the benefit is 15 days' basic for each year [HR_SETTLEMENT_RULES §5]. However, an extra year is added when there are 6+ extra months **and** 240+ fraction days [HR_SETTLEMENT_RULES §5]. HR is reviewing this rule [HR_SETTLEMENT_RULES §11].
+         
+         The code for this calculation performs a different calculation: it checks if the length of service is between 3 and 9 years and if the months are 8 or more, and if the fraction days are 240 or more, it sets the benefit to 15 days' basic for each year, including the extra year [ProcessFinalSettelment.sql §Service Benefit L653-694].
+         
+         Based on the rules, the service benefit is ৳48,000.
+    ok  round 2 Q4 (15.4 s; cites true; formulas none; unverified [] []; wrong unwarned [])
+      Q: What happens when someone in unit 27 separates on the 28th?
+      A: For an employee in unit 27 who separates on the 28th, the following rules apply:
+         
+         *   **Salary Month Calculation:** For units 1, 27, 45, and 111, a separation on the 27th–31st or the 1st counts in the **next** month [HR_SETTLEMENT_RULES §2.2]. The code determines the salary month by adding 5 days to the separation date and extracting the month and year [ProcessFinalSettelment.sql L120-133].
+         *   **Supplementary Settlement:** The system checks if the separation date falls between the 27th and 31st (or the 1st) for units 1, 27, 45, and 111 to determine the separation status for the supplementary settlement [ProcessSupplementaryFinalSetelment.sql L174-182].
+         *   **Management Leave Allocation:** If the employee is of Management type (Type 1) in unit 27, the leave allocation is calculated as days since 1 January × 16 ÷ 360 [HR_SETTLEMENT_RULES §4]. The code calculates this by finding the difference in days from January 1st of the separation year to the separation date [ProcessFinalSettelment.sql §Cacculate Current Year Leave L240-259].
+         *   **Salary Details:** For units 1, 27, and 45, the system retrieves the `BasicSalaryOrg` and `GrossSalary` from the `GetSalaryDetails` procedure [ProcessFinalSettelment.sql §Calculate Salary Stracture L550-571].
+    BAD round 3 Q1 (12.2 s; cites true; formulas (Basic/30)*15*7 → ⚠ গণনা করা যায়নি; unverified [] ["(Basic/30)*15*7"]; wrong unwarned [])
+      Q: Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?
+      A: Schedule-A কর্মীদের জন্য সার্ভিস বেনিফিট নিচের নিয়ম অনুযায়ী নির্ধারিত হয়:
          
          **সার্ভিস বেনিফিট গণনা:**
-         Schedule-A কর্মীদের জন্য ইস্তফা (Resignation), চাকরি ছেড়ে দেওয়া (Left), বা অন্য কোনো কারণে বিচ্ছেদ ঘটলে (যেমন Dismiss, Contract Expiration, Discontinuation) নিচের নিয়ম প্রযোজ্য হয়:
-         *   **৩ থেকে ৯ বছরের জন্য:** ১৫ দিনের বেসিক (days' basic) × চাকরির বছর (yrs) [HR_SETTLEMENT_RULES §5]
-         *   **অতিরিক্ত বছর (Extra Year):** যদি অতিরিক্ত মাস ৬ বা তার বেশি হয় **এবং** ফ্র্যাকশন দিন (fraction days) ২৪০ বা তার বেশি হয়, তবে ১ বছর অতিরিক্ত যোগ হবে [HR_SETTLEMENT_RULES §5]।
+         Schedule-A কর্মীদের জন্য ৩ থেকে ৯ বছরের চাকরির ক্ষেত্রে প্রতি বছর ১৫ দিনের বেসিক (basic) প্রদান করা হয় [HR_SETTLEMENT_RULES §5]। যেহেতু এই কর্মী ৭ বছর ৮ মাস চাকরি করেছেন, তাই তিনি ৭ বছরের জন্য বেনিফিট পাবেন।
          
-         **আপনার নির্দিষ্ট ক্ষেত্রে হিসাব:**
-         আপনার তথ্য অনুযায়ী, ওই কর্মী ৭ বছর ৮ মাস চাকরি করেছেন। যেহেতু ৭ বছর এবং ৮ মাস (যা ৬ মাসের বেশি) এবং ফ্র্যাকশন দিন ২৪০ এর বেশি হলে অতিরিক্ত ১ বছর যোগ হয়, তাই মোট সময় হিসেবে ৮ বছর ধরা হবে।
+         **অতিরিক্ত বছর (Extra Year):**
+         যদি অতিরিক্ত মাস ৬ বা তার বেশি হয় এবং ফ্র্যাকশন দিন (fraction days) ২৪০ বা তার বেশি হয়, তবে ১ বছর অতিরিক্ত যোগ হয় [HR_SETTLEMENT_RULES §5]। এই ক্ষেত্রে আপনার তথ্য অনুযায়ী ৮ মাস এবং ফ্র্যাকশন দিন উল্লেখ নেই।
          
-         **হিসাবের সূত্র:**
-         আপনার দেওয়া তথ্য অনুযায়ী:
-         *   চাকরির বছর (yrs): ৮ (৭ বছর ৮ মাস + ১ বছর অতিরিক্ত)
-         *   বেসিক (basic): (আপনার তথ্য প্রদান করুন)
-         
-         **হিসাবের পদ্ধতি:**
-         সূত্র: (১৫ দিন বেসিক × ৮ বছর)
-         যেহেতু আপনি বেসিকের পরিমাণ প্রদান করেননি, তাই আমি চূড়ান্ত অংকটি গণনা করতে পারছি না। অনুগ্রহ করে কর্মীর **Basic Salary** প্রদান করুন।
+         **হিসাব:**
+         আপনার জন্য বেনিফিট হবে ⚠ গণনা করা যায়নি।
          
          **গুরুত্বপূর্ণ তথ্য:**
-         *   এই হিসাবটি শুধুমাত্র **Category 1** কর্মীদের জন্য প্রযোজ্য [HR_SETTLEMENT_RULES §1]।
-         *   এই নিয়মটি বর্তমানে ড্রাফট হিসেবে আছে এবং সিস্টেমের কোড থেকে নেওয়া হয়েছে [HR_SETTLEMENT_RULES §1]।
-         *   HR এই নিয়মটি পর্যালোচনা করছে (HR is reviewing this rule) [HR_SETTLEMENT_RULES §11, Point 2]।
-    ok  Q2 (33.0 s; cites true; calculate false; formula false; unverified [])
+         আপনার এই হিসাবটি সম্পন্ন করার জন্য নির্দিষ্ট **Basic Salary** এবং **Separation Date** প্রয়োজন। অনুগ্রহ করে এই তথ্যগুলো প্রদান করুন।
+         
+         HR is reviewing this rule [HR_SETTLEMENT_RULES §11.2]
+    ok  round 3 Q2 (2.7 s; cites true; formulas none; unverified [] []; wrong unwarned [])
       Q: Which attendance codes count as worked days for earned leave?
-      A: The attendance codes that count as worked days for earned leave are: `P, LT, LTP, SD, TL, EE, NOP, EXL`. [HR_SETTLEMENT_RULES §1]
+      A: The attendance codes counted as worked days for earned leave are `P, LT, LTP, SD, TL, EE, NOP, EXL` [HR_SETTLEMENT_RULES §1].
          
-         Additionally, for the last part-year of service, `SL` also counts. [HR_SETTLEMENT_RULES §1]
-    BAD Q3 (30.2 s; cites true; calculate false; formula true; unverified [24000])
+         For the last part-year of service, `SL` also counts [HR_SETTLEMENT_RULES §1].
+    ok  round 3 Q3 (10.7 s; cites true; formulas (12000/30)*15*8 → ৳48,000; unverified [] []; wrong unwarned [])
       Q: Basic is 12,000, 7 years 8 months, 250 fraction days, resignation in April 2026, Non-Management. What is the service benefit?
-      A: To calculate the service benefit for a Non-Management employee with 7 years and 8 months of service, 250 fraction days, and a resignation in April 2026, we refer to the following rules:
+      A: For a Non-Management employee (Type 2, 3, or 4) with a resignation status (Status 3) and a service length of 7 years and 8 months, the service benefit is calculated based on the following rules:
          
-         For Non-Management (Type 2, 3, 4) with a separation date after March 1, 2026, and a service length of 3–9 years, the benefit is 15 days' basic × years. However, if the service month is 6+ months and the fraction days are 240+, an additional year is added to the calculation [ProcessFinalSettelment.sql §Service Benefit L737-809].
+         For employees with 3–9 years of service, the benefit is 15 days' basic for each year [HR_SETTLEMENT_RULES §5]. However, an extra year is added when there are 6+ extra months **and** 240+ fraction days [HR_SETTLEMENT_RULES §5]. HR is reviewing this rule [HR_SETTLEMENT_RULES §11].
          
-         Since the employee has 7 years and 8 months of service (which is 6+ months) and 250 fraction days (which is 240+), the calculation includes the extra year.
+         The code for this calculation performs a different calculation: it checks if the length of service is between 3 and 9 years and if the months are 8 or more, and if the fraction days are 240 or more, it sets the benefit to 15 days' basic for each year, including the extra year [ProcessFinalSettelment.sql §Service Benefit L653-694].
          
-         **Calculation:**
-         The formula used is: `((Basic / 30) * 15) * (Years + 1)`
-         `((12000 / 30) * 15) * (7 + 1)`
-         
-         The service benefit is ৳24,000.
-    ok  Q4 (41.1 s; cites true; calculate false; formula true; unverified [])
+         Based on the rules, the service benefit is ৳48,000.
+    ok  round 3 Q4 (15.2 s; cites true; formulas none; unverified [] []; wrong unwarned [])
       Q: What happens when someone in unit 27 separates on the 28th?
       A: For an employee in unit 27 who separates on the 28th, the following rules apply:
          
-         *   **Salary Month Calculation:** Since the separation occurs in a unit (27) where the month runs from the 27th to the 26th, and the separation date is the 28th, the salary month is determined by the month of the separation date [ProcessFinalSettelment.sql L120-144].
-         *   **Separation Status:** The system checks if the separation is valid for processing. For unit 27, if the separation date is between the 27th and 31st, the system confirms the separation status for that specific salary month [ProcessSupplementaryFinalSetelment.sql L164-201].
-         *   **Earned Leave (Management):** If the employee is of Management type (Type 1), the leave is calculated based on the number of working days from January 1st to the separation date [ProcessFinalSettelment.sql §Cacculate Current Year Leave L223-259]. The formula used is: `(16.00/360.00) * WorkingDays` [ProcessFinalSettelment.sql §Cacculate Current Year Leave L223-259].
-         *   **Salary Basis:** For unit 27, the system specifically retrieves the `BasicSalaryOrg` from the salary details [ProcessFinalSettelment.sql §Calculate Salary Stracture L548-575].
+         *   **Salary Month Calculation:** For units 1, 27, 45, and 111, a separation on the 27th–31st or the 1st counts in the **next** month [HR_SETTLEMENT_RULES §2.2]. The code determines the salary month by adding 5 days to the separation date and extracting the month and year [ProcessFinalSettelment.sql L120-133].
+         *   **Supplementary Settlement:** The system checks if the separation date falls between the 27th and 31st (or the 1st) for units 1, 27, 45, and 111 to determine the separation status for the supplementary settlement [ProcessSupplementaryFinalSetelment.sql L174-182].
+         *   **Management Leave Allocation:** If the employee is of Management type (Type 1) in unit 27, the leave allocation is calculated as days since 1 January × 16 ÷ 360 [HR_SETTLEMENT_RULES §4]. The code calculates this by finding the difference in days from January 1st of the separation year to the separation date [ProcessFinalSettelment.sql §Cacculate Current Year Leave L240-259].
+         *   **Salary Details:** For units 1, 27, and 45, the system retrieves the `BasicSalaryOrg` and `GrossSalary` from the `GetSalaryDetails` procedure [ProcessFinalSettelment.sql §Calculate Salary Stracture L550-571].
 
+## G1.6 live
+G1.6 | retrieval (nomic-embed-text): both questions find their chunk among the top 5 excerpts sent | PASS | service benefit → found: ProcessFinalSettelment.sql §Service Benefit L653-694 (0.033) | ProcessFinalSettelment.sql §Service Benefit L697-735 (0.032) | ProcessFinalSettelment.sql §Service Benefit L737-773 (0.031) | ProcessFinalSettelment.sql §Expiration Benefit L924-941 (0.031) | ProcessFinalSettelment.sql §Service Benefit L775-809 (0.031)
+    attendance codes → found: ProcessFinalSettelment.sql §Cacculate Current Year Leave L508-528 (0.032) | ProcessFinalSettelment.sql §Cacculate Current Year Leave L147-167 (0.032) | ProcessSupplementaryFinalSetelment.sql §Attendance Bonus L661-670 (0.032) | ProcessFinalSettelment.sql §Cacculate Current Year Leave L410-423 (0.031) | ProcessFinalSettelment.sql §Cacculate Current Year Leave L437-462 (0.030)
 
-## eval-g28-t0-2.log
-G2.8 | gemma4:12b answers the four §1 questions: each cites, the third uses calculate with its formula, nothing unverified | PASS | 
-    ok  Q1 (19.2 s; cites true; calculate false; formula false; unverified [])
-      Q: Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?
-      A: Schedule-A (Type 3) কর্মীদের জন্য সার্ভিস বেনিফিট হিসাবের নিয়ম নিচে দেওয়া হলো:
-         
-         **সার্ভিস বেনিফিট গণনা:**
-         Schedule-A কর্মীদের জন্য ইস্তফা (Resignation), চাকরি ছেড়ে দেওয়া (Left), বা অন্য কোনো কারণে বিচ্ছেদ ঘটলে (যেমন Dismiss, Contract Expiration, Discontinuation) নিচের নিয়ম প্রযোজ্য হয়:
-         *   **৩ থেকে ৯ বছরের জন্য:** ১৫ দিনের বেসিক (days' basic) × চাকরির বছর (yrs) [HR_SETTLEMENT_RULES §5]
-         *   **অতিরিক্ত বছর (Extra Year):** যদি অতিরিক্ত মাস ৬ বা তার বেশি হয় **এবং** ফ্র্যাকশন দিন (fraction days) ২৪০ বা তার বেশি হয়, তবে ১ বছর অতিরিক্ত যোগ হবে [HR_SETTLEMENT_RULES §5]।
-         
-         **আপনার নির্দিষ্ট ক্ষেত্রে হিসাব:**
-         আপনার তথ্য অনুযায়ী, ওই কর্মী ৭ বছর ৮ মাস চাকরি করেছেন। যেহেতু ৭ বছর এবং ৮ মাস (যা ৬ মাসের বেশি) এবং ফ্র্যাকশন দিন ২৪০ এর বেশি হলে অতিরিক্ত ১ বছর যোগ হয়, তাই মোট সময় হিসেবে ৮ বছর ধরা হবে।
-         
-         **হিসাবের সূত্র:**
-         আপনার দেওয়া তথ্য অনুযায়ী:
-         *   চাকরির বছর (yrs): ৮ (৭ বছর ৮ মাস + ১ বছর অতিরিক্ত)
-         *   বেসিক (basic): (আপনার তথ্য প্রদান করুন)
-         
-         **হিসাবের পদ্ধতি:**
-         সূত্র: (১৫ দিন বেসিক × ৮ বছর)
-         যেহেতু আপনি বেসিকের পরিমাণ প্রদান করেননি, তাই আমি চূড়ান্ত হিসাবটি করতে পারছি না। অনুগ্রহ করে ওই কর্মীর **Basic Salary** প্রদান করুন।
-         
-         **বিশেষ দ্রষ্টব্য:**
-         HR এই নিয়মটি পর্যালোচনা করছে (HR is reviewing this rule) [HR_SETTLEMENT_RULES §11]।
-    ok  Q2 (3.1 s; cites true; calculate false; formula false; unverified [])
-      Q: Which attendance codes count as worked days for earned leave?
-      A: The attendance codes that count as worked days for earned leave are: `P, LT, LTP, SD, TL, EE, NOP, EXL`. [HR_SETTLEMENT_RULES §1]
-         
-         Additionally, for the last part-year of service, `SL` also counts. [HR_SETTLEMENT_RULES §1]
-    ok  Q3 (21.4 s; cites true; calculate true; formula true; unverified [])
-      Q: Basic is 12,000, 7 years 8 months, 250 fraction days, resignation in April 2026, Non-Management. What is the service benefit?
-      A: To calculate the service benefit for a Non-Management employee with 7 years and 8 months of service, 250 fraction days, and a resignation in April 2026, we refer to the following rules:
-         
-         For Non-Management (Type 2, 3, 4) with a separation date after March 1, 2026, and a service length of 3–9 years, the benefit is 15 days' basic × years. However, if the service month is 6+ months and the fraction days are 240+, an additional year is added to the calculation [ProcessFinalSettelment.sql §Service Benefit L737-809].
-         
-         Since the employee has 7 years and 8 months of service (which is 6+ months) and 250 fraction days (which is 240+), the calculation includes the extra year.
-         
-         **Calculation:**
-         The formula used is: `((Basic / 30) * 15) * (Years + 1)`
-         `((12000 / 30) * 15) * (7 + 1)`
-         
-         The service benefit is ৳48,000.
-         
-         For a Non-Management employee (Type 2, 3, 4) with a separation date after March 1, 2026, and a service length of 3–9 years, the benefit is 15 days' basic × years. However, if the service month is 6+ months and the fraction days are 240+, an additional year is added to the calculation [ProcessFinalSettelment.sql §Service Benefit L737-809].
-         
-         Since the employee has 7 years and 8 months of service (which is 6+ months) and 250 fraction days (which is 240+), the calculation includes the extra year.
-         
-         **Calculation:**
-         ((12000 / 30) * 15) * (7 + 1) = 48,000
-    ok  Q4 (12.7 s; cites true; calculate false; formula false; unverified [])
-      Q: What happens when someone in unit 27 separates on the 28th?
-      A: For an employee in unit 27 who separates on the 28th, the following rules apply:
-         
-         *   **Salary Month Calculation:** Since the separation occurs in a unit (27) where the month runs from the 27th to the 26th, and the separation date is the 28th, the salary month is determined by the month of the separation date [ProcessFinalSettelment.sql L120-144].
-         *   **Separation Status:** The system checks if the separation is valid for processing. For unit 27, a separation on the 28th is considered a valid separation status because it falls within the range of the 27th to the 31st [ProcessSupplementaryFinalSetelment.sql L164-201].
-         *   **Earned Leave Calculation:** For management employees in unit 27, the leave is calculated based on the number of working days from January 1st to the separation date [ProcessFinalSettelment.sql §Cacculate Current Year Leave L223-259].
-         
-         The context does not cover the specific calculation of the final amount for this scenario; HR would need to add the specific calculation formula for unit 27's final settlement amount.
+## G2.14 live (six different conversations; the first unmeasured)
+G2.14 | live gemma4:12b, warm: status line within 1 s; the second question reaches its first word in < 15 s (median of 5); Ollama reused the always prefix | PASS | unmeasured warm-up after the prefix changed: first word 0.2 s, ~0 of 5551 tokens evaluated; status line after 4 ms, 174 ms, 3 ms, 5 ms, 8 ms; first word on the second question: 18.6 s, 11.1 s, 14.3 s, 14.1 s, 10.2 s (median 14.1 s); cold rate 134 tokens/s (3582 tokens in 26.7 s); prefix reused true: 6268 sent, ~2464 evaluated in 18.4 s (system 3878); 5320 sent, ~1404 evaluated in 10.5 s (system 3878); 5714 sent, ~1847 evaluated in 13.8 s (system 3878); 5699 sent, ~1810 evaluated in 13.5 s (system 3878); 5253 sent, ~1302 evaluated in 9.7 s (system 3878)
 
-
-# G2.14 live (second full run)
-G2.14 | live gemma4:12b, warm: the second question reaches its first word in < 5 s (median of 5) and Ollama reused the always prefix | FAIL | first word on the second question: 58.0 s, 26.8 s, 26.4 s, 25.9 s, 26.8 s (median 26.8 s); cold rate 128 tokens/s (3582 tokens in 27.9 s); prefix reused false: 7135 sent, ~7358 evaluated in 57.3 s (system 3736); 7113 sent, ~3296 evaluated in 25.7 s (system 3736); 7101 sent, ~3273 evaluated in 25.5 s (system 3736); 7119 sent, ~3262 evaluated in 25.4 s (system 3736); 7159 sent, ~3337 evaluated in 26.0 s (system 3736)
-
-# G1.6 live
-G1.6 | retrieval (nomic-embed-text): both questions find their chunk in the top 3 | FAIL | service benefit → found: ProcessFinalSettelment.sql §Service Benefit L653-735 (0.033) | ProcessFinalSettelment.sql §Service Benefit L737-809 (0.033) | ProcessFinalSettelment.sql §Service Benefit L811-828 (0.032)
-    attendance codes → MISSED: ProcessFinalSettelment.sql §Cacculate Current Year Leave L508-528 (0.033) | ProcessSupplementaryFinalSetelment.sql §Attendance Bonus L661-690 (0.032) | ProcessFinalSettelment.sql §Cacculate Current Year Leave L147-196 (0.032)
+## G2.14 live, first attempt (one conversation repeated; the first measured turn came right after the calibration changed the prefix)
+G2.14 | live gemma4:12b, warm: status line within 1 s; the second question reaches its first word in < 15 s (median of 5); Ollama reused the always prefix | FAIL | status line after 11 ms, 6 ms, 6 ms, 9 ms, 9 ms; first word on the second question: 42.4 s, 12.4 s, 9.9 s, 0.3 s, 0.3 s (median 9.9 s); cold rate 133 tokens/s (3582 tokens in 27.0 s); prefix reused false: 5489 sent, ~5459 evaluated in 41.1 s (system 3878); 5502 sent, ~1562 evaluated in 11.8 s (system 3878); 5495 sent, ~1258 evaluated in 9.5 s (system 3878); 5495 sent, ~11 evaluated in 0.1 s (system 3878); 5495 sent, ~11 evaluated in 0.1 s (system 3878)

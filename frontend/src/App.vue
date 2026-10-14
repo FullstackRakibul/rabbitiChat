@@ -321,6 +321,8 @@ async function send() {
           scrollDown()
         },
         onThinking: (chunk) => { reply.thinking += chunk; scrollDown() },
+        // Only the final round is the answer; what came before a tool call was a draft.
+        onContentReset: () => { reply.content = '' },
         onTool: (t) => {
           // One card per tool, updated in place as its status changes.
           const existing = reply.tools.find((x) => x.tool === t.tool && x.detail === t.detail)

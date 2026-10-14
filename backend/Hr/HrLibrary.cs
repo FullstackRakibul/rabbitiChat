@@ -181,10 +181,34 @@ public sealed class HrLibrary(
             }).ToList();
     }
 
-    /// <summary>Phase 1's retrieval route, now answered by the hybrid search.</summary>
-    public async Task<IReadOnlyList<HrHitDto>> RetrieveAsync(string question, int top = 8, CancellationToken ct = default) =>
-        (await SearchAsync(question, null, top, ct))
-            .Select(h => new HrHitDto(h.ItemId, h.ItemName, h.SourceRef, h.Section, h.LineFrom ?? 0, h.LineTo ?? 0, (float)h.Score, h.Text))
+    /// <summary>Excerpts per question: the best 5, whole chunks only, up to 1,500 tokens (§3.3).</summary>
+    public const int MaxExcerpts = 5;
+    public const int ExcerptBudget = 1500;
+
+    /// <summary>
+    /// The excerpts a question is sent with: the hybrid search's best
+    /// <see cref="MaxExcerpts"/>, whole chunks, within <see cref="ExcerptBudget"/>
+    /// tokens (a chunk that does not fit is skipped and a smaller one may still).
+    /// The chat and /api/hr/retrieve both use it, so the eval sees what the model sees.
+    /// </summary>
+    public async Task<List<HrExcerpt>> SelectExcerptsAsync(string question, IReadOnlyCollection<int>? scope, CancellationToken ct = default)
+    {
+        var excerpts = new List<HrExcerpt>();
+        var used = 0;
+        foreach (var hit in await SearchAsync(question, scope, MaxExcerpts, ct))
+        {
+            var tokens = PoPromptBuilder.EstimateTokens(hit.Text);
+            if (used + tokens > ExcerptBudget) continue;
+            excerpts.Add(new HrExcerpt(hit.ChunkId, hit.ItemId, hit.ItemName, hit.Version, hit.SourceRef, hit.LineFrom, hit.LineTo, hit.Text, tokens, hit.Score));
+            used += tokens;
+        }
+        return excerpts;
+    }
+
+    /// <summary>Phase 1's retrieval route: exactly the excerpts a question would be sent with.</summary>
+    public async Task<IReadOnlyList<HrHitDto>> RetrieveAsync(string question, CancellationToken ct = default) =>
+        (await SelectExcerptsAsync(question, null, ct))
+            .Select(e => new HrHitDto(e.ItemId, e.ItemName, e.SourceRef, SectionOf(e.SourceRef), e.LineFrom ?? 0, e.LineTo ?? 0, (float)e.Score, e.Text))
             .ToList();
 
     /// <summary>HR chunks in memory, in the database and in the keyword index, per item — the "no orphans" evidence.</summary>
@@ -404,10 +428,30 @@ public sealed class HrLibrary(
             var rows = AddChunks(item);
             await db.SaveChangesAsync(ct);
             await HrKeywordIndex.ReplaceAsync(db, item.Id, rows, ct);
+            await MarkSplitAsync(item.Id, ct);
         }
         finally { ChunkGate.Release(); }
 
         indexer.Enqueue(item.Id);
+    }
+
+    private Task MarkSplitAsync(int itemId, CancellationToken ct) =>
+        db.ContextSources.Where(s => s.Id == itemId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.SplitVersion, HrSplitter.SplitVersion), ct);
+
+    /// <summary>
+    /// Re-splits every search item whose chunks were cut by an older HrSplitter
+    /// (smaller chunks, Phase 2): the old chunks, vectors and keyword rows go, and
+    /// the new ones are embedded in the background. Runs once per change of
+    /// SplitVersion; the items' content and version are untouched.
+    /// </summary>
+    public async Task<int> ResplitOutdatedAsync(CancellationToken ct = default)
+    {
+        var outdated = await db.ContextSources.AsNoTracking()
+            .Where(s => s.Kind == Kind && s.Mode == "search" && (s.SplitVersion == null || s.SplitVersion < HrSplitter.SplitVersion))
+            .ToListAsync(ct);
+        foreach (var item in outdated) await RechunkAsync(item, ct);
+        return outdated.Count;
     }
 
     private List<EmbeddingChunk> AddChunks(ContextSource item)
@@ -504,6 +548,7 @@ public sealed class HrLibrary(
                     var rows = AddChunks(item);
                     await db.SaveChangesAsync(ct);
                     await HrKeywordIndex.ReplaceAsync(db, item.Id, rows, ct);
+                    await MarkSplitAsync(item.Id, ct);
                 }
                 finally { ChunkGate.Release(); }
             }

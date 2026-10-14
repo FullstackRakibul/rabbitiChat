@@ -54,6 +54,9 @@ public class ContextSource
     /// <summary>Why the last background embedding of this item failed; null while it is fine. Cleared by Retry.</summary>
     public string? IndexError { get; set; }
 
+    /// <summary>The HrSplitter.SplitVersion this search item's chunks were cut with; older ones are re-split on start.</summary>
+    public int? SplitVersion { get; set; }
+
     public const string KindSource = "source";
     public const string KindBuyer = "buyer";
     public const string KindHr = "hr";
