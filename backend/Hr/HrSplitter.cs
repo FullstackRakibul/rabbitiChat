@@ -29,7 +29,7 @@ namespace RabbitIC.Api.Hr;
 /// <summary>One chunk: its text, the section it belongs to, and its lines in the original.</summary>
 public sealed record HrChunk(string Text, string? Section, int LineFrom, int LineTo, string SourceRef);
 
-public static partial class HrSplitter
+public static class HrSplitter
 {
     public const int MaxChunkChars = 1500;
 
@@ -45,24 +45,22 @@ public static partial class HrSplitter
     public static string SourceRef(string name, string? section, int from, int to) =>
         string.IsNullOrWhiteSpace(section) ? $"{name} L{from}-{to}" : $"{name} §{section} L{from}-{to}";
 
-    [GeneratedRegex(@"^(?<name>.+?)(?: §(?<section>.+?))? L(?<from>\d+)-(?<to>\d+)$")]
-    public static partial Regex SourceRefPattern();
+    public static readonly Regex SourceRefPattern =
+        new(@"^(?<name>.+?)(?: §(?<section>.+?))? L(?<from>\d+)-(?<to>\d+)$", RegexOptions.Compiled);
 
     // ───────────────────────── SQL ─────────────────────────
 
     /// <summary>§3.2's list, plus ELSE: a commented `--	ELSE` is as dead as the IF above it.</summary>
-    [GeneratedRegex(@"\b(SET|SELECT|IF|ELSE|BEGIN|END|FROM|WHERE|DECLARE|INSERT|DELETE|UPDATE|EXEC)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex SqlKeyword();
+    private static readonly Regex SqlKeyword = new(
+        @"\b(SET|SELECT|IF|ELSE|BEGIN|END|FROM|WHERE|DECLARE|INSERT|DELETE|UPDATE|EXEC)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>`--//Gratutity Calculation Start`, `--// Death Benefit start  ------`.</summary>
-    [GeneratedRegex(@"^\s*--\s*//\s*(?<body>.*?)[\s-]*$")]
-    private static partial Regex SectionComment();
+    private static readonly Regex SectionComment = new(@"^\s*--\s*//\s*(?<body>.*?)[\s-]*$", RegexOptions.Compiled);
 
-    [GeneratedRegex(@"\s+(?<edge>start|star|end)$", RegexOptions.IgnoreCase)]
-    private static partial Regex SectionEdge();
+    private static readonly Regex SectionEdge = new(@"\s+(?<edge>start|star|end)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    [GeneratedRegex(@"\s+(calculation|calculate)$", RegexOptions.IgnoreCase)]
-    private static partial Regex TrailingCalculation();
+    private static readonly Regex TrailingCalculation = new(@"\s+(calculation|calculate)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private enum Marker { None, Start, End }
 
@@ -139,7 +137,7 @@ public static partial class HrSplitter
                 if (inBlock)
                 {
                     var close = line.IndexOf("*/", pos, StringComparison.Ordinal);
-                    if (close < 0) { pos = line.Length; break; }
+                    if (close < 0) break;   // the block runs on past this line
                     inBlock = false;
                     pos = close + 2;
                     continue;
@@ -163,8 +161,8 @@ public static partial class HrSplitter
 
             var trimmed = rest.TrimStart();
             if (trimmed.StartsWith("--", StringComparison.Ordinal)
-                && !SectionComment().IsMatch(trimmed)
-                && SqlKeyword().IsMatch(trimmed[2..]))
+                && !SectionComment.IsMatch(trimmed)
+                && SqlKeyword.IsMatch(trimmed[2..]))
             {
                 codeComment[i] = true;                                         // commented-out code
                 continue;
@@ -179,7 +177,7 @@ public static partial class HrSplitter
         {
             if (!kept[i] || !codeComment[i + 1]) continue;
             var t = lines[i].TrimStart();
-            if (t.StartsWith("--", StringComparison.Ordinal) && !SectionComment().IsMatch(t)) kept[i] = false;
+            if (t.StartsWith("--", StringComparison.Ordinal) && !SectionComment.IsMatch(t)) kept[i] = false;
         }
 
         return kept;
@@ -192,14 +190,14 @@ public static partial class HrSplitter
     /// </summary>
     private static (Marker Marker, string? Name) Classify(string line)
     {
-        var m = SectionComment().Match(line);
+        var m = SectionComment.Match(line);
         if (!m.Success) return (Marker.None, null);
 
         var body = m.Groups["body"].Value.Trim();
-        var edge = SectionEdge().Match(body);
+        var edge = SectionEdge.Match(body);
         if (!edge.Success) return (Marker.None, null);
 
-        var name = TrailingCalculation().Replace(body[..edge.Index], "").Trim(' ', '-');
+        var name = TrailingCalculation.Replace(body[..edge.Index], "").Trim(' ', '-');
         var marker = edge.Groups["edge"].Value.StartsWith("e", StringComparison.OrdinalIgnoreCase) ? Marker.End : Marker.Start;
         return (marker, name.Length == 0 ? null : name);
     }
@@ -288,8 +286,7 @@ public static partial class HrSplitter
 
     // ───────────────────────── other text ─────────────────────────
 
-    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(?<title>.+?)\s*#*\s*$")]
-    private static partial Regex MarkdownHeading();
+    private static readonly Regex MarkdownHeading = new(@"^\s{0,3}#{1,6}\s+(?<title>.+?)\s*#*\s*$", RegexOptions.Compiled);
 
     /// <summary>
     /// Split as documents are (DocumentApis.ChunkText: ~800 characters, ~100
@@ -327,7 +324,7 @@ public static partial class HrSplitter
         var lines = text[..Math.Min(offset + 1, text.Length)].Split('\n');
         for (var i = lines.Length - 1; i >= 0; i--)
         {
-            var m = MarkdownHeading().Match(lines[i]);
+            var m = MarkdownHeading.Match(lines[i]);
             if (m.Success) return m.Groups["title"].Value.Trim();
         }
         return null;

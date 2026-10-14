@@ -49,7 +49,7 @@ public sealed record HrHitDto(
 public sealed record HrItemInput(
     string? Name, string? HrType, string? Mode, string? Content, bool? IsActive, string? ApprovedBy);
 
-public sealed partial class HrLibrary(
+public sealed class HrLibrary(
     AppDbContext db, IContextSourceService sources, EmbeddingService embedder, VectorIndex index,
     IConfiguration config, ILogger<HrLibrary> log)
 {
@@ -425,12 +425,12 @@ public sealed partial class HrLibrary(
     /// </summary>
     private static string EmbeddingText(EmbeddingChunk chunk)
     {
-        var words = IdentifierBoundary().Replace(chunk.Text.Replace('@', ' ').Replace('_', ' '), " ");
+        var words = IdentifierBoundary.Replace(chunk.Text.Replace('@', ' ').Replace('_', ' '), " ");
         return string.IsNullOrWhiteSpace(chunk.SourceRef) ? words : $"{chunk.SourceRef}\n{words}";
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex("(?<=[a-z])(?=[A-Z])")]
-    private static partial System.Text.RegularExpressions.Regex IdentifierBoundary();
+    private static readonly System.Text.RegularExpressions.Regex IdentifierBoundary =
+        new("(?<=[a-z])(?=[A-Z])", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private async Task<Dictionary<int, (int Chunks, int Embedded)>> ChunkCountsAsync(CancellationToken ct) =>
         (await db.EmbeddingChunks.AsNoTracking()
@@ -463,7 +463,7 @@ public sealed partial class HrLibrary(
 
     private static (string? Section, int From, int To) ParseRef(string? sourceRef)
     {
-        var m = sourceRef is null ? null : HrSplitter.SourceRefPattern().Match(sourceRef);
+        var m = sourceRef is null ? null : HrSplitter.SourceRefPattern.Match(sourceRef);
         if (m is null || !m.Success) return (null, 0, 0);
         return (m.Groups["section"].Success ? m.Groups["section"].Value : null,
             int.Parse(m.Groups["from"].Value), int.Parse(m.Groups["to"].Value));
