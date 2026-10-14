@@ -32,9 +32,15 @@ const emit = defineEmits([
   'update:buyer', 'file-picked', 'upload', 'retry', 'delete', 'review', 'chat',
 ])
 
+// reka-ui reserves '' on a Select (it clears the selection), so a
+// <SelectItem value=""> throws during setup and takes the whole studio's render
+// down with it. The auto-detect row uses this sentinel instead; the parent still
+// sees '' for auto-detect, exactly as before.
+const AUTO = 'auto'
+
 const buyerValue = computed({
-  get: () => props.buyer,
-  set: (v) => emit('update:buyer', v),
+  get: () => props.buyer || AUTO,
+  set: (v) => emit('update:buyer', v === AUTO ? '' : v),
 })
 
 const fileInput = ref(null)
@@ -123,7 +129,7 @@ defineExpose({ reset: () => { if (fileInput.value) fileInput.value.value = '' } 
               <SelectValue placeholder="Buyer: auto-detect" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">
+              <SelectItem :value="AUTO">
                 Buyer: auto-detect
               </SelectItem>
               <SelectItem v-for="p in profiles" :key="p.id" :value="String(p.id)">

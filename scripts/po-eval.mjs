@@ -376,8 +376,9 @@ check('G1.1', 1, 'one PO Studio tab, /documents redirects, sections gated by doc
   const redirect = /\/documents/.test(tabs) && /workspace/.test(tabs)
   if (!redirect) return { pass: false, detail: '/documents redirect to /workspace not found in router.js' }
 
-  const label = grepDir('frontend/src', /PO Studio/)
-  if (!label.length) return { pass: false, detail: 'no "PO Studio" label found in frontend/src' }
+  // Renamed "Workspace Studio" on 14 Oct 2026 at KAKAROT's request; either name is the merged tab.
+  const label = grepDir('frontend/src', /PO Studio|Workspace Studio/)
+  if (!label.length) return { pass: false, detail: 'no "PO Studio" / "Workspace Studio" label found in frontend/src' }
 
   return { pass: true, detail: `PoStudioTab.vue present; label at ${label[0].split(':').slice(0, 2).join(':')}; ${allTabs.length} ALL_TABS/MODULE_ROUTES refs` }
 })

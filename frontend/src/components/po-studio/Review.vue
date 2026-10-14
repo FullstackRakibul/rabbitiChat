@@ -94,7 +94,7 @@ const drawer = ref(false)
 
           <template v-else>
             <div class="min-h-0 flex-1 overflow-y-auto p-4">
-              <ChatMessages :messages="messages" :busy="busy" assistant-label="PO Studio" />
+              <ChatMessages :messages="messages" :busy="busy" assistant-label="Workspace Studio" />
             </div>
             <ChatComposer
               :model-value="input"

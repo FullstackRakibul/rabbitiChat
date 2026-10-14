@@ -414,7 +414,7 @@ const ALL_TABS = [
   // One tab for what used to be Workspace and Documents. The key stays
   // `workspace`; the `docs` key still gates /api/documents and /api/buyer-profiles
   // on the server, so existing grants keep working unchanged.
-  { id: 'workspace', label: 'PO Studio', icon: Brain, group: 'Work' },
+  { id: 'workspace', label: 'Workspace Studio', icon: Brain, group: 'Work' },
   { id: 'todo', label: 'To-Do', icon: ListTodo, group: 'Work' },
   { id: 'search', label: 'Search', icon: Globe, group: 'Work' },
   { id: 'jsonto', label: 'JSON to ...', icon: Table, group: 'Tools' },
@@ -499,7 +499,7 @@ function askFromSearch(query) {
 // To-Do — todorabbit owns its own server-backed state; nothing to wire here.
 
 // ---- Documents (PO ingestion) ----
-// The upload form that used to live here went with DocumentsTab: PO Studio's
+// The upload form that used to live here went with DocumentsTab: Workspace Studio's
 // Library owns the drop zone now, and its pipeline is `studioRun` below.
 const documents = ref([])
 
@@ -523,14 +523,14 @@ async function removeDocument(id) {
 }
 
 // ---- Extraction review (the human-in-the-loop gate) ----
-// Not an overlay any more: it is PO Studio's Review section.
+// Not an overlay any more: it is Workspace Studio's Review section.
 const reviewDoc = ref(null)          // { id, fileName } | null
 
 function onReviewConfirmed() {
   refreshDocuments()
 }
 
-// ---- PO Studio ----
+// ---- Workspace Studio ----
 // Buyer profiles come from the server (`/api/buyer-profiles`), which has had a
 // BuyerProfiles table with full CRUD all along. The list used to be five names
 // hard-coded here, so adding a buyer meant a release and the dropdown could
@@ -539,7 +539,7 @@ const buyerProfiles = ref([])
 const profileSaving = ref(false)
 const profileError = ref('')
 
-/** Which PO Studio section is showing — the hash of /workspace#<section>. */
+/** Which Workspace Studio section is showing — the hash of /workspace#<section>. */
 const studioSection = ref('library')
 
 /**
@@ -672,6 +672,159 @@ function wsNewChat() {
   wsFile.value = null
   wsError.value = ''
   wsTab.value?.reset()
+}
+
+// ---- Connected sources ----
+// Server-backed: the same ContextSource rows the Sources tab edits and the
+// backend prepends to the system prompt. `activeSourceIds` is per-conversation.
+const sources = ref([])
+const activeSourceIds = ref([])
+const sourceSearch = ref('')
+const sourcesTab = ref(null)
+
+const filteredSources = computed(() => {
+  const q = sourceSearch.value.trim().toLowerCase()
+  return q ? sources.value.filter(s => s.name.toLowerCase().includes(q)) : sources.value
+})
+const activeSources = computed(() =>
+  sources.value.filter(s => activeSourceIds.value.includes(s.id)))
+const activeSourcesCount = computed(() => activeSources.value.length)
+
+async function refreshSources() {
+  try {
+    sources.value = await listContextSources('source')
+
+    // A source deleted elsewhere must not linger in this chat's active set.
+    const live = new Set(sources.value.map((s) => s.id))
+    activeSourceIds.value = activeSourceIds.value.filter((id) => live.has(id))
+
+    // An untouched new chat follows each source's own default switch.
+    if (currentId.value == null && !activeSourceIds.value.length) {
+      activeSourceIds.value = sources.value.filter((s) => s.isActive).map((s) => s.id)
+    }
+  } catch (e) {
+    if (!handleAuthError(e)) { /* keep whatever list we have */ }
+  }
+}
+
+/** The Sources tab saved something — take its list rather than re-fetching. */
+function onSourcesChanged(list) {
+  sources.value = list
+  const live = new Set(list.map((s) => s.id))
+  activeSourceIds.value = activeSourceIds.value.filter((id) => live.has(id))
+}
+
+// Chat creation flow: pick context + sources, then start a fresh chat.
+const showNewChat = ref(false)
+function openNewChat() {
+  // Reset to each source's own default before the dialog shows them, so the
+  // checkboxes describe the chat about to be started, not the previous one.
+  newChat()
+  refreshSources()
+  showNewChat.value = true
+  closeSidebar()
+}
+function startNewChat() {
+  // newChat() already ran when the dialog opened; re-running it would discard
+  // the source choices just made in it.
+  currentId.value = null
+  messages.value = []
+  error.value = ''
+  showNewChat.value = false
+  activeTab.value = 'chat'
+}
+
+// ─────────────────────────────────────────────────────────────
+// SHELL: command palette + keyboard shortcuts
+// ─────────────────────────────────────────────────────────────
+
+const paletteOpen = ref(false)
+
+/** Sidebar document pick — reuses the tab's own restore-the-thread flow. */
+function wsPickDocument(doc) {
+  wsOpenDocument(doc)
+  closeSidebar()
+}
+
+/** Cmd/Ctrl+B — only meaningful where a sidebar exists. */
+function toggleSidebar() {
+  if (!tabHasSidebar.value) return          // no-op on full-bleed tabs
+  if (window.matchMedia('(max-width: 767px)').matches) {
+    mobileSidebarOpen.value = !mobileSidebarOpen.value
+  } else {
+    sidebarCollapsed.value = !sidebarCollapsed.value
+  }
+}
+
+/** Cmd/Ctrl+Enter — the primary action of whichever tab is showing. */
+function primaryAction() {
+  if (activeTab.value === 'chat') send()
+  else if (activeTab.value === 'workspace') wsSend()
+  else if (activeTab.value === 'dashboard') openNewChat()
+}
+
+function goTab(id) {
+  // Keyboard jumps (g-then-c, and friends) bypass the launcher. The router guard
+  // would redirect a forbidden id anyway; refusing here as well means the URL
+  // never changes at all, so the back button doesn't collect entries the user
+  // never actually visited.
+  if (allowedTabs.value && !allowedTabs.value.includes(id)) return
+  activeTab.value = id
+  closeSidebar()
+}
+
+// Palette rows. Tab navigation first, then the actions worth reaching by name.
+//
+// `tabs` is a computed, so script scope needs .value — the template gets auto
+// unwrapping, script scope does not. Iterating the permission-filtered list is
+// deliberate: the palette offers only tabs this user may actually open, which
+// matches the guard in goTab().
+const commands = computed(() => [
+  ...tabs.value.map(t => ({
+    id: `tab:${t.id}`,
+    label: t.label,
+    group: 'Go to',
+    icon: t.icon,
+    keys: { chat: 'g then c', workspace: 'g then w', docs: 'g then d', todo: 'g then t' }[t.id],
+    run: () => goTab(t.id),
+  })),
+  {
+    // The palette closes itself before running a row; opening the launcher a
+    // frame later keeps the dialog's focus return from closing it again.
+    id: 'action:launcher', label: 'Open module launcher', group: 'Actions', icon: Grip,
+    keys: 'g then m', run: () => requestAnimationFrame(() => shell.value?.openLauncher()),
+  },
+  {
+    id: 'action:new-chat', label: 'New chat', group: 'Actions', icon: Plus,
+    run: () => openNewChat(),
+  },
+  {
+    id: 'action:upload', label: 'Upload a purchase order', group: 'Actions', icon: Upload,
+    run: () => goTab('workspace'),
+  },
+  {
+    id: 'action:new-note', label: 'New note', group: 'Actions', icon: Plus,
+    keys: 'mod + N',
+    run: () => {
+      goTab('notes');
+      setTimeout(() => {
+        notesTabRef.value?.newNote();
+      }, 100);
+    },
+  },
+  {
+    id: 'action:sidebar', label: 'Toggle sidebar', group: 'Actions', icon: PanelLeft,
+    keys: 'mod + B', run: () => toggleSidebar(),
+  },
+  {
+    id: 'action:theme',
+    label: theme.value === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+    group: 'Actions', icon: Settings, run: () => toggleTheme(),
+  },
+])
+
+function runCommand(cmd) {
+  cmd.run?.()
 }
 
 // ---- The upload pipeline, as the six steps the stepper shows ----
@@ -919,7 +1072,7 @@ const notesTabRef = ref(null)
           @manage-sources="goTab('sources')" @scroller="el => scroller = el" />
       </TabsContent>
 
-      <!-- PO Studio: what used to be the Workspace and Documents tabs. -->
+      <!-- Workspace Studio: what used to be the Workspace and Documents tabs. -->
       <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <PoStudioTab ref="wsTab" v-model:section="studioSection" v-model:buyer="wsBuyer"
           v-model:chat-input="wsInput"

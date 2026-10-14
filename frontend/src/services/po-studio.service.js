@@ -1,4 +1,4 @@
-// PO Studio's own endpoints. Document upload, extraction, confirmation and the
+// Workspace Studio's own endpoints. Document upload, extraction, confirmation and the
 // buyer-profile CRUD already live in document.service.js and are reused from
 // there rather than duplicated here.
 import { http } from './http.js'

@@ -20,7 +20,7 @@ const props = defineProps({
   model: { type: String, default: '' },      // chat model for the LLM fallback
 
   /**
-   * PO Studio renders this INSIDE its Review section rather than as a
+   * Workspace Studio renders this INSIDE its Review section rather than as a
    * full-screen overlay. Same logic, same markup, same checks — only the outer
    * chrome differs, so there is one review implementation rather than two.
    */

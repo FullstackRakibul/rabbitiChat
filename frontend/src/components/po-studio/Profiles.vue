@@ -11,7 +11,7 @@
 // the prompt that version will actually produce — including which parts the
 // token budget would drop.
 
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ChevronDown, Loader2, Plus, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -61,6 +61,16 @@ function expand(profile) {
     isActive: profile.isActive,
   }
 }
+
+// reka-ui reserves '' on a Select, so "install default" cannot be an empty
+// SelectItem value (it throws during setup). The row uses this sentinel and the
+// draft keeps '' — the wire format is unchanged: empty means the install default.
+const INSTALL_DEFAULT = 'install-default'
+
+const modelChoice = computed({
+  get: () => draft.value.extractionModel || INSTALL_DEFAULT,
+  set: (v) => { draft.value.extractionModel = v === INSTALL_DEFAULT ? '' : v },
+})
 
 function save(profile) {
   emit('save', { id: profile.id, ...draft.value })
@@ -145,12 +155,12 @@ function create() {
 
           <label class="flex flex-col gap-1.5 text-sm">
             <span class="font-medium">Extraction model</span>
-            <Select v-model="draft.extractionModel">
+            <Select v-model="modelChoice">
               <SelectTrigger class="w-full sm:w-72">
                 <SelectValue :placeholder="`Install default · ${defaultModel}`" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">
+                <SelectItem :value="INSTALL_DEFAULT">
                   Install default{{ defaultModel ? ` · ${defaultModel}` : '' }}
                 </SelectItem>
                 <SelectItem v-for="m in models" :key="m" :value="m">

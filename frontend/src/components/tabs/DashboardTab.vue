@@ -62,7 +62,7 @@ const allCapabilities = [
     tab: 'chat',
   },
   {
-    title: 'Workspace',
+    title: 'Workspace Studio',
     body: 'Upload a purchase order and extract its fields, with a review step before anything is trusted.',
     icon: Brain,
     tab: 'workspace',

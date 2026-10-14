@@ -1,5 +1,5 @@
 <script setup>
-// PO Studio — the merged Documents + Workspace tab.
+// Workspace Studio — the merged Documents + Workspace tab.
 //
 // There used to be two tabs for one job: Documents to upload and manage POs,
 // Workspace to chat with one and extract its JSON. They fed the same pipeline,
@@ -12,7 +12,7 @@
 // the rest of the shell's state — a streaming answer has to survive navigating
 // between sections.
 
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import Library from '@/components/po-studio/Library.vue'
 import Review from '@/components/po-studio/Review.vue'
 import Profiles from '@/components/po-studio/Profiles.vue'
@@ -79,13 +79,19 @@ const SECTIONS = [
 const current = computed(() =>
   SECTIONS.some((s) => s.key === props.section) ? props.section : 'library')
 
+// App.vue calls reset() on this tab after an upload or a new session, to clear
+// the file input — which lives in Library, so pass the call through. Library is
+// not mounted on the other sections, and there is nothing to clear then.
+const library = ref(null)
+defineExpose({ reset: () => library.value?.reset() })
+
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <!-- Sub-navigation. Scrolls sideways at 360 px rather than wrapping into
          two rows that push the content down. -->
-    <nav class="shrink-0 overflow-x-auto border-b" aria-label="PO Studio sections">
+    <nav class="shrink-0 overflow-x-auto border-b" aria-label="Workspace Studio sections">
       <ul class="flex min-w-max items-center gap-1 px-2 py-1.5">
         <li v-for="s in SECTIONS" :key="s.key">
           <button
@@ -126,6 +132,7 @@ const current = computed(() =>
       <div class="mx-auto w-full max-w-5xl">
         <Library
           v-if="current === 'library'"
+          ref="library"
           :documents="documents"
           :profiles="profiles"
           :buyer="buyer"

@@ -55,7 +55,7 @@ public static class TabCatalog
     {
         ["dashboard"] = "Dashboard",
         ["chat"] = "Chat",
-        ["workspace"] = "Workspace",
+        ["workspace"] = "Workspace Studio",
         ["docs"] = "Documents",
         ["todo"] = "To-Do",
         ["search"] = "Search",

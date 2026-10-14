@@ -85,7 +85,7 @@ export const SECTIONS = [
 
   // ── Modules (each documented with Purpose / User Guide / Technical) ──
   { id: 'chat',                 title: 'Chat & Sources',       icon: MessageSquare,   group: 'modules' },
-  { id: 'workspace',            title: 'Workspace',            icon: Brain,           group: 'modules' },
+  { id: 'workspace',            title: 'Workspace Studio',     icon: Brain,           group: 'modules' },
   { id: 'search',               title: 'Search',               icon: Globe,           group: 'modules' },
   { id: 'todorabbit',           title: 'todorabbit',           icon: ListTodo,        group: 'modules' },
   { id: 'json-table',           title: 'JSON → Table',         icon: Table,           group: 'modules' },

@@ -29,7 +29,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 export const MODULE_ROUTES = [
   { key: 'dashboard', path: '/dashboard' },
   { key: 'chat', path: '/chat' },
-  // PO Studio. The `docs` key still exists on the server, where it gates
+  // Workspace Studio. The `docs` key still exists on the server, where it gates
   // /api/documents and /api/buyer-profiles, but it no longer has a route of its
   // own: Documents and Workspace are one tab now, and /documents redirects into
   // its Library section below.
@@ -71,7 +71,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/dashboard' },
-    // Documents merged into PO Studio; old links and bookmarks still work.
+    // Documents merged into Workspace Studio; old links and bookmarks still work.
     { path: '/documents', redirect: '/workspace#library' },
     ...MODULE_ROUTES.map((r) => ({
       path: r.path,
