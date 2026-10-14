@@ -102,16 +102,35 @@ HR context items are `ContextSource` rows with `Kind = "hr"`, plus these columns
 
 - **Shared, not personal.** HR items are company knowledge. Anyone with the `hr` tab can read them. People whose role is `HrAssistant` or `SystemAdmin` can add, edit and delete them.
   - Owner scoping for every other `Kind` is unchanged. Implement the exception once, in the source service, and test it.
-- **Defaults by type:** `rules` and `codes` default to `always`; `procedure` defaults to `search`; `note` defaults to `always`.
+- **Defaults by type:** `rules` and `codes` default to `always`; `procedure` and `note` default to `search`.
+- **The library has no size limit; the always budget does.**
+  - Any item can be `search`, and HR can add as many as they like.
+  - The total of active `always` items is capped at 8,000 tokens. Turning an item to `always` beyond the cap is refused in the Library with "Always items would use N of 8,000 tokens; make this item Search or switch another off".
+  - The chat therefore never meets an over-budget library.
+  - The Library header shows the running total, as it does today.
 - **Splitting `search` items:**
   - **SQL files:**
     - Remove commented-out code first: whole lines starting with `--` that contain a SQL keyword (`SET`, `SELECT`, `IF`, `BEGIN`, `END`, `FROM`, `WHERE`, `DECLARE`, `INSERT`, `DELETE`, `UPDATE`, `EXEC`), and `/* … */` blocks.
     - Keep section comments such as `--//Gratutity Calculation Start` and short notes such as `--NO Service Benefit for DEATH`.
     - Then split on those section comments, and below them on blank lines, into chunks of at most 1,500 characters.
     - Each chunk keeps its file name, its section name and its original line range.
-  - **Other text:** split as the existing chunker does.
+  - **JSON** (`.json`, or pasted text that parses as JSON):
+    - Validate it first; invalid JSON is refused with the parser's line and column.
+    - Split along the structure: each element of a top-level array, or each top-level property, is a unit. Units are packed into chunks of at most 1,500 characters, and a unit larger than that is split by its own children.
+    - Each chunk keeps its JSON path in the `SourceRef`, for example `leave-policy.json $.categories[2]`.
+    - Chunks are pretty-printed, so the model reads keys and values clearly.
+  - **CSV and tables:** rows are grouped into chunks with the header row repeated at the top of each, and the `SourceRef` carries the row range: `emp-types.csv rows 1-40`.
+  - **PDF and XLSX:** extract the text with the existing extractors (PdfPig, ClosedXML), then split as text, with page or sheet in the `SourceRef`.
+  - **Other text** (`.md`, `.txt`, pasted text): split as the existing chunker does.
+  - **Formats:** `.md .txt .sql .json .csv .pdf .xlsx`, at most 20 MB each, the same limit as Documents. Anything else is refused with the list. A `.docx` gets "save it as PDF first".
   - The `SourceRef` is `ProcessFinalSettelment.sql §Service Benefit L686-711`.
 - **Embedding:** chunks are embedded on save. Editing or deleting an item removes its old chunks. Retrieval filters on `Kind = hr` before scoring, as the vector index does for owners.
+- **Hybrid search.** HR questions are full of exact tokens that embeddings handle badly: `EXL`, `Schedule-A`, unit `27`, status `11`, column names. So every HR chunk is also put in an SQLite **FTS5** table. FTS5 ships in the `e_sqlite3` build the app already uses, so no package is needed.
+  - At ask time, run both searches: vector top 20 and keyword (BM25) top 20.
+  - Merge them by reciprocal rank (`1/(60+rank)` summed).
+  - Keep the best 8, whole chunks only.
+  - Deleting or editing an item updates both indexes.
+- **Large libraries.** Saving an item embeds it in the background; the item shows "indexing… n of m" and is searchable when done. A failed embed marks the item `failed` with the reason and a Retry button. The Library has a text filter and a type filter, so hundreds of items stay usable.
 - **Seed on start** from `docs/hr/*.md` and `docs/hr/procedures/*.sql`, only for files not already in the library (matched by name). An HR edit in the app is never overwritten by the seed.
 
 ### 3.3 The chat
@@ -123,6 +142,14 @@ HR context items are `ContextSource` rows with `Kind = "hr"`, plus these columns
   - **Next:** retrieved excerpts, top 8 by score above a minimum, whole chunks only, until 4,000 tokens.
   - **The rest:** recent history, oldest dropped first.
   - Use the one token estimator the app already has.
+- **Fast first word.** The message order is fixed so Ollama can reuse its cache of the unchanged start of the prompt:
+  - **First, unchanged for every question:** the system message with the persona and the `always` items, byte-identical.
+  - **Then:** the history.
+  - **Last:** a final user message holding the retrieved excerpts (titled "HR context for this question") followed by the question.
+
+  Excerpts never go into the system message. Send the model's saved `num_ctx` and `keep_alive` (16,384 and -1 on the Mac), the same values every time, so the model is never reloaded.
+- **Scope a question.** The Ask box has an optional "Search in" picker. When items are picked, retrieval is limited to them; the default is the whole library.
+- **Instant search without the model.** `GET /api/hr/search?q=…&items=…` runs the hybrid search (§3.2) and returns the top 10 chunks with `SourceRef`, item name and a highlighted snippet, in under a second. HR uses it to find where something is written. Each result has "Ask about this", which starts a question scoped to that item.
 - **System prompt rules:**
   - Answer only from the HR context.
   - After each statement, cite its source: `[HR_SETTLEMENT_RULES §5]` or `[ProcessFinalSettelment.sql §Service Benefit L686-711]`.
@@ -145,8 +172,10 @@ HR context items are `ContextSource` rows with `Kind = "hr"`, plus these columns
   - **প্রশ্ন (Ask):** the chat with its own conversation list.
   - **লাইব্রেরি (Library):** the HR items, each showing type, mode, version, approval, size in tokens and, for `search` items, chunk count.
 - **Library actions:**
-  - Add by pasting text or uploading `.md`, `.txt`, `.sql` or `.csv`.
-  - Edit, switch between always and search, set approval, delete, and preview the chunks of a `search` item.
+  - Add by pasting text or JSON, or by uploading one or many files (`.md .txt .sql .json .csv .pdf .xlsx`) at once.
+  - Edit, switch between always and search (respecting the 8,000-token cap), set approval, delete, retry a failed item, and preview the chunks of a `search` item.
+  - Filter by text and by type. Indexing progress is shown on each item.
+- **Ask section:** a search bar at the top for instant search (§3.3), the chat below it with the "Search in" picker, and the HR conversation list at the side (a drawer on phones).
   - Library editing is hidden for users who cannot edit (§3.2).
 - **Citations** are clickable and open the cited item at the cited section or lines.
 - **A "Context used" panel** under each answer lists the items and excerpts that were sent, with their token counts.
@@ -180,6 +209,13 @@ HR context items are `ContextSource` rows with `Kind = "hr"`, plus these columns
 
 **Do**
 - §3.3 and the Ask section of §3.4.
+- The §3.2 additions made after Phase 1:
+  - the always cap;
+  - JSON, CSV, PDF and XLSX splitting;
+  - FTS5 hybrid search;
+  - background indexing with retry;
+  - multi-file upload;
+  - Library filters.
 
 **Gates**
 
@@ -193,7 +229,14 @@ HR context items are `ContextSource` rows with `Kind = "hr"`, plus these columns
 | G2.6 | **Access.** The chat refuses without the `hr` tab; `ModelPolicy` applies (`hr-assistant` naming `qwen3.8-27b-q3` gets 403 while its row allows only `gemma4:12b`) |
 | G2.7 | **UI.** Ask section with clickable citations that open the right item and lines, and the "Context used" panel. Screenshots, light and dark, 360 px |
 | G2.8 | **Live.** On the Mac with `gemma4:12b`, ask the four questions in §1. Each answer cites a source; the third uses `calculate` and shows the formula; no unverified amounts. Paste the four answers |
-| G2.9 | Builds clean; `hr-eval --phase 2`; the other suites unchanged |
+| G2.9 | **JSON.** A pasted array of 50 objects becomes chunks of at most 1,500 characters, each with a `$[i]` path. A question about one object's value retrieves it in the top 3 and the answer cites the path. Invalid JSON is refused with line and column |
+| G2.10 | **Other formats.** One `.csv` (header repeated in every chunk, row ranges in `SourceRef`), one `.pdf` (page in `SourceRef`), one `.xlsx` (sheet in `SourceRef`), uploaded together in one action. `.docx` is refused with "save it as PDF first" |
+| G2.11 | **Hybrid search.** The query `EXL` finds the attendance-code chunk at rank 1 through the keyword side even when the vector side ranks it below 10 (show both ranks). Editing and deleting an item updates the FTS5 table (row counts before and after) |
+| G2.12 | **Always cap.** Switching an item to `always` that would take the total over 8,000 tokens is refused with the message; the chat is never refused for budget with a library built through the UI |
+| G2.13 | **Scale.** Upload 200 generated items (about 2 MB of text). The Library stays responsive while they index in the background (progress shown); `/api/hr/search` stays under 1 second (median of 20 queries); a failed embed shows Retry and recovers |
+| G2.14 | **Speed and cache.** Live on the Mac with `gemma4:12b` warm: the second question in a conversation reaches the first word in under 5 seconds (median of 5), and `prompt_eval_count` in Ollama's final frame shows the always-prefix was reused. The fake shows the system message byte-identical across turns and the excerpts only in the last user message |
+| G2.15 | **Instant search and scoped ask.** `/api/hr/search?q=gratuity` returns ranked chunks with snippets; "Ask about this" sends a question whose retrieval used only that item (check at the fake) |
+| G2.16 | Builds clean; `hr-eval --phase 2`; the other suites unchanged |
 
 ---
 
@@ -236,7 +279,7 @@ KAKAROT and HR supply `scripts/hr/golden.json`: 30 questions, each with the fact
 `scripts/hr-eval.mjs`, Node 18+, no dependencies.
 - Reuse the shared fake Ollama (chat, embeddings, tags) and API start-up, with a throwaway SQLite file.
 - Fixtures: a short rules document, a code table, and a trimmed copy of `ProcessFinalSettelment.sql` that keeps the Ager Formula comment and the Service Benefit section.
-- `--live` uses the real Ollama for G1.6, G2.8 and Phase 3.
+- `--live` uses the real Ollama for G1.6, G2.8, G2.14 and Phase 3.
 - Output `id | check | PASS/FAIL | detail`, a summary line, non-zero exit on any FAIL, `--phase N`, `--only <id>`.
 
 ---
