@@ -1,4 +1,4 @@
-// RBAC — business rules and guardrails.
+﻿// RBAC — business rules and guardrails.
 //
 // Every refusal in this module is decided here, never in an endpoint. The three
 // guardrails are:
@@ -215,7 +215,7 @@ public class RbacService
 
         var wanted = (input.TabKeys ?? new List<string>())
             .Select(TabCatalog.Canonical)
-            .Where(k => k is not null && !baseline.Contains(k))
+            .Where(k => k is not null && !baseline.Contains(k) && TabCatalog.IsGrantable(k))
             .Select(k => k!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

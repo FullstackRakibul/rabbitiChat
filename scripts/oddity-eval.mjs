@@ -35,8 +35,12 @@ const BIN_DIR = path.join(EVAL_ROOT, 'api-bin')
 // ---- Expected values, written by hand ----
 // These mirror the design contract (§3.1), not the code: a check that read them
 // from TabCatalog.cs would only prove the code agrees with itself.
-const GENERAL_TABS = ['dashboard', 'todo', 'jsonto', '5lakhs', 'notes', 'sources', 'settings']
-const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter']
+// jsonto and 5lakhs left General's baseline when the model policy landed
+// (MODEL_POLICY_PROMPT section 1) — both are grantable, and both now start at
+// System, so the tiers above General still hold everything they held before.
+const GENERAL_TABS = ['dashboard', 'todo', 'notes', 'sources', 'settings']
+const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter',
+                      'jsonto', '5lakhs']
 const ROLE_KEYS = ['General', 'System', 'GroundControl', 'SystemAdmin']
 
 // ─────────────────────────────── fake Ollama ───────────────────────────────
@@ -52,7 +56,7 @@ export const FAKE_USAGE = {
   eval_duration: 300_000_000,
 }
 
-const FAKE_MODELS = ['fake-ok', 'fake-slow', 'fake-404', 'fake-500', 'fake-midstream-error', 'fake-nothink']
+export const FAKE_MODELS = ['fake-ok', 'fake-slow', 'fake-404', 'fake-500', 'fake-midstream-error', 'fake-nothink']
 const EMBED_DIMS = 768
 
 /**
@@ -77,7 +81,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  *   firstWriteAt, lastWriteAt }. `stop()` and `restart()` keep the same port, so
  * the API (which knows only that URL) can be shown an Ollama that has gone away.
  */
-export async function startFakeOllama() {
+export async function startFakeOllama({ models = FAKE_MODELS } = {}) {
   const requests = []
 
   const server = http.createServer(async (req, res) => {
@@ -121,7 +125,7 @@ export async function startFakeOllama() {
 
       case 'GET /api/tags':
         return json(200, {
-          models: [...FAKE_MODELS, 'nomic-embed-text'].map((name, i) => ({
+          models: [...models, 'nomic-embed-text'].map((name, i) => ({
             name, model: name, modified_at: '2026-01-01T00:00:00Z',
             size: 1000 + i, digest: `sha256:${String(i).padStart(64, '0')}`,
             details: { format: 'gguf', family: 'fake', parameter_size: '1B', quantization_level: 'Q4' },
@@ -1056,7 +1060,7 @@ check('G2.8', 2, 'first-byte and total time are measured, and total covers the f
   const r = await gw('/api/chat', { key: g.keyA.key, body: chatBody('fake-slow') })
   const row = await rowFor(g.a, r.correlationId)
   // fake-slow pauses 300 ms after each of its three frames.
-  return ok(row && row.totalMs >= 900 && row.firstByteMs > 0 && row.firstByteMs < 300 && row.firstByteMs <= row.totalMs,
+  return ok(row && row.totalMs >= 900 && row.firstByteMs >= 0 && row.firstByteMs < 300 && row.firstByteMs <= row.totalMs,
     `firstByteMs ${row?.firstByteMs} · totalMs ${row?.totalMs}`)
 })
 

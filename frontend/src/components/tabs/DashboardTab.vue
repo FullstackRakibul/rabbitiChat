@@ -6,7 +6,7 @@
  * counts read back from the API; anything that fails to load stays "—" rather
  * than falling back to a zero that would read as fact.
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   ArrowRight, Brain, FileText, Globe, LayoutGrid, ListTodo,
   MessageSquare, Plus, Upload,
@@ -18,6 +18,15 @@ import { listConversations, listDocuments, listBoards } from '@/services/index.j
 
 const props = defineProps({
   username: { type: String, default: '' },
+  /**
+   * The tabs this user may open, as the server answered. null while unknown.
+   *
+   * The dashboard advertises other modules, so it has to respect the same list
+   * the tab bar and the router guard use: offering a card for a tab the guard
+   * will refuse is a dead end, and for a restricted account it also discloses
+   * what the deployment runs.
+   */
+  allowedTabs: { type: Array, default: null },
 })
 
 const emit = defineEmits(['navigate', 'new-chat', 'open-palette'])
@@ -45,7 +54,7 @@ const statChips = [
   { key: 'boards', label: 'Boards', icon: LayoutGrid },
 ]
 
-const capabilities = [
+const allCapabilities = [
   {
     title: 'Chat',
     body: 'Ask questions against your connected sources, with optional live web grounding.',
@@ -72,12 +81,20 @@ const capabilities = [
   },
 ]
 
-const actions = [
-  { label: 'New chat', icon: Plus, keys: 'mod + K', event: 'new-chat' },
+const allActions = [
+  // New chat opens the chat tab, so it is gated on it like any other entry.
+  { label: 'New chat', icon: Plus, keys: 'mod + K', event: 'new-chat', tab: 'chat' },
   { label: 'Upload a PO', icon: Upload, keys: 'g then w', tab: 'workspace' },
   { label: 'Open the board', icon: ListTodo, keys: 'g then t', tab: 'todo' },
   { label: 'Browse documents', icon: FileText, keys: 'g then d', tab: 'docs' },
 ]
+
+// Unknown permissions (null) show nothing rather than guessing: the same
+// choice the shell makes, and a guess could only mislead.
+const may = (tab) => !tab || (props.allowedTabs ?? []).includes(tab)
+
+const capabilities = computed(() => allCapabilities.filter((c) => may(c.tab)))
+const actions = computed(() => allActions.filter((a) => may(a.tab)))
 
 function runAction(a) {
   if (a.event === 'new-chat') emit('new-chat')
@@ -105,13 +122,12 @@ function runAction(a) {
 
         <p class="max-w-2xl text-sm leading-relaxed text-muted-foreground">
           {{ username ? `Welcome back, ${username}.` : 'Welcome.' }}
-          Chat with your connected sources, pull structured data out of purchase
-          orders in the Workspace, track what follows on the To-Do board, and
-          search the web without leaving the thread.
+          Your tools for the documents, questions and work in front of you —
+          each one listed below.
         </p>
 
         <div class="flex flex-wrap items-center gap-2 pt-1">
-          <Button class="gap-1.5" @click="emit('new-chat')">
+          <Button v-if="may('chat')" class="gap-1.5" @click="emit('new-chat')">
             <Plus class="h-4 w-4" />
             New chat
           </Button>

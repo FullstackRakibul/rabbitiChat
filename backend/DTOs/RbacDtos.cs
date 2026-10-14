@@ -1,4 +1,4 @@
-// RBAC — wire contracts for the admin surface.
+﻿// RBAC — wire contracts for the admin surface.
 //
 // Entities never cross the boundary: no secret hash, salt or token appears in
 // any shape here, so an admin listing users cannot leak credential material.
@@ -53,3 +53,19 @@ public record SetRoleInput(string? Role);
 /// dropped rather than rejected, so the UI can post back whatever it has checked.
 /// </summary>
 public record SetTabsInput(List<string>? TabKeys);
+
+// ---- Model policy ----
+
+/// <summary>One role's model policy, as the Access screen shows it.</summary>
+/// <param name="AllowedModels">Empty means every local model — no restriction.</param>
+/// <param name="Locked">True when the role is held to a single model.</param>
+/// <param name="Editable">False for SystemAdmin, which can never be restricted.</param>
+public record ModelPolicyDto(
+    string Role, List<string> AllowedModels, string DefaultModel,
+    bool Locked, bool Editable, DateTime UpdatedAtUtc);
+
+/// <summary>Every role's policy plus the installed models to choose from.</summary>
+public record ModelPolicyPageDto(List<ModelPolicyDto> Policies, List<string> InstalledModels);
+
+/// <summary>Replaces one role's policy. An empty list clears the restriction.</summary>
+public record SetModelPolicyInput(List<string>? AllowedModels, string? DefaultModel);

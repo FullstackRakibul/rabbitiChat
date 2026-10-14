@@ -29,7 +29,7 @@ public record ChatArgs(
     string Model,
     IReadOnlyList<ChatTurn> Messages,
     IReadOnlyList<ToolDefinition>? Tools = null,
-    bool Think = false);
+    bool? Think = null);
 
 /// <summary>
 /// One message in a chat history.

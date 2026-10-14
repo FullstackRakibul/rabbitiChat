@@ -35,6 +35,7 @@ public static class SchemaUpgrade
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
         EnsureIeltsTables(db);
+        EnsureModelPolicyTable(db);
         EnsureOddityTables(db);
         var addedUserId = EnsureConversationUserIdColumn(db);
 
@@ -240,6 +241,50 @@ public static class SchemaUpgrade
     /// Five tables, each guarded independently: a database that already has some
     /// of them (a partially applied earlier run) gains only what it is missing.
     /// </summary>
+    /// <summary>
+    /// Model policy — which models each role may run.
+    ///
+    /// Seeds one row per KNOWN role, and only for roles that have no row yet, so
+    /// a role added later gets its row on the next start and an admin's edited
+    /// row is never overwritten.
+    /// </summary>
+    private static void EnsureModelPolicyTable(AppDbContext db)
+    {
+        if (!TableExists(db, "RoleModelPolicies"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""RoleModelPolicies"" (
+                    ""Role""            TEXT NOT NULL CONSTRAINT ""PK_RoleModelPolicies"" PRIMARY KEY,
+                    ""AllowedModels""   TEXT NOT NULL,
+                    ""DefaultModel""    TEXT NOT NULL,
+                    ""UpdatedAtUtc""    TEXT NOT NULL,
+                    ""UpdatedByUserId"" INTEGER NOT NULL
+                );");
+        }
+
+        // Only General starts restricted. Every other role gets an empty list,
+        // which reads as "no restriction" — so a role that gains a row later is
+        // never silently locked out of every model.
+        var seeds = new (string Role, string Allowed, string Default)[]
+        {
+            (Models.UserRoles.General, "qwen3.5:0.8b", "qwen3.5:0.8b"),
+            (Models.UserRoles.System, "", ""),
+            (Models.UserRoles.GroundControl, "", ""),
+            (Models.UserRoles.SystemAdmin, "", ""),
+        };
+
+        var now = DateTime.UtcNow.ToString("o");
+        foreach (var (role, allowed, def) in seeds)
+        {
+            db.Database.ExecuteSqlRaw(
+                @"INSERT INTO ""RoleModelPolicies""
+                      (""Role"", ""AllowedModels"", ""DefaultModel"", ""UpdatedAtUtc"", ""UpdatedByUserId"")
+                  SELECT {0}, {1}, {2}, {3}, 0
+                  WHERE NOT EXISTS (SELECT 1 FROM ""RoleModelPolicies"" WHERE ""Role"" = {0});",
+                role, allowed, def, now);
+        }
+    }
+
     private static void EnsureIeltsTables(AppDbContext db)
     {
         if (!TableExists(db, "Mistakes"))

@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -250,6 +250,10 @@ builder.Services.AddScoped<RabbitIC.Api.Services.RbacService>();
 // ---- IELTS ----
 // The mistake spine is registered first because the Reading engine depends on
 // it: every wrong answer a sitting produces is logged through IMistakeService.
+// The model policy: one rule, read by every endpoint that runs a model.
+builder.Services.AddScoped<RabbitIC.Api.Rbac.IModelPolicy,
+                           RabbitIC.Api.Rbac.ModelPolicy>();
+
 builder.Services.AddScoped<RabbitIC.Api.Services.IMistakeService,
 							 RabbitIC.Api.Services.MistakeService>();
 builder.Services.AddScoped<RabbitIC.Api.Services.IReadingService,

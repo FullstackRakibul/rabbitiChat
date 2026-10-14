@@ -12,7 +12,7 @@ import {
   deleteConversation, streamChat,
   uploadDocument, listDocuments, deleteDocument, workspaceChat,
   login, getToken, getUsername, clearSession, AuthError,
-  listContextSources, myTabs
+  listContextSources, myTabs, listModelsWithPolicy
 } from './services/index.js'
 import { environment } from './environments/environment.js'
 import { useTheme } from '@/composables/useTheme'
@@ -109,6 +109,9 @@ function handleAuthError(e) {
 // ---- Chat state ----
 const models = ref([])          // names, for the pickers
 const modelRecords = ref([])    // full records, for capabilities + context length
+// The server says whether this role is held to a single model. Carried to every
+// picker so none of them has to decide, or guess, for itself.
+const modelLocked = ref(false)
 const model = ref('')
 // Which source answers the next send. The picker owns the choice (and persists
 // it); App just carries it to the API.
@@ -143,7 +146,9 @@ async function refreshModels() {
   try {
     // The full records, not just names: the composer gates Think and Search on
     // each model's declared capabilities, and shows its real context window.
-    modelRecords.value = await listModels()
+    const served = await listModelsWithPolicy()
+    modelRecords.value = served.models
+    modelLocked.value = served.locked
     models.value = modelRecords.value.map((m) => m.name)
 
     if (models.value.length) {
@@ -895,7 +900,7 @@ const notesTabRef = ref(null)
 
       <!-- Panels -->
       <TabsContent value="dashboard" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <DashboardTab :username="username" @navigate="goTab" @new-chat="openNewChat"
+        <DashboardTab :username="username" :allowed-tabs="allowedTabs" @navigate="goTab" @new-chat="openNewChat"
           @open-palette="paletteOpen = true" />
       </TabsContent>
 
@@ -909,7 +914,7 @@ const notesTabRef = ref(null)
 
       <TabsContent value="workspace" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <WorkspaceTab ref="wsTab" v-model:buyer="wsBuyer" v-model:model="model" v-model:input="wsInput"
-          :buyer-profiles="buyerProfiles" :models="models" :doc="wsDoc" :file="wsFile" :messages="wsMessages"
+          :buyer-profiles="buyerProfiles" :models="models" :model-locked="modelLocked" :doc="wsDoc" :file="wsFile" :messages="wsMessages"
           :busy="wsBusy" :uploading="wsUploading" :extracting="wsExtracting" :error="wsError"
           @file-picked="onWsFilePicked" @upload="wsUpload" @extract="wsExtract" @send="wsSend" @new-chat="wsNewChat"
           @scroller="el => wsScroller = el" />

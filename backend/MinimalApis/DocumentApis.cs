@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
@@ -238,10 +238,21 @@ namespace RabbitIC.Api.MinimalApis
             app.MapPost("/documents/{id:int}/extract", async (
                 int id, ExtractRequest req, HttpContext ctx, AppDbContext db,
                 Extraction.ExtractionDispatcher dispatcher, int? buyerProfileId,
+                RabbitIC.Api.Rbac.IModelPolicy modelPolicy,
                 CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
+                // No model named means the policy's default for this role, falling
+                // back to the existing config chain when the role is unrestricted.
+                var extractPolicy = await modelPolicy.CheckAsync(user, req.Model, "local", ct);
+                if (!string.IsNullOrWhiteSpace(req.Model) && !extractPolicy.IsAllowed)
+                    return Results.Json(new { error = extractPolicy.Message }, statusCode: 403);
+
+                var effectiveModel = string.IsNullOrWhiteSpace(req.Model)
+                    ? await modelPolicy.DefaultForAsync(user, ct)
+                    : req.Model;
+
                 if (!string.IsNullOrWhiteSpace(req.Model) && IsEmbeddingModel(req.Model))
                     return Results.BadRequest(new { error = $"'{req.Model}' is an embedding model — pick a chat model." });
 
@@ -260,7 +271,7 @@ namespace RabbitIC.Api.MinimalApis
                     return string.Join("\n", chunks);
                 }
 
-                var outcome = await dispatcher.DispatchAsync(doc, ChunkText, buyerProfileId, req.Model, ct);
+                var outcome = await dispatcher.DispatchAsync(doc, ChunkText, buyerProfileId, effectiveModel, ct);
 
                 var resultJson = outcome.Result is null
                     ? ""
@@ -358,10 +369,17 @@ namespace RabbitIC.Api.MinimalApis
             app.MapPost("/documents/workspace-chat", async (
                 WorkspaceChatRequest req, HttpContext ctx, AppDbContext db,
                 EmbeddingService embedder, VectorIndex index, IHttpClientFactory http,
-                RabbitIC.Api.Services.IContextSourceService contextSources) =>
+                RabbitIC.Api.Services.IContextSourceService contextSources,
+                RabbitIC.Api.Rbac.IModelPolicy modelPolicy) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) { ctx.Response.StatusCode = 401; return; }
+                // This endpoint answers in plain text (F5), so the refusal does too —
+                // the same message, in the shape this caller already parses.
+                var wsPolicy = await modelPolicy.CheckAsync(user, req.Model, "local", ctx.RequestAborted);
+                if (!wsPolicy.IsAllowed)
+                { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsync(wsPolicy.Message); return; }
+
                 if (string.IsNullOrWhiteSpace(req.Message) || string.IsNullOrWhiteSpace(req.Model))
                 { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsync("model and message are required."); return; }
                 if (IsEmbeddingModel(req.Model))

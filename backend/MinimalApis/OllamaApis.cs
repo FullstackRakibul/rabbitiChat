@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
@@ -23,9 +23,32 @@ namespace RabbitIC.Api.MinimalApis
             // source and a metered flag. Routed through ChatService so this endpoint
             // never names a concrete source.
             group.MapGet("/models", async (
-                ChatService chat, IModelSourceRegistry registry, CancellationToken ct) =>
+                ChatService chat, IModelSourceRegistry registry,
+                HttpContext ctx, AppDbContext db,
+                RabbitIC.Api.Rbac.IModelPolicy modelPolicy, CancellationToken ct) =>
             {
                 var models = await chat.ListAllModelsAsync(ct);
+
+                // Hiding a model here is convenience, not control — every endpoint
+                // enforces the policy itself. This only keeps the picker honest.
+                var caller = await Authorization.ResolveUser(ctx, db);
+                var locked = false;
+                if (caller is not null)
+                {
+                    var allowed = await modelPolicy.AllowedAsync(caller, ct);
+                    if (allowed.Count > 0)
+                    {
+                        models = models
+                            .Where(m => string.Equals(m.Source, "local", StringComparison.OrdinalIgnoreCase)
+                                     && allowed.Any(a => RabbitIC.Api.Rbac.ModelPolicy.SameModel(a, m.Name)))
+                            .ToList();
+                        locked = allowed.Count == 1;
+                    }
+                }
+
+                // The flag rides in a header rather than the body, so every existing
+                // caller that expects a bare array keeps working unchanged.
+                if (locked) ctx.Response.Headers["X-Model-Locked"] = "true";
 
                 // A configured provider names its own picker group; the built-in
                 // sources return null and keep the labels the client already has.

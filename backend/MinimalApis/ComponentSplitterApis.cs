@@ -1,4 +1,4 @@
-// HTTP surface for the component splitter.
+﻿// HTTP surface for the component splitter.
 //
 // One endpoint per pipeline stage rather than one "split it" call, because the
 // human approval gate is mandatory: /analyse produces a proposal and NOTHING
@@ -95,10 +95,14 @@ public static class ComponentSplitterApis
         // its existing reader. Frames: stage / ai / proposal / error.
         app.MapPost("/component-splitter/analyse", async (
             SplitAnalyseRequest req, HttpContext ctx, AppDbContext db,
-            SplitterService splitter, CancellationToken ct) =>
+            SplitterService splitter, RabbitIC.Api.Rbac.IModelPolicy modelPolicy,
+            CancellationToken ct) =>
         {
             var user = await Authorization.ResolveUser(ctx, db);
             if (user is null) return Results.Unauthorized();
+
+            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct);
+            if (!policy.IsAllowed) return Results.Json(new { error = policy.Message }, statusCode: 403);
 
             if (string.IsNullOrWhiteSpace(req.Model))
                 return Results.BadRequest(new { error = "A model is required for the reasoning stage." });

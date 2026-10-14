@@ -27,6 +27,7 @@ export {
 } from './context-source.service.js'
 export {
   myTabs, searchUsers, getUser, setRole, setTabs, listTabs, listRoles,
+  listModelPolicies, setModelPolicy,
 } from './rbac.service.js'
 export {
   parseComponent, deriveFacts, analyse as analyseComponentSplit,

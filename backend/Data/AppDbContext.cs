@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
 using RabbitIC.Api.Observability;
@@ -18,6 +18,9 @@ public class AppDbContext : DbContext
 
     /// <summary>RBAC — explicit per-tab grants that add to a user's role baseline.</summary>
     public DbSet<UserTabPermission> UserTabPermissions => Set<UserTabPermission>();
+
+    /// <summary>Which models each role may run. One row per role; empty list = unrestricted.</summary>
+    public DbSet<RoleModelPolicy> RoleModelPolicies => Set<RoleModelPolicy>();
 
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
@@ -78,6 +81,10 @@ public class AppDbContext : DbContext
         b.Entity<UserTabPermission>()
             .HasIndex(p => new { p.UserId, p.TabKey })
             .IsUnique();
+
+        // The role name IS the key: one policy per role, so a second row for the
+        // same role cannot exist to disagree with the first.
+        b.Entity<RoleModelPolicy>().HasKey(p => p.Role);
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)

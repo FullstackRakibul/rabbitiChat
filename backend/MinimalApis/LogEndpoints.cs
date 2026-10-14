@@ -1,4 +1,4 @@
-// Observability — REST endpoints and SSE live stream.
+﻿// Observability — REST endpoints and SSE live stream.
 //
 // All endpoints require the caller to be authenticated and to have the "logs"
 // tab (enforced by TabAccessMiddleware). The audit endpoints additionally check
@@ -132,7 +132,12 @@ public static class LogEndpoints
             var user = await Authorization.ResolveUser(ctx, db);
             if (user is null) return Results.Unauthorized();
             if (!RabbitIC.Api.Models.UserRoles.IsSystemAdmin(user))
-                return Results.Forbid();
+                // Not Results.Forbid(): it challenges an authentication scheme, and
+                // none is registered here, so it throws a 500 instead of refusing.
+                // Same shape the RBAC routes return.
+                return Results.Json(
+                    new { error = "SystemAdmin role required." },
+                    statusCode: StatusCodes.Status403Forbidden);
 
             var filter = new AuditLogFilter(entity, key, action, userId, from, to, cursor, pageSize ?? 50);
             var page   = await svc.QueryAuditAsync(filter, ct);

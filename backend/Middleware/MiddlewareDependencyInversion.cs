@@ -81,6 +81,7 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+
         public static WebApplication ApplicationRbacApis(this WebApplication app)
         {
             var rbacApi = app.MapGroup("/api").WithTags("RBAC");

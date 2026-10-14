@@ -28,7 +28,7 @@ internal static class OllamaChatStream
         ILogger log,
         [EnumeratorCancellation] CancellationToken ct,
         IReadOnlyList<ToolDefinition>? tools = null,
-        bool think = false)
+        bool? think = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
@@ -85,7 +85,7 @@ internal static class OllamaChatStream
     /// </summary>
     private static object BuildPayload(
         string model, IReadOnlyList<ChatTurn> messages,
-        IReadOnlyList<ToolDefinition>? tools, bool think)
+        IReadOnlyList<ToolDefinition>? tools, bool? think)
     {
         var wireMessages = messages.Select(m => m.Role == "tool"
             // A tool result carries the name of the call it answers.
@@ -94,30 +94,33 @@ internal static class OllamaChatStream
 
         if (tools is null || tools.Count == 0)
         {
-            return think
-                ? new { model, messages = wireMessages, stream = true, think = true }
+            // An anonymous type cannot drop a property conditionally, so the
+            // shape with `think` and the shape without it are written out
+            // separately rather than sending null and hoping it is ignored.
+            return think is bool withoutTools
+                ? new { model, messages = wireMessages, stream = true, think = withoutTools }
                 : (object)new { model, messages = wireMessages, stream = true };
         }
 
-        return new
+        var wireTools = tools.Select(t => new
         {
-            model,
-            messages = wireMessages,
-            stream = true,
-            think,
-            tools = tools.Select(t => new
+            type = "function",
+            function = new
             {
-                type = "function",
-                function = new
-                {
-                    name = t.Name,
-                    description = t.Description,
-                    // The schema is authored as JSON text, so it goes on the wire
-                    // as a parsed node rather than a re-escaped string.
-                    parameters = JsonDocument.Parse(t.ParametersJson).RootElement,
-                },
-            }),
-        };
+                name = t.Name,
+                description = t.Description,
+                // The schema is authored as JSON text, so it goes on the wire
+                // as a parsed node rather than a re-escaped string.
+                parameters = JsonDocument.Parse(t.ParametersJson).RootElement,
+            },
+        });
+
+        // Decided exactly as above: the tools path used to send `think`
+        // unconditionally, which meant a false reached models that answer 400
+        // for the field at all.
+        return think is bool wantThink
+            ? new { model, messages = wireMessages, stream = true, think = wantThink, tools = wireTools }
+            : (object)new { model, messages = wireMessages, stream = true, tools = wireTools };
     }
 
     /// <summary>One NDJSON line to zero or more deltas. Unparsable lines are skipped.</summary>

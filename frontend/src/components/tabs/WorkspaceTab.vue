@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { Braces, Paperclip, Plus, SlidersHorizontal, X } from '@lucide/vue'
+import { Braces, Lock, Paperclip, Plus, SlidersHorizontal, X } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +15,8 @@ const props = defineProps({
   buyerProfiles: { type: Array, default: () => [] },
   buyer: { type: String, default: '' },
   models: { type: Array, default: () => [] },
+  /** The role is held to one model: show it, do not offer a choice. */
+  modelLocked: { type: Boolean, default: false },
   model: { type: String, default: '' },
   doc: { type: Object, default: null },
   file: { type: Object, default: null },
@@ -91,7 +93,21 @@ defineExpose({ reset: () => { if (fileInput.value) fileInput.value.value = '' } 
           Profiles
         </Button>
 
-        <Select v-model="modelValue">
+<!--
+          Locked: the model as text with a lock, not a disabled Select. A
+          disabled Select still lists what the role may not run.
+        -->
+        <div
+          v-if="modelLocked"
+          class="flex h-8 items-center gap-1.5 rounded-md border border-dashed bg-muted/40 px-2 text-xs"
+          title="Set by your role"
+        >
+          <Lock class="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span class="max-w-36 truncate font-medium">{{ modelValue }}</span>
+          <span class="text-muted-foreground">Set by your role</span>
+        </div>
+
+        <Select v-else v-model="modelValue">
           <SelectTrigger class="h-8 w-auto min-w-36 text-xs">
             <SelectValue placeholder="Model" />
           </SelectTrigger>

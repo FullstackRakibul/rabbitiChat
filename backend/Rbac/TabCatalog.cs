@@ -1,4 +1,4 @@
-// RBAC — the tab catalogue and the role → default-tabs map.
+﻿// RBAC — the tab catalogue and the role → default-tabs map.
 //
 // Deliberately a constant map rather than a table: role baselines change when
 // the SHIPPED TAB SET changes, which is a code change anyway. Keeping it here
@@ -107,12 +107,16 @@ public static class TabCatalog
     ///
     /// Chat, workspace, documents, search and IELTS are deliberately NOT here —
     /// they are the model-backed and knowledge-base modules, so they start at
-    /// System. An admin can still grant any of them to one General user without
+    /// System. jsonto and 5lakhs run no model either, but they were taken out of
+    /// this baseline too (MODEL_POLICY_PROMPT section 1) to keep a plain account
+    /// to the five core tools; they remain grantable and start at System.
+    ///
+    /// An admin can still grant any of them to one General user without
     /// promoting them, which is what the additive grant table is for.
     /// </summary>
     private static readonly string[] GeneralTabs =
     {
-        "dashboard", "todo", "jsonto", "5lakhs", "notes", "sources", "settings",
+        "dashboard", "todo", "notes", "sources", "settings",
     };
 
     /// <summary>
@@ -123,6 +127,9 @@ public static class TabCatalog
     private static readonly string[] SystemExtraTabs =
     {
         "chat", "workspace", "docs", "search", "ielts", "component-splitter",
+        // Not model-backed, but they left General's baseline (MODEL_POLICY_PROMPT
+        // section 1) and every tier above General must keep what it had.
+        "jsonto", "5lakhs",
     };
 
     /// <summary>
@@ -174,6 +181,17 @@ public static class TabCatalog
 
     public static string LabelFor(string tabKey) =>
         Labels.TryGetValue(tabKey, out var label) ? label : tabKey;
+
+    /// <summary>
+    /// True when a tab may be handed to a user who does not already hold it by
+    /// role. Everything is grantable except the RBAC tab: that screen changes
+    /// roles and grants, so granting it would let a non-admin promote
+    /// themselves, and the grant would be a way around the role check rather
+    /// than an addition to it.
+    /// </summary>
+    public static bool IsGrantable(string? tabKey) =>
+        Canonical(tabKey) is { } key &&
+        !string.Equals(key, RbacTab, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Effective tabs = role baseline ∪ explicit grants, in catalogue order so

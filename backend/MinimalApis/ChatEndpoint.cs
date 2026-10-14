@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
@@ -36,7 +36,8 @@ namespace RabbitIC.Api.MinimalApis
             IContextSourceService contextSources,
             WebSearchRunner webSearchRunner,
             IConfiguration config,
-            ILoggerFactory logs)
+            ILoggerFactory logs,
+            RabbitIC.Api.Rbac.IModelPolicy modelPolicy)
         {
             var log = logs.CreateLogger("ChatEndpoint");
             var ct = ctx.RequestAborted;
@@ -46,6 +47,16 @@ namespace RabbitIC.Api.MinimalApis
             {
                 ctx.Response.StatusCode = 401;
                 await ctx.Response.WriteAsync("Unauthorized.");
+                return;
+            }
+
+            // The policy runs before the conversation is resolved and before the
+            // user turn is saved, so a refused request leaves nothing behind.
+            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct);
+            if (!policy.IsAllowed)
+            {
+                ctx.Response.StatusCode = 403;
+                await ctx.Response.WriteAsJsonAsync(new { error = policy.Message }, ct);
                 return;
             }
 
@@ -107,11 +118,16 @@ namespace RabbitIC.Api.MinimalApis
             var modelSupportsTools = capabilities.Contains("tools", StringComparer.OrdinalIgnoreCase);
             var useTools = req.WebSearch && modelSupportsTools && webSearchRunner.IsConfigured;
 
-            // Only ask for reasoning where the model advertises it; otherwise the
-            // flag is dropped rather than sent and rejected upstream.
-            var think = req.Think && capabilities.Any(c =>
+            // Three-valued, and the middle case is the one that used to be wrong:
+            // a model that CAN reason is told explicitly either way, because
+            // saying nothing lets it fall back to its own default (thinking ON
+            // for Qwen) and the toggle appeared to do nothing. A model that
+            // cannot reason is told nothing at all -- the field is a 400 there.
+            var canThink = capabilities.Any(c =>
                 c.Equals("thinking", StringComparison.OrdinalIgnoreCase) ||
                 c.Equals("reasoning", StringComparison.OrdinalIgnoreCase));
+
+            bool? think = canThink ? req.Think : null;
 
             var webSearchUsed = false;
             string? notice = null;

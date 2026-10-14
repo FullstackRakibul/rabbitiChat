@@ -71,3 +71,27 @@ export function listTabs() {
 export function listRoles() {
   return http.get('/admin/rbac/roles')
 }
+
+/**
+ * Which models each role may run, plus the installed local models to choose
+ * from: { policies: [{ role, allowedModels, defaultModel, locked, editable,
+ * updatedAtUtc }], installedModels: [...] }.
+ *
+ * An empty allowedModels means no restriction — that asymmetry is the server's,
+ * and the editor shows it as "No restriction" rather than as an empty list.
+ */
+export function listModelPolicies() {
+  return http.get('/admin/rbac/model-policies')
+}
+
+/**
+ * Replaces one role's policy. An empty list clears the restriction.
+ *
+ * Every rule about what is valid lives on the server; this just posts the draft
+ * and lets the refusal come back worded there.
+ */
+export function setModelPolicy(role, allowedModels, defaultModel) {
+  return http.put(`/admin/rbac/model-policies/${encodeURIComponent(role)}`, {
+    allowedModels, defaultModel,
+  })
+}

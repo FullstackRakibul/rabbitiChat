@@ -19,6 +19,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import ModelPolicyEditor from '@/components/rbac/ModelPolicyEditor.vue'
 import { cn } from '@/lib/utils'
 
 const props = defineProps({
@@ -247,9 +248,19 @@ defineExpose({ refresh: refreshList })
       </p>
     </div>
 
-    <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+    <!--
+      Not flex-1: the model policy editor sits below this grid, and the page
+      itself scrolls. A grid that claimed the remaining viewport height would
+      paint over whatever follows it instead of making room for it.
+    -->
+    <div class="grid shrink-0 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <!-- ── Users ── -->
-      <section class="flex min-h-0 flex-col rounded-lg border bg-card">
+      <!--
+        A definite height, because this panel scrolls internally (flex-1 +
+        overflow-y-auto below) and such a scroller collapses in a row that has
+        no height of its own.
+      -->
+      <section class="flex h-[32rem] flex-col rounded-lg border bg-card">
         <div class="flex items-center gap-2 border-b p-3">
           <div class="relative flex-1">
             <Search class="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -316,7 +327,8 @@ defineExpose({ refresh: refreshList })
       </section>
 
       <!-- ── Detail ── -->
-      <section class="flex min-h-0 flex-col rounded-lg border bg-card">
+      <!-- Same reason as the users panel above. -->
+      <section class="flex h-[32rem] flex-col rounded-lg border bg-card">
         <div
           v-if="!selected"
           class="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground"
@@ -424,5 +436,13 @@ defineExpose({ refresh: refreshList })
         </template>
       </section>
     </div>
+
+    <Separator />
+
+    <!--
+      The model policy. Same screen, same audience: this tab is SystemAdmin-only
+      and is never grantable, which is the gate on the editor too.
+    -->
+    <ModelPolicyEditor />
   </div>
 </template>

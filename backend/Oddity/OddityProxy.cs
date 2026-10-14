@@ -1,4 +1,4 @@
-// Oddity — the gateway proxy.
+﻿// Oddity — the gateway proxy.
 //
 // Speaks Ollama's own API, so any Ollama client works by changing its base URL
 // and adding a key. Two rules carry the design:
@@ -60,17 +60,20 @@ public sealed class OddityProxy
     private readonly OdditySettingsService _settings;
     private readonly OddityRecorder _recorder;
     private readonly RbacService _rbac;
+    private readonly RabbitIC.Api.Rbac.IModelPolicy _modelPolicy;
     private readonly IHttpClientFactory _http;
 
     public OddityProxy(
         AppDbContext db, OddityKeyService keys, OdditySettingsService settings,
-        OddityRecorder recorder, RbacService rbac, IHttpClientFactory http)
+        OddityRecorder recorder, RbacService rbac, IHttpClientFactory http,
+        RabbitIC.Api.Rbac.IModelPolicy modelPolicy)
     {
         _db = db;
         _keys = keys;
         _settings = settings;
         _recorder = recorder;
         _rbac = rbac;
+        _modelPolicy = modelPolicy;
         _http = http;
     }
 
@@ -183,6 +186,20 @@ public sealed class OddityProxy
         {
             await RejectAsync(ctx, row, StatusCodes.Status403Forbidden, $"model '{model}' is not allowed on this gateway");
             return;
+        }
+
+        // The key's OWNER is still subject to their role's model policy. Without
+        // this, a key would be a way around the restriction: the gateway has its
+        // own allow-list, but that is the operator's list, not the role's.
+        // Embedding calls are exempt, as they are everywhere else (§10.3).
+        if (!embed)
+        {
+            var rolePolicy = await _modelPolicy.CheckAsync(owner, model, "local", ct);
+            if (!rolePolicy.IsAllowed)
+            {
+                await RejectAsync(ctx, row, StatusCodes.Status403Forbidden, rolePolicy.Message);
+                return;
+            }
         }
 
         // Embedding calls are forwarded byte for byte; chat and generate get the
