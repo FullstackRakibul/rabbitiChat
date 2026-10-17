@@ -204,3 +204,48 @@ export function downloadRulePage(id, version) {
 export function exportRulebook() {
   return saveDownload('/hr/rulebook/export', 'rulebook-confirmed.md')
 }
+
+/**
+ * Works a formula out exactly as a [[= … ]] in a page is (the server's one
+ * evaluator): { ok, result, display: '৳42,000', error }. The Rulebook editor's
+ * preview calls it once per formula.
+ */
+export function calculateHr(expression) {
+  return http.post('/hr/calculate', { expression, inline: true })
+}
+
+/** The number check before Confirm: { version, generatedVersion, unverified: [77777], failedFormulas }. */
+export function checkRulePage(id, version) {
+  return http.get(`/hr/rulebook/${id}/check${version ? `?version=${version}` : ''}`)
+}
+
+/**
+ * Drafts a page from the Library; the draft streams. Frames: `status` (the line
+ * shown until the first word), `context` (what was sent), `content` (the model's
+ * words), `error`, then `draft` — the page as saved: { pageId, version, body,
+ * unverified, formulas }. `pageId` adds a version to that page; without it a new
+ * page is made from title, category and language.
+ */
+export async function streamRulebookDraft({ pageId, title, category, language, items = [], instruction }, handlers, signal) {
+  let buffer = ''
+  const consume = (line) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    let frame
+    try { frame = JSON.parse(trimmed) } catch { return }
+    switch (frame.type) {
+      case 'status': handlers.onStatus?.(frame.text ?? ''); break
+      case 'context': handlers.onContext?.(frame); break
+      case 'content': handlers.onContent?.(frame.text ?? ''); break
+      case 'error': handlers.onError?.(frame.message ?? 'The model failed.'); break
+      case 'draft': handlers.onDraft?.(frame); break
+    }
+  }
+  await http.stream('/hr/rulebook/generate', { pageId, title, category, language, items, instruction }, (chunk) => {
+    buffer += chunk
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    lines.forEach(consume)
+  }, signal)
+  consume(buffer)
+}

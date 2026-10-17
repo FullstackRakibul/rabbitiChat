@@ -28,6 +28,9 @@ import { Button } from '@/components/ui/button'
 import HrItemViewer from '@/components/hr/HrItemViewer.vue'
 import { escapeHtml, withFormulas } from '@/lib/hr-text'
 
+/** A Rulebook citation was clicked: the tab opens that page at that version ({ pageId | title, version }). */
+const emit = defineEmits(['open-rule'])
+
 const EXAMPLES = [
   'Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?',
   'Which attendance codes count as worked days for earned leave?',
@@ -200,7 +203,12 @@ function withCites(content) {
 
 /** A citation → the item and place to open, from what this answer was sent, then from the library by name. */
 function resolveCite(message, label) {
-  // A Rulebook page is cited as "Rulebook: <Title> v<N>" (its `cite`); anything else by its SourceRef.
+  // A Rulebook page is cited as "Rulebook: <Title> v<N>" (its `cite`) and opens the page
+  // at that version (docs/HR_RULEBOOK_PROMPT.md §3.5); anything else by its SourceRef.
+  const rule = message.context?.excerpts?.find((e) => e.cite === label && e.rulePageId)
+  if (rule) return { rule: { pageId: rule.rulePageId, version: rule.ruleVersion } }
+  const named = /^Rulebook: (.+) v(\d+)$/.exec(label)
+  if (named) return { rule: { title: named[1], version: Number(named[2]) } }
   const excerpt = message.context?.excerpts?.find((e) => e.cite === label || e.sourceRef === label)
   if (excerpt) return { itemId: excerpt.itemId, label, lineFrom: excerpt.lineFrom, lineTo: excerpt.lineTo }
 
@@ -226,7 +234,8 @@ function onAnswerClick(message, event) {
   const el = event.target.closest?.('[data-cite]')
   if (!el) return
   const target = resolveCite(message, el.dataset.cite)
-  if (target) openViewer(target)
+  if (target?.rule) emit('open-rule', target.rule)
+  else if (target) openViewer(target)
 }
 
 function openViewer(target) {

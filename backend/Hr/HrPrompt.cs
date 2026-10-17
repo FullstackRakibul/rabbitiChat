@@ -15,8 +15,10 @@ using RabbitIC.Api.Models;
 namespace RabbitIC.Api.Hr;
 
 /// <param name="Cite">How the excerpt is cited when it is not by its SourceRef: a Rulebook page's "Rulebook: &lt;Title&gt; v&lt;N&gt;".</param>
+/// <param name="RulePageId">The Rulebook page, and its confirmed version, a click on the citation opens.</param>
+/// <param name="Pinned">In because the question names its Rulebook page, not by rank (docs/HR_RULEBOOK_PROMPT.md §3.5).</param>
 public sealed record HrExcerpt(int ChunkId, int ItemId, string ItemName, int Version, string? SourceRef, int? LineFrom, int? LineTo, string Text, int Tokens, double Score,
-    string? Cite = null);
+    string? Cite = null, int? RulePageId = null, int? RuleVersion = null, bool Pinned = false);
 
 public static class HrPrompt
 {
@@ -36,7 +38,7 @@ public static class HrPrompt
         Follow these rules in every answer:
         1. Answer only from the HR context: the library below and the excerpts sent with the question. Never answer from general knowledge or guess company policy.
         2. After each statement, cite its source in square brackets as the context labels it: [HR_SETTLEMENT_RULES §5] for a section of a library document, or an excerpt's own label, such as [ProcessFinalSettelment.sql §Service Benefit L686-711] or, for a page of HR's Rulebook, exactly its label with nothing added inside the brackets, such as [Rulebook: Earned leave at settlement v4].
-        3. When the rules document and a procedure disagree, give the rules document's answer and say that the code does something else.
+        3. The sources rank: a page of HR's Rulebook first, then the rules document, then procedure code. When a Rulebook page and the code disagree, give the Rulebook page's rule and say that the code does something else; when the rules document and a procedure disagree, give the rules document's answer and say that the code does something else.
         4. When the context does not cover the question, say so in one line and name the item HR would need to add. Do not answer it anyway.
         5. For one employee's amount, use only figures the user gave. If one is missing (basic, service length, status, employee type, separation date), ask for it instead of assuming.
         6. Never calculate an amount yourself. Write each taka amount you work out as a formula in double brackets, [[= (12000/30)*15*8 ]], and the system puts the result in its place: "The service benefit is [[= (12000/30)*15*8 ]]." Inside the brackets use only numbers, + - * /, parentheses and round(x, n); no ৳ and no words. Do not write the result yourself, before or after the formula. For days or years, state the rule ("15 days' basic for each year") instead of multiplying them out.

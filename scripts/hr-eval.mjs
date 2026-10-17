@@ -339,7 +339,8 @@ check('G1.5', 1, 'fake', 'a library split the old way (no SplitVersion) is re-sp
   const stats = (await asAdmin('GET', '/api/hr/library/index-stats')).json?.byItem?.[item.id] ?? {}
   const log = fs.readFileSync(ctx.api.logPath, 'utf8').split('\n').filter((l) => l.includes('re-split')).map((l) => l.trim())
   const replaced = after.length > 0 && after.every((id) => !before.includes(id))
-  return ok(replaced && JSON.stringify(after) === JSON.stringify(third) && version === 2 && stats.index === after.length && stats.fts === after.length,
+  // 3 since the Rulebook's R2: small sections join into one chunk (docs/HR_RULEBOOK_PROMPT.md, R2 addition a).
+  return ok(replaced && JSON.stringify(after) === JSON.stringify(third) && version === 3 && stats.index === after.length && stats.fts === after.length,
     `chunks ${before.length} → ${after.length}, all new ids ${replaced}; second restart leaves them ${JSON.stringify(after) === JSON.stringify(third)}; `
     + `SplitVersion ${version}; index ${stats.index}, db ${stats.db}, fts ${stats.fts}; log: ${log.at(-1) ?? 'none'}`)
 })
@@ -470,7 +471,13 @@ check('G1.9', 1, 'any', 'git diff main: no Microsoft.Data.SqlClient and nothing 
   const hrAssistOnly = spawnSync('git', ['diff', '--name-only', 'main', 'hr-assist'], { cwd: REPO, encoding: 'utf8' }).stdout
     .split('\n').filter((f) => /backend\/Hr\/|HrQueryCatalog|SqlServerHr|coreerp-/.test(f))
   const sqlClient = /Microsoft\.Data\.SqlClient/.test(read('backend/RabbitIC.Api.csproj')) || /SqlClient/.test(diff)
-  const leaked = names.filter((f) => hrAssistOnly.includes(f))
+  // By content, not by name: a file is hr-assist's when HEAD holds hr-assist's own version
+  // of it, or holds a file only hr-assist has. A file hr-assist simply lacks (HrLibrary.cs)
+  // differs from main for reasons of its own and is not a leak.
+  const blob = (ref, f) => spawnSync('git', ['rev-parse', '-q', '--verify', `${ref}:${f}`], { cwd: REPO, encoding: 'utf8' }).stdout.trim()
+  const fromHrAssist = (f) => blob('hr-assist', f) !== '' && blob('HEAD', f) !== ''
+    && (blob('HEAD', f) === blob('hr-assist', f) || blob('main', f) === '')   // its version, or a file only hr-assist has
+  const leaked = names.filter((f) => hrAssistOnly.includes(f) && fromHrAssist(f))
   return ok(!sqlClient && !leaked.length, `${names.length} files differ from main; SqlClient ${sqlClient}; hr-assist files present [${leaked}]`)
 })
 
@@ -1479,6 +1486,353 @@ check('GR1.10', 'R1', 'any', 'dotnet build: 0 warnings, 0 errors; npm run build 
   return ok(d.status === 0 && warnings === '0' && errors === '0' && n.status === 0 && /built in/.test(nout) && !/\berror\b/i.test(nout),
     `dotnet exit ${d.status}, ${warnings} warning(s), ${errors} error(s); npm exit ${n.status}, ${(nout.match(/built in [\d.]+m?s/) ?? ['no build line'])[0]}`
     + `${d.status ? `\n${dout.slice(-600)}` : ''}`)
+})
+
+// ═══════════════════════════ Rulebook R2 — draft from the Library; Ask prefers confirmed pages ═══════════════════════════
+// docs/HR_RULEBOOK_PROMPT.md §3.4–§3.5, gates GR2.1–GR2.8, and KAKAROT's R2 additions:
+// GR2.9 small sections join (a), GR2.10 formulas in the editor preview (b), GR2.11
+// Rulebook copies always split as Markdown (c). Run with --phase R2 (R1 runs too).
+
+/** §3.4's template headings, in order, written by hand. */
+const RB_TEMPLATE = ['## উদ্দেশ্য · Purpose', '## নিয়ম · Rules', '## হিসাব · Calculation', '## ব্যতিক্রম · Exceptions',
+  '## পর্যালোচনাধীন · Under review', '## উৎস · Sources']
+const RB_NOT_IN_LIBRARY = 'এই বিষয়ে লাইব্রেরিতে তথ্য নেই · Not in the library'
+const RB_MAX_EXCERPTS = 12, RB_EXCERPT_BUDGET = 5000
+
+/** One generation, read to the end: frames, the streamed text and the saved draft. */
+async function rbGenerate(user, body) {
+  const t0 = Date.now()
+  const res = await fetch(`${ctx.api.url}${RB}/generate`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${user.token}` }, body: JSON.stringify(body),
+  })
+  const reader = res.body.getReader(), decoder = new TextDecoder()
+  let text = '', firstContentMs = null
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    const piece = decoder.decode(value, { stream: true })
+    if (firstContentMs === null && piece.includes('"type":"content"')) firstContentMs = Date.now() - t0
+    text += piece
+  }
+  const frames = /ndjson/.test(res.headers.get('content-type') ?? '')
+    ? text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean) : []
+  return {
+    status: res.status, text, frames, endMs: Date.now() - t0, firstContentMs,
+    streamed: frames.filter((f) => f.type === 'content').map((f) => f.text).join(''),
+    context: frames.find((f) => f.type === 'context'), draft: frames.find((f) => f.type === 'draft'),
+    error: frames.find((f) => f.type === 'error')?.message,
+  }
+}
+
+/** The body under one "## " heading, up to the next one. */
+function rbSection(body, heading) {
+  const at = body.indexOf(`${heading}\n`)
+  if (at < 0) return null
+  const rest = body.slice(at + heading.length + 1)
+  const next = rest.search(/^## /m)
+  return (next < 0 ? rest : rest.slice(0, next)).trim()
+}
+
+/** The template headings in the order the body has them (others left out). */
+const rbHeadingOrder = (body) => body.split('\n').filter((l) => RB_TEMPLATE.includes(l.trim())).map((l) => l.trim())
+
+/** What a fake model writes for a draft: the template, with the parts given. */
+function rbFakeDraft(title, parts) {
+  const out = [`# ${title}`, '**বিভাগ / Category:** Settlement   **প্রযোজ্য / Applies to:** Non-Management', '']
+  for (const [h, text] of [['Purpose', parts.purpose], ['Rules', parts.rules], ['Calculation', parts.calculation], ['Exceptions', parts.exceptions], ['Under review', parts.review], ['Sources', parts.sources]]) {
+    if (text === undefined) continue
+    out.push(RB_TEMPLATE.find((t) => t.endsWith(h)), text, '')
+  }
+  return out.join('\n')
+}
+const words = (text) => text.match(/\S+\s*/g) ?? []
+
+async function libraryFingerprint() {
+  const rows = await sqlite(`SELECT Id, Version, IsActive, length(Content) AS n, substr(Content, 1, 60) AS head FROM ContextSources WHERE Kind = 'hr' ORDER BY Id`)
+  return JSON.stringify(rows)
+}
+
+// ─────────────────────────── GR2.1 — draft only ───────────────────────────
+
+check('GR2.1', 'R2', 'fake', 'generating "Retrenchment benefits" streams a draft with every template heading in order; a generated version with SourcesJson and ModelJson; the page stays Draft; the Library is unchanged', async () => {
+  const editor = await rbEditor()
+  await embedded()
+  const k = stamp(), title = `Retrenchment benefits ${k}`
+  const libraryBefore = await libraryFingerprint()
+  script(() => ({ words: words(rbFakeDraft(title, {
+    purpose: 'What a retrenched employee is paid at final settlement.',
+    rules: '1. Basic × years of service, at least 1 year [ProcessFinalSettelment.sql §Retrenchment L1-9].\n2. Plus notice pay: day\'s basic × notice-period days.',
+    calculation: 'Basic × years. Example: basic ৳12,000, 5 years → [[= 12000*5 ]]',
+    exceptions: 'Not covered for Day Labour.',
+    review: '',
+    sources: '- whatever the model lists',
+  })) }))
+  const g = await rbGenerate(editor, { title, category: 'settlement', language: 'en' })
+  script(null)
+  const body = g.draft?.body ?? ''
+  const order = rbHeadingOrder(body)
+  const page = g.draft ? (await rbGet(editor, g.draft.pageId)).json : null
+  const rows = g.draft ? await sqlite(`SELECT Version, Kind, SourcesJson, ModelJson FROM HrRulePageVersions WHERE PageId = ${Number(g.draft.pageId)}`) : []
+  let sources = null, model = null
+  try { sources = JSON.parse(rows[0]?.SourcesJson ?? 'null'); model = JSON.parse(rows[0]?.ModelJson ?? 'null') } catch { /* reported below */ }
+  const libraryAfter = await libraryFingerprint()
+  ctx.gr21 = { pageId: g.draft?.pageId, body }
+  return ok(g.status === 200 && g.frames[0]?.type === 'status' && g.streamed.length > 0 && body.startsWith(`# ${title}\n`)
+      && JSON.stringify(order) === JSON.stringify(RB_TEMPLATE) && rows.length === 1 && rows[0].Kind === 'generated'
+      && (sources?.excerpts?.length ?? 0) > 0 && !!model?.model && !!model?.promptHash && model?.durationMs >= 0
+      && page?.status === 'draft' && page?.confirmedVersion === null && page?.libraryItemId === null && libraryAfter === libraryBefore,
+    `status ${g.status}, first frame ${g.frames[0]?.type}, ${g.frames.filter((f) => f.type === 'content').length} content frames streamed; headings in order ${JSON.stringify(order) === JSON.stringify(RB_TEMPLATE)} [${order.map((h) => h.split(' · ')[1]).join(', ')}]; `
+    + `versions [${rows.map((r) => `v${r.Version} ${r.Kind}`)}], SourcesJson ${sources?.excerpts?.length} excerpts, ModelJson ${JSON.stringify(model ?? {}).slice(0, 160)}; `
+    + `page ${page?.status}, confirmed ${page?.confirmedVersion}, Library item ${page?.libraryItemId}; Library unchanged ${libraryAfter === libraryBefore}`)
+})
+
+// ─────────────────────────── GR2.2 — sources ───────────────────────────
+
+check('GR2.2', 'R2', 'fake', 'the model gets the always items and at most 12 excerpts within 5,000 tokens', async () => {
+  const editor = await rbEditor()
+  const always = (await library()).filter((i) => i.mode === 'always' && i.isActive)
+  const alwaysText = await Promise.all(always.map(async (i) => (await asAdmin('GET', `/api/hr/library/${i.id}`)).json.content.trim()))
+  const before = chatRequests().length
+  const g = await rbGenerate(editor, { title: `Service benefit and gratuity ${stamp()}`, category: 'settlement', language: 'en' })
+  const sent = chatRequests().slice(before)[0]?.body
+  const sys = sent?.messages?.[0]?.content ?? '', last = sent?.messages?.at(-1)?.content ?? ''
+  const ex = g.context?.excerpts ?? []
+  const tokens = ex.reduce((n, e) => n + e.tokens, 0)
+  return ok(g.status === 200 && always.length > 0 && alwaysText.every((t) => sys.includes(t)) && ex.length > 5 && ex.length <= RB_MAX_EXCERPTS
+      && tokens <= RB_EXCERPT_BUDGET && ex.every((e) => last.includes(`[${e.sourceRef}]`)),
+    `always items in the system message ${alwaysText.filter((t) => sys.includes(t)).length}/${always.length}; ${ex.length} excerpts (≤ ${RB_MAX_EXCERPTS}), ${tokens} tokens (≤ ${RB_EXCERPT_BUDGET}); all labelled in the prompt ${ex.every((e) => last.includes(`[${e.sourceRef}]`))}`)
+})
+
+check('GR2.2', 'R2', 'fake', 'with two Library items picked, the excerpts come from those two only; the Sources heading lists the SourceRefs used, each opening its item at its lines', async () => {
+  const editor = await rbEditor()
+  const items = await library()
+  const picked = ['ProcessFinalSettelment.sql', 'GetSalaryDetails.sql'].map((n) => items.find((i) => i.name === n)?.id)
+  const before = chatRequests().length
+  const g = await rbGenerate(editor, { title: `Retrenchment notice pay ${stamp()}`, category: 'settlement', language: 'en', items: picked })
+  const last = chatRequests().slice(before)[0]?.body?.messages?.at(-1)?.content ?? ''
+  const ex = g.context?.excerpts ?? []
+  const sourcesBody = rbSection(g.draft?.body ?? '', '## উৎস · Sources') ?? ''
+  const listed = [...sourcesBody.matchAll(/^- \[(.+)\]$/gm)].map((m) => m[1])
+  const detail = g.draft ? (await rbGet(editor, g.draft.pageId)).json : null
+  const opens = (detail?.version?.sources ?? []).filter((s) => s.itemId && s.lineFrom > 0 && s.lineTo >= s.lineFrom && picked.includes(s.itemId))
+  const ui = read('frontend/src/components/hr/HrRulePage.vue')
+  const refs = [...new Set(ex.map((e) => e.sourceRef))]
+  return ok(g.status === 200 && picked.every(Boolean) && ex.length > 0 && ex.every((e) => picked.includes(e.itemId))
+      && [...last.matchAll(/^\[([^\]\n]+ L\d+-\d+)\]$/gm)].every((m) => /^(ProcessFinalSettelment|GetSalaryDetails)\.sql/.test(m[1]))
+      && refs.every((r) => listed.includes(r)) && opens.length === refs.length && /HrItemViewer/.test(ui) && /data-source/.test(ui),
+    `picked [${picked}]; excerpt items [${[...new Set(ex.map((e) => e.itemId))]}]; Sources lists ${listed.length} (${listed.slice(0, 3).join(' | ')}…), every excerpt listed ${refs.every((r) => listed.includes(r))}; `
+    + `version sources that open their item at lines ${opens.length}/${refs.length}; HrRulePage opens them in HrItemViewer ${/HrItemViewer/.test(ui)}`)
+})
+
+// ─────────────────────────── GR2.3 — not invented ───────────────────────────
+
+check('GR2.3', 'R2', 'fake', 'a topic the library lacks gets "Not in the library" under its heading, never a rule; every ⚠ line in the excerpts is under Under review', async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  const a = await asAdmin('POST', '/api/hr/library', { name: `eval-gr23-quasar-${k}`, hrType: 'note', mode: 'search', content:
+    `# Quasar bonus ${k}\n\n## Rule\nThe Quasar bonus ${k} is one month's basic, paid in December.\n\n## Doubts\n⚠ Quasar bonus ${k} for unit 9 is under review by HR.\n` })
+  const b = await asAdmin('POST', '/api/hr/library', { name: `eval-gr23-quasar-units-${k}`, hrType: 'note', mode: 'search', content:
+    `# Quasar bonus ${k} by unit\n\nUnits 1 and 27 pay the Quasar bonus ${k} in two halves.\n⚠ Quasar bonus ${k} for Day Labour: the code and the policy differ.\n` })
+  await embedded()
+  const before = chatRequests().length
+  // The model leaves Exceptions and Under review empty, as a model does when the excerpts say nothing.
+  script(() => ({ words: words(rbFakeDraft(`Quasar bonus ${k}`, {
+    purpose: 'A yearly bonus.', rules: `1. One month's basic, paid in December.`, calculation: 'Basic × 1.', exceptions: '', review: '', sources: '',
+  })) }))
+  const g = await rbGenerate(editor, { title: `Quasar bonus ${k}`, category: 'salary', language: 'en', items: [a.json?.id, b.json?.id] })
+  script(null)
+  const sys = chatRequests().slice(before)[0]?.body?.messages?.[0]?.content ?? ''
+  const body = g.draft?.body ?? ''
+  const exceptions = rbSection(body, '## ব্যতিক্রম · Exceptions'), review = rbSection(body, '## পর্যালোচনাধীন · Under review') ?? ''
+  const warnings = [`⚠ Quasar bonus ${k} for unit 9 is under review by HR.`, `⚠ Quasar bonus ${k} for Day Labour: the code and the policy differ.`]
+  for (const id of [a.json?.id, b.json?.id]) if (id) await asAdmin('DELETE', `/api/hr/library/${id}`)
+  return ok(g.status === 200 && exceptions === RB_NOT_IN_LIBRARY && warnings.every((w) => review.includes(w)) && sys.includes(RB_NOT_IN_LIBRARY) && /⚠/.test(sys),
+    `Exceptions → "${exceptions}"; Under review has both ⚠ lines ${warnings.every((w) => review.includes(w))} ("${review.replace(/\n/g, ' / ').slice(0, 200)}"); `
+    + `the model is told to write "Not in the library" ${sys.includes(RB_NOT_IN_LIBRARY)} and to keep ⚠ ${/⚠/.test(sys)}`)
+})
+
+// ─────────────────────────── GR2.4 — numbers ───────────────────────────
+
+check('GR2.4', 'R2', 'fake', 'formulas in a draft are worked out; an invented amount is unverified, highlighted in the editor and listed before Confirm', async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  script(() => ({ words: words(rbFakeDraft(`Service benefit ${k}`, {
+    purpose: 'Service benefit at settlement.', rules: '1. 3–9 years: 15 days\' basic for each year.\n2. A flat ৳77,777 is added for every case.',
+    calculation: 'Basic ৳12,000, 7 years → [[= (12000/30)*15*7 ]]', exceptions: 'Removal: none.', review: '', sources: '',
+  })) }))
+  const g = await rbGenerate(editor, { title: `Service benefit ${k}`, category: 'settlement', language: 'en' })
+  script(null)
+  const pageId = g.draft?.pageId
+  const view = pageId ? (await rbGet(editor, pageId)).json?.version : null
+  const before = pageId ? (await as(editor, 'GET', `${RB}/${pageId}/check`)).json : null
+  if (pageId) await rbSave(editor, pageId, `${g.draft.body}\nAn HR note.\n`, { note: 'HR read it' })
+  const after = pageId ? (await as(editor, 'GET', `${RB}/${pageId}/check`)).json : null
+  // The marking is lib/hr-text.js's markUnverified, which the page uses for its view and its editor preview.
+  const ui = read('frontend/src/components/hr/HrRulePage.vue') + (/markUnverified/.test(read('frontend/src/components/hr/HrRulePage.vue')) ? read('frontend/src/lib/hr-text.js') : '')
+  const formula = (view?.formulas ?? [])[0]
+  return ok(g.status === 200 && JSON.stringify(g.draft?.unverified) === '[77777]' && formula?.ok && formula?.display === '৳42,000' && view?.display?.includes('৳42,000')
+      && JSON.stringify(before?.unverified) === '[77777]' && JSON.stringify(after?.unverified) === '[77777]'
+      && /data-unverified/.test(ui) && /confirm-unverified/.test(ui),
+    `draft frame unverified ${JSON.stringify(g.draft?.unverified)}; the page shows ${formula?.display} for ${formula?.expression}; `
+    + `check before Confirm: generated ${JSON.stringify(before?.unverified)}, after an HR edit ${JSON.stringify(after?.unverified)}; editor highlights (data-unverified) ${/data-unverified/.test(ui)}, Confirm lists them ${/confirm-unverified/.test(ui)}`)
+})
+
+// ─────────────────────────── GR2.5 — precedence ───────────────────────────
+
+async function rbPrecedenceFixture() {
+  const k = stamp(), title = `Quokka allowance ${k}`
+  const proc = await asAdmin('POST', '/api/hr/library', { name: `eval-gr25-${k}.sql`, hrType: 'procedure', content:
+    `--// Quokka allowance ${k} Start\nSET @QuokkaAllowance${k} = @Basic * 2 -- Quokka allowance ${k}: two times basic\n--// Quokka allowance ${k} End\n` })
+  const { page } = await rbConfirmed(title, `# ${title}\n\n## নিয়ম · Rules\n1. The Quokka allowance ${k} is three times basic.\n`, 'salary')
+  await embedded()
+  return { k, title, page, procId: proc.json?.id }
+}
+
+check('GR2.5', 'R2', 'fake', 'a confirmed page and a procedure that disagree: the persona puts the Rulebook first, and its excerpt is sent before the code', async () => {
+  const f = await rbPrecedenceFixture()
+  const before = chatRequests().length
+  const r = await hrChat(await rbEditor(), { message: `How is the Quokka allowance ${f.k} calculated?` })
+  const sent = chatRequests().slice(before)[0]?.body
+  const sys = sent?.messages?.[0]?.content ?? '', last = sent?.messages?.at(-1)?.content ?? ''
+  const label = `[Rulebook: ${f.title} v${f.page.confirmedVersion}]`
+  const rbAt = last.indexOf(label), codeAt = last.indexOf(`eval-gr25-${f.k}.sql`)
+  const persona = /Rulebook/.test(sys) && /rules document/i.test(sys) && /procedure/i.test(sys) && /code does something else|code differs/i.test(sys)
+  if (f.procId) await asAdmin('DELETE', `/api/hr/library/${f.procId}`)
+  return ok(r.status === 200 && persona && rbAt >= 0 && codeAt > rbAt,
+    `persona states the Rulebook > rules > code precedence ${persona}; the Rulebook excerpt at ${rbAt}, the code at ${codeAt} (after it ${codeAt > rbAt})`)
+})
+
+check('GR2.5', 'R2', 'live', 'live: the answer gives the page\'s rule, cites the page and says the code differs', async () => {
+  const f = await rbPrecedenceFixture()
+  const r = await hrChat(await rbEditor(), { message: `How is the Quokka allowance ${f.k} calculated?` })
+  const label = `[Rulebook: ${f.title} v${f.page.confirmedVersion}]`
+  const answer = r.answer.replace(/\s+/g, ' ')
+  const gives = /three times|3 times|× ?3|\* ?3|তিন গুণ/i.test(answer), differs = /code|procedure|কোড/i.test(answer)
+  if (f.procId) await asAdmin('DELETE', `/api/hr/library/${f.procId}`)
+  return ok(r.status === 200 && answer.includes(label) && gives && differs,
+    `cites ${label} ${answer.includes(label)}; gives three times basic ${gives}; says the code differs ${differs}; answer "${answer.slice(0, 400)}"`)
+})
+
+// ─────────────────────────── GR2.6 — pinned retrieval ───────────────────────────
+
+check('GR2.6', 'R2', 'fake', "a question naming a confirmed page's title gets its best chunk among the 5 excerpts, even when the ranks alone leave it out", async () => {
+  const k = stamp(), title = `Zorblax stipend ${k}`
+  const { page, item } = await rbConfirmed(title, `# ${title}\n\n## নিয়ম · Rules\n1. Paid once a year, in March.\n`, 'salary')
+  const distractors = []
+  for (let i = 0; i < 8; i++) {
+    const d = await asAdmin('POST', '/api/hr/library', { name: `eval-gr26-${k}-${i}`, hrType: 'note', mode: 'search',
+      content: `# Note ${i}\n\n${`Zorblax stipend ${k} payment dates and payment schedule. `.repeat(6)}Distractor ${i}.\n` })
+    distractors.push(d.json?.id)
+  }
+  await embedded()
+  const question = `What does the Zorblax stipend ${k} say about payment dates?`
+  const ranked = (await asAdmin('GET', `/api/hr/search?q=${encodeURIComponent(question)}`)).json?.hits ?? []
+  const rank = ranked.findIndex((h) => h.itemId === item.id) + 1   // 0: not even in the top 10
+  const r = await hrChat(await rbEditor(), { message: question })
+  const ex = r.context?.excerpts ?? []
+  const pinned = ex.filter((e) => e.itemId === item.id)
+  const control = await hrChat(await rbEditor(), { message: `Which notes mention payment schedule distractors ${k}?` })
+  const pinnedWithout = (control.context?.excerpts ?? []).filter((e) => e.itemId === item.id && e.pinned).length
+  for (const id of distractors) if (id) await asAdmin('DELETE', `/api/hr/library/${id}`)
+  return ok(r.status === 200 && (rank === 0 || rank > 5) && ex.length <= 5 && pinned.length === 1 && pinned[0].pinned === true && pinnedWithout === 0,
+    `by rank alone the page is ${rank ? `#${rank}` : 'outside the top 10'}; Ask's ${ex.length} excerpts include it ${pinned.length} time(s), pinned ${pinned[0]?.pinned}; `
+    + `a question not naming it pins it ${pinnedWithout} time(s); page ${page.id}`)
+})
+
+// ─────────────────────────── GR2.7 — live ───────────────────────────
+
+check('GR2.7', 'R2', 'live', 'live gemma4:12b on the real library: "রিট্রেঞ্চমেন্ট সুবিধা" (bn) and "Earned leave at settlement" (en): template, sources, times; drafts written for review', async () => {
+  const editor = await rbEditor()
+  await embedded(600_000)
+  const out = []
+  for (const [title, language] of [['রিট্রেঞ্চমেন্ট সুবিধা', 'bn'], ['Earned leave at settlement', 'en']]) {
+    const g = await rbGenerate(editor, { title, category: 'settlement', language })
+    const body = g.draft?.body ?? ''
+    const file = path.join(EVAL_ROOT, `gr27-${language}.md`)
+    fs.writeFileSync(file, `<!-- first word ${g.firstContentMs} ms · end ${g.endMs} ms · unverified ${JSON.stringify(g.draft?.unverified)} -->\n\n${body}\n\n<!-- streamed:\n${g.streamed}\n-->\n`)
+    out.push({ title, status: g.status, headings: JSON.stringify(rbHeadingOrder(body)) === JSON.stringify(RB_TEMPLATE),
+      sources: (g.context?.excerpts ?? []).length, firstMs: g.firstContentMs, endMs: g.endMs, unverified: g.draft?.unverified ?? null,
+      failed: g.draft?.formulas ?? [], file, error: g.error })
+  }
+  // "No invented rule" is judged by reading the drafts against HR_SETTLEMENT_RULES; unverified amounts are listed, not failed.
+  return ok(out.every((o) => o.status === 200 && o.headings && o.sources > 0 && Array.isArray(o.unverified) && !o.error),
+    out.map((o) => `${o.title}: ${o.status}, template ${o.headings}, ${o.sources} excerpts, first word ${o.firstMs} ms, end ${o.endMs} ms, unverified ${JSON.stringify(o.unverified)}, formulas not worked out ${JSON.stringify(o.failed)}${o.error ? `, error ${o.error}` : ''} → ${o.file}`).join('\n    '))
+})
+
+// ─────────────────────────── GR2.8 — builds ───────────────────────────
+
+check('GR2.8', 'R2', 'any', 'dotnet build: 0 warnings, 0 errors; npm run build clean', async () => {
+  const d = spawnSync('dotnet', ['build', path.join(REPO, 'backend', 'RabbitIC.Api.csproj'), '-v', 'q', '--nologo', '--no-incremental',
+    '-o', path.join(EVAL_ROOT, 'build-check-r2')], { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' })
+  const dout = (d.stdout ?? '') + (d.stderr ?? '')
+  const warnings = dout.match(/(\d+) Warning\(s\)/)?.[1], errors = dout.match(/(\d+) Error\(s\)/)?.[1]
+  const n = spawnSync('npm', ['run', 'build'], { cwd: path.join(REPO, 'frontend'), encoding: 'utf8', shell: process.platform === 'win32' })
+  const nout = (n.stdout ?? '') + (n.stderr ?? '')
+  return ok(d.status === 0 && warnings === '0' && errors === '0' && n.status === 0 && /built in/.test(nout),
+    `dotnet exit ${d.status}, ${warnings} warning(s), ${errors} error(s); npm exit ${n.status}, ${(nout.match(/built in [\d.]+m?s/) ?? ['no build line'])[0]}`)
+})
+
+// ─────────────────────────── GR2.9 — small sections join (R2 addition a) ───────────────────────────
+
+check('GR2.9', 'R2', 'fake', 'a one-rule page confirmed into the Library is 1 chunk, header line included, and takes 1 of the 5 excerpt slots', async () => {
+  const k = stamp(), title = `One rule ${k}`
+  const { page, item } = await rbConfirmed(title, `# ${title}\n\n## নিয়ম · Rules\n1. The one-rule fixture ${k} pays 777 Tk to every trainee.\n`, 'salary')
+  const chunks = (await asAdmin('GET', `/api/hr/library/${item.id}/chunks`)).json?.chunks ?? []
+  const r = await hrChat(await rbEditor(), { message: `One rule ${k}: how much does the one-rule fixture pay a trainee?` })
+  const slots = (r.context?.excerpts ?? []).filter((e) => e.itemId === item.id).length
+  return ok(chunks.length === 1 && chunks[0].text.startsWith(`Rulebook · ${title} · v${page.confirmedVersion} ·`) && chunks[0].text.includes('The one-rule fixture') && slots === 1,
+    `${chunks.length} chunk(s): ${chunks.map((c) => `${c.sourceRef} (${c.chars} chars)`).join(' | ')}; starts with the header line ${chunks[0]?.text.startsWith(`Rulebook · ${title}`)}; excerpt slots taken ${slots} of ${(r.context?.excerpts ?? []).length}`)
+})
+
+check('GR2.9', 'R2', 'fake', 'small sections join up to ~800 characters; a long section still splits under 1,500; every search item is at the new SplitVersion', async () => {
+  const k = stamp()
+  const small = Array.from({ length: 6 }, (_, i) => `## Part ${i}\nShort part ${i} of ${k}.`).join('\n\n')
+  const long = `## Long\n${Array.from({ length: 40 }, (_, i) => `Line ${i} of a long section about ${k}, written to pass the chunk size.`).join('\n')}`
+  const c = await asAdmin('POST', '/api/hr/library', { name: `eval-gr29-${k}`, hrType: 'note', mode: 'search', content: `${small}\n\n${long}\n` })
+  const chunks = (await asAdmin('GET', `/api/hr/library/${c.json?.id}/chunks`)).json?.chunks ?? []
+  const joined = chunks.filter((x) => x.text.includes('Short part 0') && x.text.includes('Short part 5'))
+  const longChunks = chunks.filter((x) => x.text.includes('Line 10'))
+  const versions = await sqlite(`SELECT DISTINCT SplitVersion AS v FROM ContextSources WHERE Kind = 'hr' AND Mode = 'search' AND IsActive = 1`)
+  if (c.json?.id) await asAdmin('DELETE', `/api/hr/library/${c.json.id}`)
+  return ok(joined.length === 1 && joined[0].chars <= 900 && chunks.every((x) => x.chars <= 1500) && longChunks.length >= 1 && chunks.length >= 3
+      && versions.length === 1 && versions[0].v === 3,
+    `six small parts → ${joined.length} chunk (${joined[0]?.chars} chars, "${joined[0]?.sourceRef}"); ${chunks.length} chunks, largest ${Math.max(...chunks.map((x) => x.chars))} chars; SplitVersion of search items [${versions.map((v) => v.v)}]`)
+})
+
+// ─────────────────────────── GR2.10 — formulas in the editor preview (R2 addition b) ───────────────────────────
+
+check('GR2.10', 'R2', 'any', 'the editor preview works formulas out through /api/hr/calculate, once per formula after a pause, as the page view does', async () => {
+  const a = await asAdmin('POST', '/api/hr/calculate', { expression: '(12000/30)*15*7', inline: true })
+  const b = await asAdmin('POST', '/api/hr/calculate', { expression: '১২,০০০ × ২', inline: true })
+  const bad = await asAdmin('POST', '/api/hr/calculate', { expression: '12000*', inline: true })
+  const plain = await asAdmin('POST', '/api/hr/calculate', { expression: 'round((12000/30)*15*7, 0)' })
+  const ui = read('frontend/src/components/hr/HrRulePage.vue'), svc = read('frontend/src/services/hr.service.js')
+  const has = {
+    endpoint: /\/hr\/calculate/.test(svc) && /calculateHr/.test(ui),
+    pause: /setTimeout\(/.test(ui) && /clearTimeout\(/.test(ui),
+    once: /new Map\(/.test(ui),
+    noSecondEvaluator: !/\beval\(|new Function\(/.test(ui),
+  }
+  return ok(a.status === 200 && a.json?.display === '৳42,000' && b.json?.display === '৳24,000' && bad.json?.ok === false && plain.json?.result === '42000'
+      && Object.values(has).every(Boolean),
+    `inline: (12000/30)*15*7 → ${a.json?.display}; "১২,০০০ × ২" → ${b.json?.display}; "12000*" → ok ${bad.json?.ok} (${bad.json?.error}); unchanged plain call → ${plain.json?.result}; ui ${JSON.stringify(has)}`)
+})
+
+// ─────────────────────────── GR2.11 — Rulebook copies split as Markdown (R2 addition c) ───────────────────────────
+
+check('GR2.11', 'R2', 'fake', 'a page titled "Notice.sql" is split as Markdown in the Library: its lines kept, its headings as sections', async () => {
+  const k = stamp()
+  const body = `# Notice.sql\n\n## নিয়ম · Rules\n1. Short notice is deducted at day's basic × days short (${k}).\n-- SET aside: this line looks like dead SQL but is part of the rule.\n`
+  const editor = await rbEditor()
+  // The title must be free: an earlier run on this database may hold it.
+  for (const p of (await as(editor, 'GET', `${RB}?q=Notice.sql`)).json?.pages ?? [])
+    if (p.title === 'Notice.sql' && p.status !== 'retired') await rbRetire(editor, p.id, 'eval: make the title free')
+  const { item } = await rbConfirmed('Notice.sql', body, 'company-policy')
+  const chunks = (await asAdmin('GET', `/api/hr/library/${item.id}/chunks`)).json?.chunks ?? []
+  const all = chunks.map((c) => c.text).join('\n')
+  return ok(item.name === 'Rulebook · Notice.sql' && chunks.length === 1 && all.includes('-- SET aside: this line looks like dead SQL') && all.includes(`(${k})`)
+      && chunks.every((c) => /^Rulebook · Notice\.sql §.+ L\d+-\d+$/.test(c.sourceRef)),
+    `${item.name}: ${chunks.length} chunk(s) [${chunks.map((c) => c.sourceRef).join(' | ')}]; the "-- SET" line kept ${all.includes('-- SET aside')}`)
 })
 
 // ─────────────────────────── runner ───────────────────────────

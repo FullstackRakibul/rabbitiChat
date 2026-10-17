@@ -36,13 +36,29 @@ public sealed record HrRulePageDto(
     HrRuleVersionDto? Version = null);
 
 /// <summary>
-/// One version. Body, Display and Formulas only on a single-version read: Display
-/// is the body with each [[= … ]] worked out, as Ask shows it; Formulas say where
-/// each result sits in Display, for the formula on hover.
+/// One version. Body, Display, Formulas and Sources only on a single-version read:
+/// Display is the body with each [[= … ]] worked out, as Ask shows it; Formulas say
+/// where each result sits in Display, for the formula on hover; Sources are the
+/// Library places the page was drafted from (its latest `generated` version up to
+/// this one), each opening its item at its lines.
 /// </summary>
 public sealed record HrRuleVersionDto(
     int Version, string Kind, string? ChangeNote, string? Author, DateTime AtUtc,
-    string? Body = null, string? Display = null, IReadOnlyList<HrRuleFormulaDto>? Formulas = null);
+    string? Body = null, string? Display = null, IReadOnlyList<HrRuleFormulaDto>? Formulas = null,
+    IReadOnlyList<HrRuleSourceDto>? Sources = null);
+
+/// <summary>A Library place a draft was written from. LineFrom is null for an always item, sent whole.</summary>
+public sealed record HrRuleSourceDto(int ItemId, string Name, string SourceRef, int? LineFrom, int? LineTo);
+
+/// <summary>A draft from the Library (§3.4). PageId: a new version of that page; otherwise a new page from Title, Category, Language.</summary>
+public sealed record HrRuleGenerateRequest(
+    int? PageId, string? Title, string? Category, string? Language, List<int>? Items, string? Instruction, string? Model);
+
+/// <summary>What a draft is about, once the request is checked.</summary>
+public sealed record HrRuleDraftTarget(int? PageId, string Title, HrRuleCategory Category, string Language);
+
+/// <summary>The number check before Confirm: amounts no source of the draft accounts for, and formulas that cannot be worked out.</summary>
+public sealed record HrRuleCheckDto(int Version, int? GeneratedVersion, IReadOnlyList<decimal> Unverified, IReadOnlyList<string> FailedFormulas);
 
 public sealed record HrRuleFormulaDto(int Offset, int Length, string Expression, string Display, bool Ok, string? Error);
 
@@ -345,13 +361,123 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
         return await ReadBackAsync(editor, page.Id, ct);
     }
 
+    // ───────────────────────── drafts from the Library (§3.4) ─────────────────────────
+
+    /// <summary>
+    /// Checks a draft request before anything is sent to a model: an editor, a page
+    /// that can take a new version (not retired), or a new page's title, category
+    /// and language as Create checks them.
+    /// </summary>
+    public async Task<(HrRuleResult? Refusal, HrRuleDraftTarget? Target)> ValidateDraftAsync(User editor, HrRuleGenerateRequest input, CancellationToken ct = default)
+    {
+        if (!CanEdit(editor)) return (HrRuleResult.Forbidden(EditorsOnly), null);
+        if (input.PageId is int id)
+        {
+            var page = await db.HrRulePages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (page is null) return (HrRuleResult.NotFound, null);
+            if (page.Status == HrRulePage.StatusRetired)
+                return (HrRuleResult.Conflict("This page is retired. Restore a version from its history first."), null);
+            return (null, new HrRuleDraftTarget(page.Id, page.Title, Categories.First(c => c.Key == page.Category), page.Language));
+        }
+
+        var title = (input.Title ?? "").Trim();
+        if (TitleError(title) is { } titleError) return (HrRuleResult.Invalid(titleError), null);
+        var category = Categories.FirstOrDefault(c => c.Key == (input.Category ?? "").Trim().ToLowerInvariant());
+        if (category is null) return (HrRuleResult.Invalid($"category must be one of: {string.Join(", ", Categories.Select(c => c.Key))}."), null);
+        var language = string.IsNullOrWhiteSpace(input.Language) ? GuessLanguage(title) : input.Language.Trim().ToLowerInvariant();
+        if (!Languages.Contains(language)) return (HrRuleResult.Invalid("language must be bn or en."), null);
+        if (await TitleTakenAsync(title, null, ct)) return (HrRuleResult.Conflict($"A page titled \"{title}\" already exists."), null);
+        return (null, new HrRuleDraftTarget(null, title, category, language));
+    }
+
+    /// <summary>
+    /// Saves a model's draft as a `generated` version, with its sources and the
+    /// model's details: a new page (v1), or a new version of the page — a draft on
+    /// top when the page is confirmed. Never confirmed here (§0 rule 5).
+    /// </summary>
+    public async Task<HrRuleResult> SaveGeneratedAsync(User editor, HrRuleDraftTarget target, string body, string sourcesJson, string modelJson, string note, CancellationToken ct = default)
+    {
+        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        body = HrLibrary.Normalize(body);
+        HrRulePage? page;
+        if (target.PageId is int id)
+        {
+            page = await db.HrRulePages.FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (page is null) return HrRuleResult.NotFound;
+            if (page.Status == HrRulePage.StatusRetired) return HrRuleResult.Conflict("This page was retired while the draft was written.");
+            AddVersion(page, HrRulePageVersion.KindGenerated, body, note, editor, sourcesJson, modelJson);
+            await db.SaveChangesAsync(ct);
+            return await ReadBackAsync(editor, page.Id, ct);
+        }
+
+        if (await TitleTakenAsync(target.Title, null, ct)) return HrRuleResult.Conflict($"A page titled \"{target.Title}\" was made while the draft was written.");
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var now = DateTime.UtcNow;
+        page = new HrRulePage
+        {
+            Title = target.Title, Category = target.Category.Key, Language = target.Language, Status = HrRulePage.StatusDraft,
+            CurrentVersion = 0, CreatedByUserId = editor.Id, CreatedAtUtc = now, UpdatedAtUtc = now,
+        };
+        db.HrRulePages.Add(page);
+        await db.SaveChangesAsync(ct);
+        AddVersion(page, HrRulePageVersion.KindGenerated, body, note, editor, sourcesJson, modelJson);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return await ReadBackAsync(editor, page.Id, ct);
+    }
+
+    /// <summary>
+    /// The number check before Confirm (§3.4): the version's amounts against what
+    /// the sources of its latest draft hold (kept with the `generated` version),
+    /// formula results and an example's own inputs counting as stated. A page
+    /// never drafted from the Library has nothing to check against: only its
+    /// formulas are checked. Editors only.
+    /// </summary>
+    public async Task<(HrRuleOutcome Outcome, HrRuleCheckDto? Check)> CheckAsync(User caller, int id, int? version, CancellationToken ct = default)
+    {
+        if (!CanEdit(caller)) return (HrRuleOutcome.Forbidden, null);
+        var page = await db.HrRulePages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (page is null) return (HrRuleOutcome.NotFound, null);
+        var number = version ?? page.CurrentVersion;
+        var row = await db.HrRulePageVersions.AsNoTracking().FirstOrDefaultAsync(v => v.PageId == id && v.Version == number, ct);
+        if (row is null) return (HrRuleOutcome.NotFound, null);
+
+        var generated = await LatestGeneratedAsync(id, number, ct);
+        var known = generated is null ? null : ReadSources(generated.SourcesJson)?.KnownAmounts;
+        var (unverified, failed) = HrRuleDraft.Check(row.Body, known ?? new List<decimal>());
+        return (HrRuleOutcome.Ok, new HrRuleCheckDto(number, generated?.Version, generated is null ? Array.Empty<decimal>() : unverified, failed));
+    }
+
+    private Task<HrRulePageVersion?> LatestGeneratedAsync(int pageId, int upTo, CancellationToken ct) =>
+        db.HrRulePageVersions.AsNoTracking()
+            .Where(v => v.PageId == pageId && v.Version <= upTo && v.Kind == HrRulePageVersion.KindGenerated)
+            .OrderByDescending(v => v.Version).FirstOrDefaultAsync(ct);
+
+    private static readonly System.Text.Json.JsonSerializerOptions Json = new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>A generated version's SourcesJson, as written by the draft endpoint.</summary>
+    public sealed record DraftSources(
+        string? Query, List<int>? Scope, List<DraftAlways>? Always, List<DraftExcerpt>? Excerpts, List<decimal>? KnownAmounts);
+    public sealed record DraftAlways(int ItemId, string Name, int Version);
+    public sealed record DraftExcerpt(int ChunkId, int ItemId, string Name, int Version, string? SourceRef, int? LineFrom, int? LineTo, int Tokens, double Score);
+
+    public static string WriteSources(DraftSources sources) => System.Text.Json.JsonSerializer.Serialize(sources, Json);
+
+    private static DraftSources? ReadSources(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return System.Text.Json.JsonSerializer.Deserialize<DraftSources>(json, Json); }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
     // ───────────────────────── the paper trail ─────────────────────────
 
     /// <summary>
     /// The one way a version is written: appended after the page's latest, with
     /// who and when. Nothing in this codebase updates or deletes a version.
     /// </summary>
-    private HrRulePageVersion AddVersion(HrRulePage page, string kind, string body, string? note, User author)
+    private HrRulePageVersion AddVersion(HrRulePage page, string kind, string body, string? note, User author,
+        string? sourcesJson = null, string? modelJson = null)
     {
         page.CurrentVersion++;
         page.UpdatedAtUtc = DateTime.UtcNow;
@@ -360,6 +486,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
             PageId = page.Id, Version = page.CurrentVersion, Kind = kind, Body = body,
             ChangeNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
             AuthorUserId = author.Id, AtUtc = page.UpdatedAtUtc,
+            SourcesJson = sourcesJson, ModelJson = modelJson,
         };
         db.HrRulePageVersions.Add(version);
         return version;
@@ -456,9 +583,16 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
         var dto = (await ProjectAsync(new[] { page }, editor, ct))[0];
         var author = (await UsernamesAsync(new[] { row.AuthorUserId }, ct)).GetValueOrDefault(row.AuthorUserId);
         var (display, formulas) = Render(row.Body);
+        var generated = row.Kind == HrRulePageVersion.KindGenerated ? row : await LatestGeneratedAsync(page.Id, row.Version, ct);
+        var drafted = ReadSources(generated?.SourcesJson);
+        var sources = drafted is null ? null
+            : (drafted.Excerpts ?? new()).Where(e => !string.IsNullOrWhiteSpace(e.SourceRef)).DistinctBy(e => e.SourceRef)
+                .Select(e => new HrRuleSourceDto(e.ItemId, e.Name, e.SourceRef!, e.LineFrom, e.LineTo))
+                .Concat((drafted.Always ?? new()).Select(a => new HrRuleSourceDto(a.ItemId, a.Name, a.Name, null, null)))
+                .ToList();
         return dto with
         {
-            Version = new HrRuleVersionDto(row.Version, row.Kind, row.ChangeNote, author, row.AtUtc, row.Body, display, formulas),
+            Version = new HrRuleVersionDto(row.Version, row.Kind, row.ChangeNote, author, row.AtUtc, row.Body, display, formulas, sources),
         };
     }
 

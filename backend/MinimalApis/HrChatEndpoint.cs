@@ -159,6 +159,7 @@ namespace RabbitIC.Api.MinimalApis
                 excerpts = excerpts.Select(e => new
                 {
                     chunkId = e.ChunkId, itemId = e.ItemId, name = e.ItemName, version = e.Version, sourceRef = e.SourceRef, cite = e.Cite,
+                    rulePageId = e.RulePageId, ruleVersion = e.RuleVersion, pinned = e.Pinned,
                     lineFrom = e.LineFrom, lineTo = e.LineTo, tokens = e.Tokens, score = e.Score,
                 }),
                 scope = req.Items ?? new List<int>(),

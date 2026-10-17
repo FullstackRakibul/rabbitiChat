@@ -25,3 +25,26 @@ export function withFormulas(content, formulas) {
   }
   return text
 }
+
+// An amount as the server's number check reads one: 12,000 and 1,23,456 whole, or a
+// plain number; Bengali digits count. (HrNumberCheck.Amount, for highlighting only.)
+const AMOUNT = /(?<![\d.,০-৯])[\d০-৯]{1,3}(?:,[\d০-৯]{2,3})+(?:\.\d+)?(?![\d০-৯])|(?<![\d.,০-৯])[\d০-৯]+(?:\.\d+)?(?![\d০-৯])/g
+const toNumber = (s) => Number(s.replace(/[০-৯]/g, (c) => String(c.charCodeAt(0) - 0x09e6)).replace(/,/g, ''))
+
+/**
+ * The amounts the number check could not trace, marked where they appear
+ * (data-unverified). Only text between tags is touched, so a formula's title or a
+ * citation's attributes stay as they are.
+ */
+export function markUnverified(html, amounts) {
+  if (!amounts?.length) return html
+  const want = new Set(amounts.map(Number))
+  return String(html).split(/(<[^>]*>)/).map((part, i) => (i % 2 === 1 ? part : part.replace(AMOUNT, (m) => (want.has(toNumber(m))
+    ? `<mark data-unverified title="Not found in the sources this page was drafted from" class="rounded-sm bg-destructive/15 px-0.5 text-foreground underline decoration-destructive decoration-wavy underline-offset-2">${m}</mark>`
+    : m)))).join('')
+}
+
+/** ৳ with the separators HR reads (৳77,777; ৳1,20,000) — for listing an amount, as HrFormulas.Taka shows one. */
+export function taka(n) {
+  return `৳${Number(n).toLocaleString('en-IN')}`
+}

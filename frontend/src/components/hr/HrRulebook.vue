@@ -6,14 +6,15 @@
  * নিশ্চিত Confirmed, বাতিল Retired), its confirmed version and who confirmed it
  * when; search by title and text, filters by category and status; "Export all
  * confirmed". Opening a page shows it in HrRulePage, which holds the editor,
- * the actions and the history.
+ * the actions and the history; "Draft from library" opens it drafting a new page
+ * from the Library (Phase R2).
  *
  * What a person may see and do is the server's decision: a reader gets confirmed
  * and retired pages only, and `canEdit` decides which buttons show. Theme tokens
  * only; usable at 360 px.
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { BookMarked, Download, Loader2, Plus, Search } from '@lucide/vue'
+import { BookMarked, Download, Loader2, Plus, Search, Sparkles } from '@lucide/vue'
 import { exportRulebook, listRulebook } from '@/services/hr.service.js'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -43,8 +44,10 @@ const q = ref('')
 const category = ref('all')
 const status = ref('all')
 
-/** The open page: null for the list, 'new' for a new page, or a page id. */
+/** The open page: null for the list, 'new' for a new page, 'generate' for a new draft from the Library, or a page id. */
 const open = ref(null)
+/** The version to open it at — a Rulebook citation in Ask names one. */
+const openVersion = ref(null)
 const pageView = ref(null)
 
 let searchTimer = null
@@ -98,10 +101,28 @@ function leaveAllowed() {
   return !pageView.value?.dirty || window.confirm('সংরক্ষণ না করা পরিবর্তন আছে। ছেড়ে যাবেন? / You have unsaved changes. Leave this page?')
 }
 
-function openPage(id) {
+function openPage(id, version = null) {
   if (open.value !== null && !leaveAllowed()) return
+  openVersion.value = version
   open.value = id
 }
+
+/**
+ * Opens a page from elsewhere — a Rulebook citation in Ask: by its id, or by its
+ * title when only the citation's text is known. Returns whether it was found.
+ */
+async function openAt({ pageId, title, version }) {
+  let id = pageId
+  if (!id && title) {
+    const res = await listRulebook({ q: title }).catch(() => null)
+    id = res?.pages?.find((p) => p.title === title)?.id
+  }
+  if (!id) return false
+  openPage(id, version ?? null)
+  return true
+}
+
+defineExpose({ openAt })
 
 function backToList() {
   if (!leaveAllowed()) return
@@ -126,12 +147,14 @@ async function doExport() {
   <HrRulePage
     v-if="open !== null"
     ref="pageView"
-    :key="open"
-    :page-id="open === 'new' ? null : open"
+    :key="`${open}:${openVersion ?? ''}`"
+    :page-id="typeof open === 'number' ? open : null"
+    :generate="open === 'generate'"
+    :initial-version="openVersion"
     :categories="categories"
     :can-edit="canEdit"
     @back="backToList"
-    @created="(id) => { open = id; load() }"
+    @created="(id) => { openVersion = null; open = id; load() }"
     @changed="load"
   />
 
@@ -152,6 +175,10 @@ async function doExport() {
           <Loader2 v-if="exporting" class="animate-spin" />
           <Download v-else />
           সব নিশ্চিত এক্সপোর্ট <span class="text-xs opacity-70">Export all confirmed</span>
+        </Button>
+        <Button v-if="canEdit" size="sm" variant="outline" data-testid="rulebook-generate" @click="openPage('generate')">
+          <Sparkles />
+          লাইব্রেরি থেকে খসড়া <span class="text-xs opacity-70">Draft from library</span>
         </Button>
         <Button v-if="canEdit" size="sm" data-testid="rulebook-new" @click="openPage('new')">
           <Plus />

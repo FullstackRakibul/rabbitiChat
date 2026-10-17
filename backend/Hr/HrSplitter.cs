@@ -38,12 +38,20 @@ public static class HrSplitter
     /// <summary>The hard limit: a single unit (one JSON value, one paragraph's line) up to this size stays whole.</summary>
     public const int MaxChunkChars = 1500;
 
-    /// <summary>Raised whenever the splitting changes, so a library split the old way is re-split once on start.</summary>
-    public const int SplitVersion = 2;
+    /// <summary>
+    /// Raised whenever the splitting changes, so a library split the old way is re-split once on start.
+    /// 3: small text sections join into one chunk, and text before the first heading stays with it.
+    /// </summary>
+    public const int SplitVersion = 3;
 
-    public static IReadOnlyList<HrChunk> Split(string name, string content)
+    /// <param name="markdown">
+    /// Split as Markdown whatever the name ends with — a Rulebook page's Library copy
+    /// is Markdown even when its title is "Notice.sql".
+    /// </param>
+    public static IReadOnlyList<HrChunk> Split(string name, string content, bool markdown = false)
     {
         var text = (content ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+        if (markdown) return SplitText(name, text);
         if (name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)) return SplitSql(name, text);
         if (IsJson(name, text)) return SplitJson(name, text);
         if (name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)) return SplitCsv(name, text);
@@ -529,6 +537,13 @@ public static class HrSplitter
     /// as documents are (DocumentApis.ChunkText: ~800 characters, ~100 overlap).
     /// Each piece is located in the original to recover its line range, and
     /// carries its section's heading in the SourceRef.
+    ///
+    /// Small sections are not left as chunks of their own: consecutive sections
+    /// join while together they stay within <see cref="TargetChunkChars"/>, and the
+    /// text before the first heading — a Rulebook copy's header line — always goes
+    /// with the first section. A short page is then one chunk and takes one excerpt
+    /// slot, not three. A joined chunk names its sections: "Page 1 + Page 2", or
+    /// "Purpose … Exceptions" for three or more.
     /// </summary>
     private static IReadOnlyList<HrChunk> SplitText(string name, string text)
     {
@@ -546,9 +561,38 @@ public static class HrSplitter
         }
         sections.Add((title, first, lines.Length - 1));
 
-        var chunks = new List<HrChunk>();
-        foreach (var (section, firstLine, lastLine) in sections)
+        // The text before the first heading belongs with the first section, never alone.
+        if (sections.Count > 1 && sections[0].Title is null)
         {
+            sections[1] = (sections[1].Title, sections[0].FirstLine, sections[1].LastLine);
+            sections.RemoveAt(0);
+        }
+
+        int Length(int from, int to) => string.Join("\n", lines[from..(to + 1)]).Trim().Length;
+
+        var groups = new List<(List<string> Titles, int FirstLine, int LastLine)>();
+        foreach (var (sectionTitle, firstLine, lastLine) in sections)
+        {
+            if (groups.Count > 0 && Length(groups[^1].FirstLine, lastLine) <= TargetChunkChars)
+            {
+                var g = groups[^1];
+                if (sectionTitle is not null) g.Titles.Add(sectionTitle);
+                groups[^1] = (g.Titles, g.FirstLine, lastLine);
+                continue;
+            }
+            groups.Add((sectionTitle is null ? new List<string>() : new List<string> { sectionTitle }, firstLine, lastLine));
+        }
+
+        var chunks = new List<HrChunk>();
+        foreach (var (titles, firstLine, lastLine) in groups)
+        {
+            var section = titles.Count switch
+            {
+                0 => null,
+                1 => titles[0],
+                2 => $"{titles[0]} + {titles[1]}",
+                _ => $"{titles[0]} … {titles[^1]}",
+            };
             var body = string.Join("\n", lines[firstLine..(lastLine + 1)]);
             if (string.IsNullOrWhiteSpace(body)) continue;
             var cursor = 0;

@@ -130,10 +130,9 @@ public sealed class HrFormulaStream
     private void AddFormula(List<HrFormulaPiece> output, string expression, bool cutOff)
     {
         expression = expression.Trim();
-        var (value, error) = cutOff
-            ? (null, "The formula was not closed with ]].")
-            : HrCalculator.Evaluate(HrFormulas.Normalize(expression));
-        var display = value is decimal v ? HrFormulas.Taka(v) : CouldNotCalculate;
+        var (value, display, error) = cutOff
+            ? (null, CouldNotCalculate, "The formula was not closed with ]].")
+            : HrFormulas.EvaluateInline(expression);
         var formula = new HrFormula(expression, value, display, error, _offset);
         _formulas.Add(formula);
         output.Add(new HrFormulaPiece(display, formula));
@@ -161,6 +160,21 @@ public static class HrFormulas
             });
         return Thousands.Replace(Currency.Replace(sb.ToString(), ""), "");
     }
+
+    /// <summary>
+    /// An inline [[= … ]] formula worked out: made plain (Normalize), evaluated by
+    /// HrCalculator, shown as ৳ — or "⚠ গণনা করা যায়নি" with the reason. The one way a
+    /// formula is worked out, for an answer as it streams, a Rulebook page, and the
+    /// Rulebook editor's preview (/api/hr/calculate with inline).
+    /// </summary>
+    public static (decimal? Value, string Display, string? Error) EvaluateInline(string? expression)
+    {
+        var (value, error) = HrCalculator.Evaluate(Normalize((expression ?? "").Trim()));
+        return (value, value is decimal v ? Taka(v) : HrFormulaStream.CouldNotCalculate, error);
+    }
+
+    /// <summary>The amounts written inside a formula: an example's inputs, stated by the example itself.</summary>
+    public static IEnumerable<decimal> Operands(string expression) => HrNumberCheck.Numbers(Normalize(expression));
 
     /// <summary>৳ with the separators HR in Bangladesh reads (৳48,000; ৳1,20,000), at most two decimals.</summary>
     public static string Taka(decimal value)

@@ -15,18 +15,26 @@
  *   · History: every version the person may see, with kind, author, time and
  *     note; two picked are compared line by line (lib/line-diff).
  *   · Print (the browser's, with a header and a footer) and Markdown download.
+ *   · Draft from the Library (Phase R2): the draft streams in under the status
+ *     line, as an answer does in Ask, and is saved as a `generated` version — a
+ *     draft, never confirmed by itself. Amounts the number check could not trace
+ *     are marked in the page and the editor preview, and listed before Confirm;
+ *     the Sources open their Library item at its lines.
+ *   · The editor's preview works each [[= … ]] out through /api/hr/calculate —
+ *     the server's one evaluator — once per formula, after a pause in typing.
  *
  * Theme tokens only, light and dark; one column at 360 px.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  ArrowLeft, Check, Download, GitCompare, History, Loader2, Pencil, Printer, RotateCcw, Save, Undo2, X,
+  ArrowLeft, Check, Download, GitCompare, History, Loader2, Pencil, Printer, RotateCcw, Save, Sparkles, TriangleAlert, Undo2, X,
 } from '@lucide/vue'
 import {
-  confirmRulePage, createRulePage, downloadRulePage, getRulePage, listRuleVersions, restoreRuleVersion,
-  retireRulePage, saveRulePage,
+  calculateHr, checkRulePage, confirmRulePage, createRulePage, downloadRulePage, getRulePage, listHrLibrary, listRuleVersions,
+  restoreRuleVersion, retireRulePage, saveRulePage, streamRulebookDraft,
 } from '@/services/hr.service.js'
 import MarkdownBody from '@/components/MarkdownBody.vue'
+import HrItemViewer from '@/components/hr/HrItemViewer.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -40,7 +48,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { diffLines, diffStats } from '@/lib/line-diff'
-import { withFormulas } from '@/lib/hr-text'
+import { attr, escapeHtml, markUnverified, taka, withFormulas } from '@/lib/hr-text'
 import { toDate } from '@/lib/time'
 
 const props = defineProps({
@@ -48,6 +56,10 @@ const props = defineProps({
   pageId: { type: Number, default: null },
   categories: { type: Array, default: () => [] },
   canEdit: { type: Boolean, default: false },
+  /** Open with "Draft from library" (a new page drafted by the model). */
+  generate: { type: Boolean, default: false },
+  /** Open at this version (a Rulebook citation in Ask names one). */
+  initialVersion: { type: Number, default: null },
 })
 const emit = defineEmits(['back', 'created', 'changed'])
 
@@ -85,7 +97,7 @@ const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 
-const editing = ref(props.pageId === null)
+const editing = ref(props.pageId === null && !props.generate)
 const form = ref({ title: '', category: 'other', language: 'bn', body: SKELETON })
 const baseline = ref(JSON.stringify(form.value))
 const baseVersion = ref(null)
@@ -97,13 +109,29 @@ const diff = ref(null)            // { from, to, lines, stats } once two are pic
 const dialog = ref(null)          // { action, version?, note, summary?, firstConfirmation? }
 const printedAt = ref(new Date())
 
-const dirty = computed(() => editing.value && JSON.stringify(form.value) !== baseline.value)
+/** The number check of the version shown (editors): { unverified, failedFormulas, generatedVersion }. */
+const check = ref(null)
+const unverified = computed(() => check.value?.unverified ?? [])
+
+/** Draft from library: the dialog's fields, and the draft while it streams. */
+const gen = ref(null)              // { title, category, language, items: [], instruction, filter }
+const libraryItems = ref([])
+const streaming = ref(null)        // { status, text, error }
+let streamAbort = null
+
+/** The Library item viewer, for a page's sources. */
+const viewerOpen = ref(false)
+const viewerTarget = ref(null)
+
+const dirty = computed(() => !!streaming.value || (editing.value && JSON.stringify(form.value) !== baseline.value))
 defineExpose({ dirty })
 
 const shown = computed(() => page.value?.version ?? null)
 const latest = computed(() => !page.value || shown.value?.version === page.value.currentVersion)
 const category = computed(() => props.categories.find((c) => c.key === (editing.value ? form.value.category : page.value?.category)))
-const pageHtml = computed(() => (shown.value ? withFormulas(shown.value.display, shown.value.formulas) : ''))
+const pageHtml = computed(() => (shown.value
+  ? markUnverified(withSources(withFormulas(shown.value.display, shown.value.formulas), shown.value.sources), unverified.value)
+  : ''))
 const retired = computed(() => page.value?.status === 'retired')
 const canConfirm = computed(() => props.canEdit && page.value && !retired.value && page.value.confirmedVersion !== page.value.currentVersion)
 
@@ -124,6 +152,7 @@ async function load(version) {
     const [p, h] = await Promise.all([getRulePage(props.pageId, version), listRuleVersions(props.pageId)])
     page.value = p
     versions.value = h.versions ?? []
+    check.value = props.canEdit ? await checkRulePage(props.pageId, p.version.version).catch(() => null) : null
   } catch (e) {
     error.value = e.message || 'The page could not be loaded.'
   } finally {
@@ -138,10 +167,145 @@ function onBeforeUnload(e) {
 }
 
 onMounted(() => {
-  load()
+  load(props.initialVersion ?? undefined)
+  if (props.generate) openGenerate()
   window.addEventListener('beforeunload', onBeforeUnload)
 })
-onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  streamAbort?.abort()
+  clearTimeout(calcTimer)
+})
+
+// ───────────────────────── the preview's formulas ─────────────────────────
+// Each [[= … ]] is worked out by the server (/api/hr/calculate, inline), once per
+// formula: a pause in typing asks for the ones not asked yet, and the answers are
+// kept. A formula still being typed, or not closed, stays as written.
+
+const FORMULA = /\[\[=([^\]\n]*?)\]\]/g
+const calcCache = new Map()        // expression → { ok, display, error }, or null while asked
+const calcTick = ref(0)
+let calcTimer = null
+
+async function calculatePending(body) {
+  const asked = [...new Set([...body.matchAll(FORMULA)].map((m) => m[1].trim()))].filter((e) => e && !calcCache.has(e))
+  if (!asked.length) return
+  asked.forEach((e) => calcCache.set(e, null))
+  await Promise.all(asked.map(async (e) => {
+    try { calcCache.set(e, await calculateHr(e)) } catch { calcCache.delete(e) }
+  }))
+  calcTick.value++
+}
+
+watch(() => form.value.body, (body) => {
+  clearTimeout(calcTimer)
+  calcTimer = setTimeout(() => calculatePending(body), 500)
+})
+
+function withPreviewFormulas(text) {
+  return (text || '').replace(FORMULA, (all, expr) => {
+    const r = calcCache.get(expr.trim())
+    if (!r) return all
+    const cls = r.ok
+      ? 'cursor-help rounded-sm bg-primary/10 px-0.5 font-medium underline decoration-dotted underline-offset-2'
+      : 'cursor-help rounded-sm bg-destructive/10 px-0.5 text-destructive dark:text-foreground'
+    return `<span data-formula title="${attr(r.ok ? `= ${expr.trim()}` : `${expr.trim()} — ${r.error ?? ''}`)}" class="${cls}">${escapeHtml(r.display)}</span>`
+  })
+}
+
+const previewHtml = computed(() => {
+  calcTick.value   // re-render when an answer arrives
+  return markUnverified(withPreviewFormulas(form.value.body), unverified.value)
+})
+
+// ───────────────────────── sources ─────────────────────────
+
+/** Each [label] that names one of the page's sources becomes a button that opens it at its lines. */
+function withSources(html, sources) {
+  if (!sources?.length) return html
+  return (html || '').replace(/\[([^[\]\n<>]{2,200})\](?!\()/g, (all, label) => {
+    const i = sources.findIndex((s) => s.sourceRef === label)
+    const j = i >= 0 ? i : sources.findIndex((s) => s.lineFrom == null && (label === s.name || label.startsWith(`${s.name} `)))
+    if (j < 0) return all
+    return `<button type="button" data-source="${j}" data-label="${escapeHtml(label)}" class="mx-0.5 rounded border bg-muted/60 px-1 py-px align-baseline font-mono text-[11px] text-foreground hover:bg-accent">${escapeHtml(label)}</button>`
+  })
+}
+
+function onPageClick(event) {
+  const el = event.target.closest?.('[data-source]')
+  if (!el) return
+  const s = shown.value?.sources?.[Number(el.dataset.source)]
+  if (!s) return
+  const label = el.dataset.label ?? s.sourceRef
+  const rest = label.slice(s.name.length).trim()
+  viewerTarget.value = {
+    itemId: s.itemId, label, lineFrom: s.lineFrom, lineTo: s.lineTo,
+    section: s.lineFrom == null ? rest.replace(/^§\s*/, '') || null : null,
+  }
+  viewerOpen.value = true
+}
+
+// ───────────────────────── draft from the Library ─────────────────────────
+
+async function openGenerate() {
+  error.value = ''
+  gen.value = page.value
+    ? { title: page.value.title, category: page.value.category, language: page.value.language, items: [], instruction: '', filter: '' }
+    : { title: '', category: 'settlement', language: 'bn', items: [], instruction: '', filter: '' }
+  try {
+    libraryItems.value = (await listHrLibrary()).items ?? []
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+function cancelGenerate() {
+  gen.value = null
+  if (!props.pageId) emit('back')
+}
+
+const pickable = computed(() => {
+  const q = (gen.value?.filter ?? '').trim().toLowerCase()
+  return libraryItems.value.filter((i) => i.isActive && (!q || i.name.toLowerCase().includes(q)))
+})
+
+function togglePick(id, on) {
+  const items = gen.value.items.filter((x) => x !== id)
+  gen.value.items = on ? [...items, id] : items
+}
+
+async function runGenerate() {
+  const g = gen.value
+  if (!g || (!props.pageId && !g.title.trim())) return
+  gen.value = null
+  error.value = ''
+  streaming.value = { status: '', text: '', error: '' }
+  streamAbort = new AbortController()
+  let saved = null
+  try {
+    await streamRulebookDraft({
+      pageId: props.pageId ?? undefined,
+      title: g.title.trim(), category: g.category, language: g.language, items: g.items, instruction: g.instruction.trim() || undefined,
+    }, {
+      onStatus: (t) => { streaming.value.status = t },
+      onContent: (t) => { streaming.value.status = ''; streaming.value.text += t },
+      onError: (m) => { streaming.value.error = m },
+      onDraft: (d) => { saved = d },
+    }, streamAbort.signal)
+  } catch (e) {
+    if (e.name !== 'AbortError') error.value = e.message
+  }
+  const failed = streaming.value?.error
+  streaming.value = null
+  if (!saved) {
+    if (failed) error.value = failed
+    if (!props.pageId && !failed && !error.value) emit('back')
+    return
+  }
+  if (!props.pageId) { emit('created', saved.pageId); return }
+  await load()
+  emit('changed')
+}
 
 // ───────────────────────── edit ─────────────────────────
 
@@ -169,10 +333,13 @@ function goBack() {
 
 async function openDialog(action, version) {
   error.value = ''
-  const d = { action, version, note: '', summary: null, firstConfirmation: false }
+  const d = { action, version, note: '', summary: null, firstConfirmation: false, unverified: [], failedFormulas: [] }
   if (action === 'confirm') {
     // What changed since the last confirmation: the confirmed text against the latest.
     try {
+      const latestCheck = await checkRulePage(props.pageId)
+      d.unverified = latestCheck.unverified ?? []
+      d.failedFormulas = latestCheck.failedFormulas ?? []
       const current = latest.value ? page.value.version.body : (await getRulePage(props.pageId)).version.body
       if (page.value.confirmedVersion) {
         const before = (await getRulePage(props.pageId, page.value.confirmedVersion)).version.body
@@ -287,6 +454,7 @@ async function download() {
           <Button size="sm" variant="outline" @click="printPage"><Printer /> প্রিন্ট <span class="text-xs opacity-70">Print</span></Button>
           <Button size="sm" variant="outline" @click="download"><Download /> ডাউনলোড <span class="text-xs opacity-70">.md</span></Button>
           <template v-if="canEdit">
+            <Button v-if="!retired && !streaming" size="sm" variant="outline" data-action="generate" @click="openGenerate"><Sparkles /> লাইব্রেরি থেকে খসড়া <span class="text-xs opacity-70">Draft from library</span></Button>
             <Button v-if="!retired" size="sm" variant="outline" data-action="edit" @click="startEdit"><Pencil /> সম্পাদনা <span class="text-xs opacity-70">Edit</span></Button>
             <Button v-if="canConfirm" size="sm" data-action="confirm" @click="openDialog('confirm')"><Check /> নিশ্চিত করুন <span class="text-xs opacity-80">Confirm</span></Button>
             <Button v-if="!retired" size="sm" variant="outline" data-action="retire" @click="openDialog('retire')"><X /> বাতিল <span class="text-xs opacity-70">Retire</span></Button>
@@ -308,6 +476,21 @@ async function download() {
     <div v-else class="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
       <!-- ───── the page, or the editor ───── -->
       <div class="min-w-0">
+        <!-- A draft streaming in from the model -->
+        <section v-if="streaming" class="mb-4 rounded-lg border bg-card p-4" aria-label="Drafting" data-testid="rulebook-drafting">
+          <p class="flex items-center gap-2 text-sm font-medium">
+            <Loader2 class="size-4 animate-spin" aria-hidden="true" /> লাইব্রেরি থেকে খসড়া লেখা হচ্ছে <span class="text-xs font-normal text-muted-foreground">Drafting from the library…</span>
+          </p>
+          <p v-if="streaming.status" class="mt-2 text-sm text-muted-foreground" data-status>{{ streaming.status }}</p>
+          <Textarea :model-value="streaming.text" readonly class="mt-3 min-h-[45vh] font-mono text-sm leading-relaxed" aria-label="The draft as it arrives" />
+          <p class="mt-1 text-xs text-muted-foreground">শেষ হলে খসড়াটি টেমপ্লেট অনুযায়ী সাজিয়ে একটি নতুন সংস্করণ হিসেবে রাখা হবে — নিশ্চিত নয়। When it ends, the draft is put into the template and saved as a new version — not confirmed.</p>
+        </section>
+
+        <p v-if="unverified.length && !streaming" class="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm" data-testid="unverified-line">
+          <TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+          <span>এই সংখ্যাগুলো খসড়ার উৎসে পাওয়া যায়নি: {{ unverified.map(taka).join(', ') }}।
+            <span class="text-xs text-muted-foreground">Not found in the sources this page was drafted from — check them before confirming.</span></span>
+        </p>
         <!-- Editor -->
         <template v-if="editing">
           <div class="grid gap-3 sm:grid-cols-[1fr_12rem_8rem]">
@@ -352,17 +535,17 @@ async function download() {
             <div :class="tab === 'preview' && 'hidden lg:block'">
               <Textarea v-model="form.body" class="min-h-[55vh] font-mono text-sm leading-relaxed" aria-label="Page text (Markdown)" spellcheck="false" />
               <p class="mt-1 text-xs text-muted-foreground">
-                Markdown: <code>## শিরোনাম</code>, <code>1.</code> নিয়ম। হিসাবের উদাহরণ <code>[[= (12000/30)*15*7 ]]</code> — সংরক্ষণের পর ফল দেখাবে।
+                Markdown: <code>## শিরোনাম</code>, <code>1.</code> নিয়ম। হিসাবের উদাহরণ <code>[[= (12000/30)*15*7 ]]</code> — লেখা থামালে প্রিভিউতে ফল দেখাবে। <span class="opacity-80">The preview works each formula out when you pause.</span>
               </p>
             </div>
             <div :class="['rounded-lg border bg-card p-4 sm:p-6', tab === 'write' && 'hidden lg:block']" aria-label="Preview">
-              <MarkdownBody :content="form.body" class="rule-page" />
+              <MarkdownBody :content="previewHtml" class="rule-page" />
             </div>
           </div>
         </template>
 
         <!-- Page view -->
-        <template v-else-if="page">
+        <template v-else-if="page && !streaming">
           <div class="flex flex-wrap items-center gap-2 text-sm">
             <Badge :variant="STATUS[page.status]?.variant ?? 'outline'" class="font-normal" :data-status="page.status">
               {{ STATUS[page.status]?.bn }} <span class="ml-1 opacity-75">{{ STATUS[page.status]?.en }}</span>
@@ -387,7 +570,7 @@ async function download() {
               </p>
               <p v-if="shown.changeNote" class="mt-1 text-sm text-muted-foreground">“{{ shown.changeNote }}”</p>
             </header>
-            <MarkdownBody :content="pageHtml" class="rule-page" />
+            <div @click="onPageClick"><MarkdownBody :content="pageHtml" class="rule-page" /></div>
           </article>
         </template>
       </div>
@@ -480,6 +663,13 @@ async function download() {
           </template>
         </div>
 
+        <div v-if="dialog.action === 'confirm' && (dialog.unverified.length || dialog.failedFormulas.length)"
+          class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="confirm-unverified">
+          <p class="flex items-center gap-2 font-medium"><TriangleAlert class="size-4 text-destructive" aria-hidden="true" /> যাচাই করা যায়নি · Not verified</p>
+          <p v-if="dialog.unverified.length" class="mt-1">উৎসে পাওয়া যায়নি · Not in the sources: {{ dialog.unverified.map(taka).join(', ') }}</p>
+          <p v-if="dialog.failedFormulas.length" class="mt-1 font-mono text-xs">গণনা করা যায়নি · Could not be worked out: {{ dialog.failedFormulas.join(' · ') }}</p>
+        </div>
+
         <div class="grid gap-1.5">
           <Label for="rule-note">
             নোট <span class="text-xs text-muted-foreground">{{ noteRequired ? 'Note — required' : 'Note — optional' }}</span>
@@ -499,6 +689,75 @@ async function download() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- ───── draft from the Library ───── -->
+    <Dialog :open="!!gen" @update:open="(o) => { if (!o) cancelGenerate() }">
+      <DialogContent v-if="gen" class="max-h-[90dvh] overflow-y-auto sm:max-w-xl" data-testid="generate-dialog">
+        <DialogHeader>
+          <DialogTitle>লাইব্রেরি থেকে খসড়া · Draft from library</DialogTitle>
+          <DialogDescription>
+            মডেল লাইব্রেরির নিয়ম ও প্রসিডিউর থেকে একটি খসড়া লিখবে, উৎসসহ। আপনি পড়ে, সম্পাদনা করে নিশ্চিত করবেন — নিজে থেকে কিছু নিশ্চিত হয় না।
+            The model writes a draft from the Library, with sources. You read, edit and confirm it; nothing is confirmed by itself.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-3">
+          <div v-if="!pageId" class="grid gap-1.5">
+            <Label for="gen-title">বিষয় / শিরোনাম <span class="text-xs text-muted-foreground">Topic / title</span></Label>
+            <Input id="gen-title" v-model="gen.title" maxlength="120" placeholder="যেমন: রিট্রেঞ্চমেন্ট সুবিধা · e.g. Retrenchment benefits" />
+          </div>
+          <p v-else class="text-sm">“{{ page?.title }}” — একটি নতুন সংস্করণ হবে · a new version of this page.</p>
+          <div v-if="!pageId" class="grid gap-3 sm:grid-cols-2">
+            <div class="grid gap-1.5">
+              <Label>বিভাগ <span class="text-xs text-muted-foreground">Category</span></Label>
+              <Select v-model="gen.category">
+                <SelectTrigger class="h-9 w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="c in categories" :key="c.key" :value="c.key">{{ c.bn }} · {{ c.en }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-1.5">
+              <Label>ভাষা <span class="text-xs text-muted-foreground">Language</span></Label>
+              <Select v-model="gen.language">
+                <SelectTrigger class="h-9 w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bn">বাংলা</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div class="grid gap-1.5">
+            <Label for="gen-instruction">নির্দেশনা (ঐচ্ছিক) <span class="text-xs text-muted-foreground">Instruction — optional</span></Label>
+            <Input id="gen-instruction" v-model="gen.instruction" placeholder="যেমন: Non-Management-এর উপর জোর · e.g. focus on Non-Management" />
+          </div>
+          <div class="grid gap-1.5">
+            <Label>কোথা থেকে <span class="text-xs text-muted-foreground">Draw from — none picked: the whole Library</span></Label>
+            <Input v-model="gen.filter" class="h-8" placeholder="আইটেম খুঁজুন · Filter items" aria-label="Filter Library items" />
+            <ul class="max-h-44 overflow-y-auto rounded-md border p-1 text-sm">
+              <li v-for="i in pickable" :key="i.id">
+                <label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-accent">
+                  <Checkbox :model-value="gen.items.includes(i.id)" @update:model-value="(on) => togglePick(i.id, on)" />
+                  <span class="min-w-0 truncate">{{ i.name }}</span>
+                  <span class="ml-auto shrink-0 text-xs text-muted-foreground">{{ i.hrType }}</span>
+                </label>
+              </li>
+            </ul>
+            <p class="text-xs text-muted-foreground">{{ gen.items.length ? `${gen.items.length} টি বেছে নেওয়া · picked` : 'পুরো লাইব্রেরি (নিয়মাবলির পাতা বাদে) · the whole Library, Rulebook pages left out' }}</p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" @click="cancelGenerate">বাদ দিন · Cancel</Button>
+          <Button :disabled="!pageId && !gen.title.trim()" data-action="run-generate" @click="runGenerate">
+            <Sparkles /> খসড়া লিখুন · Draft
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <HrItemViewer v-model:open="viewerOpen" :target="viewerTarget" />
 
     <!-- ───── the print copy: shown only when printing (index.css) ───── -->
     <Teleport to="body">

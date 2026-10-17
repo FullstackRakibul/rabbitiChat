@@ -16,7 +16,7 @@
 //   GET    /api/hr/search?q=…&items=…      instant hybrid search, no model
 //   GET    /api/hr/retrieve?q=…            the excerpts a question would be sent with
 //   POST   /api/hr/chat                    the HR chat, streamed (HrChatEndpoint)
-//   POST   /api/hr/calculate               the formula evaluator on its own
+//   POST   /api/hr/calculate               the formula evaluator on its own; { inline: true } as a [[= … ]] is (the Rulebook preview)
 //   GET    /api/hr/conversations           this user's HR conversations
 //   GET    /api/hr/conversations/{id}      one, with each answer's receipt
 //   DELETE /api/hr/conversations/{id}
@@ -36,7 +36,8 @@ using RabbitIC.Api.Services;
 
 namespace RabbitIC.Api.MinimalApis
 {
-    public record HrCalculateRequest(string? Expression);
+    /// <param name="Inline">Work it out as an inline [[= … ]] formula is (HrFormulas.EvaluateInline): Bengali digits, ×, ৳ and separators allowed, the result as ৳. Always 200, with ok and the reason.</param>
+    public record HrCalculateRequest(string? Expression, bool? Inline = null);
 
     public static class HrApis
     {
@@ -205,6 +206,15 @@ namespace RabbitIC.Api.MinimalApis
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
+                if (req.Inline == true)
+                {
+                    var (inlineValue, display, inlineError) = HrFormulas.EvaluateInline(req.Expression);
+                    return Results.Ok(new
+                    {
+                        expression = req.Expression, ok = inlineValue is not null,
+                        result = inlineValue is decimal r ? HrCalculator.Format(r) : null, display, error = inlineError,
+                    });
+                }
                 var (value, error) = HrCalculator.Evaluate(req.Expression);
                 return value is null
                     ? Results.BadRequest(new { error })

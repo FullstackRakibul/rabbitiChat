@@ -9,7 +9,7 @@
  *
  * Bengali labels with English in smaller text, theme tokens only.
  */
-import { ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import HrAsk from '@/components/hr/HrAsk.vue'
 import HrLibrary from '@/components/hr/HrLibrary.vue'
 import HrRulebook from '@/components/hr/HrRulebook.vue'
@@ -25,6 +25,15 @@ const section = ref('ask')
 /** Sections opened at least once; the Rulebook loads on its first visit and then stays. */
 const visited = ref({ ask: true })
 watch(section, (s) => { visited.value[s] = true })
+
+/** A Rulebook citation in Ask opens the page, at the cited version, in the Rulebook. */
+const rulebook = ref(null)
+async function openRule(target) {
+  section.value = 'rulebook'
+  visited.value.rulebook = true
+  await nextTick()
+  await rulebook.value?.openAt(target)
+}
 </script>
 
 <template>
@@ -51,7 +60,7 @@ watch(section, (s) => { visited.value[s] = true })
 
     <!-- Ask keeps its own scrolling (the conversation, the list and the search each scroll). -->
     <div v-show="section === 'ask'" class="min-h-0 flex-1">
-      <HrAsk />
+      <HrAsk @open-rule="openRule" />
     </div>
 
     <div v-if="section === 'library'" class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
@@ -62,7 +71,7 @@ watch(section, (s) => { visited.value[s] = true })
 
     <!-- Kept mounted once opened, so a page being edited survives a look at Ask or the Library. -->
     <div v-if="visited.rulebook" v-show="section === 'rulebook'" class="min-h-0 flex-1 overflow-y-auto">
-      <HrRulebook />
+      <HrRulebook ref="rulebook" />
     </div>
   </div>
 </template>

@@ -211,39 +211,142 @@ public sealed class HrLibrary(
     /// </summary>
     public async Task<List<HrExcerpt>> SelectExcerptsAsync(string question, IReadOnlyCollection<int>? scope, CancellationToken ct = default)
     {
+        // Pinned first (docs/HR_RULEBOOK_PROMPT.md §3.5): a confirmed Rulebook page the
+        // question names keeps its best chunk among the excerpts, whatever the ranks say.
+        var pinned = await PinnedRulebookHitsAsync(question, scope, ct);
+        var hits = pinned.Concat((await SearchAsync(question, scope, MaxExcerpts, ct)).Where(h => pinned.All(p => p.ChunkId != h.ChunkId))).ToList();
+        var pinnedIds = pinned.Select(p => p.ChunkId).ToHashSet();
+        var excerpts = await TakeExcerptsAsync(hits, MaxExcerpts, ExcerptBudget, pinnedIds, ct);
+
+        // The Rulebook outranks the rules document and the code, so its excerpts are read first.
+        return excerpts.OrderBy(e => e.Cite is null ? 1 : 0).ToList();
+    }
+
+    /// <summary>Drafting a Rulebook page (§3.4): a larger budget, the best 12 within 5,000 tokens.</summary>
+    public const int DraftMaxExcerpts = 12;
+    public const int DraftExcerptBudget = 5000;
+
+    /// <summary>
+    /// The excerpts a Rulebook draft is written from: the hybrid search's best 12,
+    /// whole chunks, within 5,000 tokens. With <paramref name="items"/>, only those
+    /// items are searched; without, every active item except Rulebook copies — a
+    /// draft is written from the Library's rules and procedures, not from pages
+    /// HR already wrote.
+    /// </summary>
+    public async Task<List<HrExcerpt>> SelectDraftExcerptsAsync(string query, IReadOnlyCollection<int>? items, CancellationToken ct = default)
+    {
+        IReadOnlyCollection<int> scope;
+        if (items is { Count: > 0 }) scope = items;
+        else
+        {
+            var copies = (await RulebookPagesAsync(ct)).Keys.ToHashSet();
+            scope = (await sources.ListSharedAsync(Kind, ct)).Where(i => i.IsActive && !copies.Contains(i.Id)).Select(i => i.Id).ToList();
+            if (scope.Count == 0) return new();
+        }
+        return await TakeExcerptsAsync(await SearchAsync(query, scope, DraftMaxExcerpts, ct), DraftMaxExcerpts, DraftExcerptBudget, new HashSet<int>(), ct);
+    }
+
+    /// <summary>Whole chunks in the order given, up to <paramref name="max"/> and within <paramref name="budget"/> tokens (a chunk that does not fit is skipped; a smaller one may still).</summary>
+    private async Task<List<HrExcerpt>> TakeExcerptsAsync(IReadOnlyList<HrSearchHit> hits, int max, int budget, IReadOnlySet<int> pinned, CancellationToken ct)
+    {
         var excerpts = new List<HrExcerpt>();
         var used = 0;
-        var hits = await SearchAsync(question, scope, MaxExcerpts, ct);
-        var cites = await RulebookCitesAsync(hits.Select(h => h.ItemId).Distinct().ToList(), ct);
+        var pages = await RulebookCitesAsync(hits.Select(h => h.ItemId).Distinct().ToList(), ct);
         foreach (var hit in hits)
         {
+            if (excerpts.Count == max) break;
             var tokens = PoPromptBuilder.EstimateTokens(hit.Text);
-            if (used + tokens > ExcerptBudget) continue;
+            if (used + tokens > budget) continue;
+            var isPage = pages.TryGetValue(hit.ItemId, out var page);
             excerpts.Add(new HrExcerpt(hit.ChunkId, hit.ItemId, hit.ItemName, hit.Version, hit.SourceRef, hit.LineFrom, hit.LineTo, hit.Text, tokens, hit.Score,
-                cites.GetValueOrDefault(hit.ItemId)));
+                isPage ? page.Cite : null, isPage ? page.PageId : null, isPage ? page.Version : null, pinned.Contains(hit.ChunkId)));
             used += tokens;
         }
         return excerpts;
+    }
+
+    /// <summary>At most this many Rulebook pages are pinned into one question's five excerpts.</summary>
+    public const int MaxPinnedPages = 3;
+
+    /// <summary>
+    /// The best chunk of each confirmed Rulebook page the question names (§3.5):
+    /// its whole title, or every word of three letters or more in it. When no title
+    /// is named but a category is ("salary", "বেতন"), the best-ranked page of that
+    /// category. Only pages whose copy is active and inside the "Search in" scope.
+    /// </summary>
+    private async Task<List<HrSearchHit>> PinnedRulebookHitsAsync(string question, IReadOnlyCollection<int>? scope, CancellationToken ct)
+    {
+        var pages = await db.HrRulePages.AsNoTracking()
+            .Where(p => p.Status == HrRulePage.StatusConfirmed && p.LibraryItemId != null)
+            .Select(p => new { p.Title, p.Category, ItemId = p.LibraryItemId!.Value })
+            .ToListAsync(ct);
+        if (pages.Count == 0) return new();
+        var active = (await sources.ListSharedAsync(Kind, ct)).Where(i => i.IsActive).Select(i => i.Id).ToHashSet();
+        pages = pages.Where(p => active.Contains(p.ItemId) && (scope is null || scope.Count == 0 || scope.Contains(p.ItemId))).ToList();
+
+        var q = question.ToLowerInvariant();
+        var asked = Words(q).ToHashSet();
+        bool Names(string title)
+        {
+            var t = title.Trim().ToLowerInvariant();
+            if (t.Length > 0 && q.Contains(t)) return true;
+            var significant = Words(t).Where(w => w.Length >= 3).ToList();
+            return significant.Count > 0 && significant.All(asked.Contains);
+        }
+
+        var chosen = pages.Where(p => Names(p.Title)).Select(p => p.ItemId).Take(MaxPinnedPages).ToList();
+        if (chosen.Count == 0)
+        {
+            var named = HrRulebook.Categories
+                .Where(c => q.Contains(c.En.ToLowerInvariant()) || q.Contains(c.Bn) || q.Contains(c.Key)).Select(c => c.Key).ToHashSet();
+            if (named.Count > 0)
+            {
+                var candidates = pages.Where(p => named.Contains(p.Category)).Select(p => p.ItemId).ToList();
+                var ranked = candidates.Count == 0 ? new List<HrSearchHit>() : (await SearchAsync(question, candidates, 1, ct)).ToList();
+                chosen = ranked.Select(h => h.ItemId).Take(1).ToList();
+            }
+        }
+
+        var hits = new List<HrSearchHit>();
+        foreach (var itemId in chosen)
+        {
+            var best = (await SearchAsync(question, new[] { itemId }, 1, ct)).FirstOrDefault() ?? await FirstChunkAsync(itemId, ct);
+            if (best is not null) hits.Add(best);
+        }
+        return hits;
+    }
+
+    private static IEnumerable<string> Words(string text) =>
+        System.Text.RegularExpressions.Regex.Matches(text, @"[\p{L}\p{M}\p{N}]+").Select(m => m.Value);
+
+    /// <summary>An item's first chunk, as a hit — the pin when the search finds nothing in it.</summary>
+    private async Task<HrSearchHit?> FirstChunkAsync(int itemId, CancellationToken ct)
+    {
+        var item = await sources.GetSharedAsync(Kind, itemId, ct);
+        var c = await db.EmbeddingChunks.AsNoTracking().Where(x => x.ContextSourceId == itemId).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+        return item is null || c is null ? null
+            : new HrSearchHit(c.Id, item.Id, item.Name, item.Version, c.SourceRef, SectionOf(c.SourceRef), c.LineFrom, c.LineTo, 0, null, null, c.Text, Preview(c.Text));
     }
 
     /// <summary>
     /// How an excerpt from a Rulebook page's Library copy is cited:
     /// "Rulebook: &lt;Title&gt; v&lt;N&gt;" (docs/HR_RULEBOOK_PROMPT.md §3.5) — the title
     /// the copy was confirmed under (its name) and the confirmed version, which
-    /// change only at confirmation, as the copy's text does.
+    /// change only at confirmation, as the copy's text does — and the page and
+    /// version a click on the citation opens.
     /// </summary>
-    private async Task<Dictionary<int, string>> RulebookCitesAsync(IReadOnlyCollection<int> itemIds, CancellationToken ct)
+    private async Task<Dictionary<int, (string Cite, int PageId, int Version)>> RulebookCitesAsync(IReadOnlyCollection<int> itemIds, CancellationToken ct)
     {
         if (itemIds.Count == 0) return new();
         var pages = await db.HrRulePages.AsNoTracking()
             .Where(p => p.LibraryItemId != null && itemIds.Contains(p.LibraryItemId.Value) && p.ConfirmedVersion != null)
-            .Select(p => new { ItemId = p.LibraryItemId!.Value, p.ConfirmedVersion })
+            .Select(p => new { ItemId = p.LibraryItemId!.Value, p.Id, Version = p.ConfirmedVersion!.Value })
             .ToListAsync(ct);
         var names = await db.ContextSources.AsNoTracking()
             .Where(s => itemIds.Contains(s.Id)).ToDictionaryAsync(s => s.Id, s => s.Name, ct);
         return pages.Where(p => names.ContainsKey(p.ItemId)).ToDictionary(
             p => p.ItemId,
-            p => $"Rulebook: {RulebookTitleOf(names[p.ItemId])} v{p.ConfirmedVersion}");
+            p => ($"Rulebook: {RulebookTitleOf(names[p.ItemId])} v{p.Version}", p.Id, p.Version));
     }
 
     /// <summary>"Rulebook · Earned leave" → "Earned leave".</summary>
@@ -431,7 +534,7 @@ public sealed class HrLibrary(
         }
         if (write.Outcome != SharedOutcome.Ok) return (null, "The Library copy could not be written.");
 
-        await RechunkAsync(write.Item!, ct);
+        await RechunkAsync(write.Item!, ct, markdown: true);
         return (write.Item!.Id, null);
     }
 
@@ -526,8 +629,10 @@ public sealed class HrLibrary(
     /// the keyword index; re-split if `search` and keyword-indexed at once; then
     /// queued for embedding in the background.
     /// </summary>
-    private async Task RechunkAsync(ContextSource item, CancellationToken ct)
+    /// <param name="markdown">Split as Markdown whatever the name says; null: decided by whether the item is a Rulebook copy.</param>
+    private async Task RechunkAsync(ContextSource item, CancellationToken ct, bool? markdown = null)
     {
+        var asMarkdown = markdown ?? await IsRulebookCopyAsync(item.Id, ct);
         await ChunkGate.WaitAsync(ct);
         try
         {
@@ -537,7 +642,7 @@ public sealed class HrLibrary(
             await db.ContextSources.Where(s => s.Id == item.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.IndexError, (string?)null), ct);
 
             if (item.Mode != "search") return;
-            var rows = AddChunks(item);
+            var rows = AddChunks(item, asMarkdown);
             await db.SaveChangesAsync(ct);
             await HrKeywordIndex.ReplaceAsync(db, item.Id, rows, ct);
             await MarkSplitAsync(item.Id, ct);
@@ -566,9 +671,9 @@ public sealed class HrLibrary(
         return outdated.Count;
     }
 
-    private List<EmbeddingChunk> AddChunks(ContextSource item)
+    private List<EmbeddingChunk> AddChunks(ContextSource item, bool markdown = false)
     {
-        var rows = HrSplitter.Split(item.Name, item.Content).Select(chunk => new EmbeddingChunk
+        var rows = HrSplitter.Split(item.Name, item.Content, markdown).Select(chunk => new EmbeddingChunk
         {
             ContextSourceId = item.Id,
             Kind = Kind,
