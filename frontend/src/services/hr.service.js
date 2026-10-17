@@ -125,3 +125,82 @@ export async function streamHrChat({ conversationId, message, items = [], model 
   consume(buffer)
   return Number(res.headers.get('X-Conversation-Id')) || conversationId
 }
+
+// ───────────────────────── Rulebook (নিয়মাবলি) ─────────────────────────
+// docs/HR_RULEBOOK_PROMPT.md §3. Who may write, and who may see a draft, is the
+// server's decision; it says `canEdit`, and answers 403 to anything else.
+
+/**
+ * The pages this user may see: { pages: [{ id, title, category, language, status,
+ * currentVersion, confirmedVersion, confirmedBy, confirmedAtUtc, libraryItemId,
+ * draftInProgress, canEdit }], canEdit, categories: [{ key, bn, en }], languages, statuses }.
+ * `q` searches titles and text.
+ */
+export function listRulebook({ q = '', category = '', status = '' } = {}) {
+  const query = [
+    q && `q=${encodeURIComponent(q)}`,
+    category && `category=${encodeURIComponent(category)}`,
+    status && `status=${encodeURIComponent(status)}`,
+  ].filter(Boolean).join('&')
+  return http.get(`/hr/rulebook${query ? `?${query}` : ''}`)
+}
+
+/**
+ * One page at a version (default: the one this user opens), with
+ * `version: { version, kind, changeNote, author, atUtc, body, display, formulas }`.
+ */
+export function getRulePage(id, version) {
+  return http.get(`/hr/rulebook/${id}${version ? `?version=${version}` : ''}`)
+}
+
+/** Every version, newest last: [{ version, kind, changeNote, author, atUtc }]. */
+export function listRuleVersions(id) {
+  return http.get(`/hr/rulebook/${id}/versions`)
+}
+
+export function createRulePage({ title, category, language, body, note }) {
+  return http.post('/hr/rulebook', { title, category, language, body, note })
+}
+
+/** A save is always a new version. `baseVersion` is where the editor started: a newer page answers 409. */
+export function saveRulePage(id, { title, category, language, body, note, baseVersion }) {
+  return http.put(`/hr/rulebook/${id}`, { title, category, language, body, note, baseVersion })
+}
+
+export function confirmRulePage(id, note) {
+  return http.post(`/hr/rulebook/${id}/confirm`, { note })
+}
+
+export function retireRulePage(id, note) {
+  return http.post(`/hr/rulebook/${id}/retire`, { note })
+}
+
+/** A new draft from an old version. */
+export function restoreRuleVersion(id, version, note) {
+  return http.post(`/hr/rulebook/${id}/restore`, { version, note })
+}
+
+/** Saves a file the server sends, under the name it gives. */
+async function saveDownload(path, fallbackName) {
+  const res = await http.raw(path)
+  const blob = await res.blob()
+  const disposition = res.headers.get('content-disposition') ?? ''
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  const name = encoded ? decodeURIComponent(encoded) : /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** One version as Markdown, under its header line. */
+export function downloadRulePage(id, version) {
+  return saveDownload(`/hr/rulebook/${id}/download${version ? `?version=${version}` : ''}`, `rulebook-${id}.md`)
+}
+
+/** Every confirmed page in one Markdown file, grouped by category. */
+export function exportRulebook() {
+  return saveDownload('/hr/rulebook/export', 'rulebook-confirmed.md')
+}

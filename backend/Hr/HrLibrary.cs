@@ -35,12 +35,14 @@ namespace RabbitIC.Api.Hr;
 /// <summary>
 /// A library item as the list and the editor see it. Content only on a single-item
 /// read. IndexState is "ready", "indexing" (EmbeddedCount of ChunkCount) or "failed".
+/// RulebookPageId: the Rulebook page this item is the confirmed copy of; such an
+/// item is never editable here (CanEdit false), only from the Rulebook.
 /// </summary>
 public sealed record HrItemDto(
     int Id, string Name, string HrType, string Mode, int Version,
     string? ApprovedBy, DateTime? ApprovedAt, bool IsActive, int SortOrder,
     int Chars, int Tokens, int ChunkCount, int EmbeddedCount, DateTime UpdatedAt, bool CanEdit,
-    string IndexState, string? IndexError, string? Content = null);
+    string IndexState, string? IndexError, string? Content = null, int? RulebookPageId = null);
 
 public sealed record HrChunkDto(
     int Id, string? SourceRef, string? Section, int LineFrom, int LineTo,
@@ -74,6 +76,12 @@ public sealed class HrLibrary(
     public static readonly string[] UploadExtensions = { ".md", ".txt", ".sql", ".json", ".csv", ".pdf", ".xlsx" };
     public const long MaxUploadBytes = 20L * 1024 * 1024;   // the same limit as Documents
 
+    /// <summary>What an edit or delete of a Rulebook page's Library copy is told (docs/HR_RULEBOOK_PROMPT.md §3.3).</summary>
+    public const string RulebookOwned = "This item is a Rulebook page's confirmed copy; edit it in the Rulebook.";
+
+    /// <summary>A Rulebook page's Library copy is named "Rulebook · &lt;Title&gt;" (§3.3).</summary>
+    public const string RulebookPrefix = "Rulebook · ";
+
     /// <summary>The always budget: persona plus every active always item (§3.2, §3.3).</summary>
     public const int AlwaysCapTokens = 8000;
 
@@ -93,15 +101,25 @@ public sealed class HrLibrary(
     {
         var items = await sources.ListSharedAsync(Kind, ct);
         var counts = await ChunkCountsAsync(ct);
+        var pages = await RulebookPagesAsync(ct);
         var canEdit = ContextSourceService.CanEditShared(caller);
-        return items.Select(i => Project(i, counts, canEdit, withContent: false)).ToList();
+        return items.Select(i => Project(i, counts, pages, canEdit, withContent: false)).ToList();
     }
 
     public async Task<HrItemDto?> GetAsync(User caller, int id, CancellationToken ct = default)
     {
         var item = await sources.GetSharedAsync(Kind, id, ct);
-        return item is null ? null : Project(item, await ChunkCountsAsync(ct), ContextSourceService.CanEditShared(caller), withContent: true);
+        return item is null ? null : Project(item, await ChunkCountsAsync(ct), await RulebookPagesAsync(ct), ContextSourceService.CanEditShared(caller), withContent: true);
     }
+
+    /// <summary>Library item id → the Rulebook page it is the confirmed copy of.</summary>
+    private async Task<Dictionary<int, int>> RulebookPagesAsync(CancellationToken ct) =>
+        await db.HrRulePages.AsNoTracking()
+            .Where(p => p.LibraryItemId != null)
+            .ToDictionaryAsync(p => p.LibraryItemId!.Value, p => p.Id, ct);
+
+    private Task<bool> IsRulebookCopyAsync(int id, CancellationToken ct) =>
+        db.HrRulePages.AsNoTracking().AnyAsync(p => p.LibraryItemId == id, ct);
 
     public async Task<IReadOnlyList<HrChunkDto>?> ChunksAsync(int id, CancellationToken ct = default)
     {
@@ -195,15 +213,42 @@ public sealed class HrLibrary(
     {
         var excerpts = new List<HrExcerpt>();
         var used = 0;
-        foreach (var hit in await SearchAsync(question, scope, MaxExcerpts, ct))
+        var hits = await SearchAsync(question, scope, MaxExcerpts, ct);
+        var cites = await RulebookCitesAsync(hits.Select(h => h.ItemId).Distinct().ToList(), ct);
+        foreach (var hit in hits)
         {
             var tokens = PoPromptBuilder.EstimateTokens(hit.Text);
             if (used + tokens > ExcerptBudget) continue;
-            excerpts.Add(new HrExcerpt(hit.ChunkId, hit.ItemId, hit.ItemName, hit.Version, hit.SourceRef, hit.LineFrom, hit.LineTo, hit.Text, tokens, hit.Score));
+            excerpts.Add(new HrExcerpt(hit.ChunkId, hit.ItemId, hit.ItemName, hit.Version, hit.SourceRef, hit.LineFrom, hit.LineTo, hit.Text, tokens, hit.Score,
+                cites.GetValueOrDefault(hit.ItemId)));
             used += tokens;
         }
         return excerpts;
     }
+
+    /// <summary>
+    /// How an excerpt from a Rulebook page's Library copy is cited:
+    /// "Rulebook: &lt;Title&gt; v&lt;N&gt;" (docs/HR_RULEBOOK_PROMPT.md §3.5) — the title
+    /// the copy was confirmed under (its name) and the confirmed version, which
+    /// change only at confirmation, as the copy's text does.
+    /// </summary>
+    private async Task<Dictionary<int, string>> RulebookCitesAsync(IReadOnlyCollection<int> itemIds, CancellationToken ct)
+    {
+        if (itemIds.Count == 0) return new();
+        var pages = await db.HrRulePages.AsNoTracking()
+            .Where(p => p.LibraryItemId != null && itemIds.Contains(p.LibraryItemId.Value) && p.ConfirmedVersion != null)
+            .Select(p => new { ItemId = p.LibraryItemId!.Value, p.ConfirmedVersion })
+            .ToListAsync(ct);
+        var names = await db.ContextSources.AsNoTracking()
+            .Where(s => itemIds.Contains(s.Id)).ToDictionaryAsync(s => s.Id, s => s.Name, ct);
+        return pages.Where(p => names.ContainsKey(p.ItemId)).ToDictionary(
+            p => p.ItemId,
+            p => $"Rulebook: {RulebookTitleOf(names[p.ItemId])} v{p.ConfirmedVersion}");
+    }
+
+    /// <summary>"Rulebook · Earned leave" → "Earned leave".</summary>
+    public static string RulebookTitleOf(string itemName) =>
+        itemName.StartsWith(RulebookPrefix, StringComparison.Ordinal) ? itemName[RulebookPrefix.Length..] : itemName;
 
     /// <summary>Phase 1's retrieval route: exactly the excerpts a question would be sent with.</summary>
     public async Task<IReadOnlyList<HrHitDto>> RetrieveAsync(string question, CancellationToken ct = default) =>
@@ -277,6 +322,9 @@ public sealed class HrLibrary(
         var mode = input.Mode?.Trim().ToLowerInvariant();
         if (mode is not null && !Modes.Contains(mode)) return (SharedOutcome.Ok, null, $"mode must be one of: {string.Join(", ", Modes)}.");
 
+        // A Rulebook page's copy changes only through the Rulebook, so its paper trail can't be bypassed.
+        if (await IsRulebookCopyAsync(id, ct)) return (SharedOutcome.Conflict, null, null);
+
         // The state the item would be in after this change — checked before anything is written.
         var all = await sources.ListSharedAsync(Kind, ct);
         var current = all.FirstOrDefault(i => i.Id == id);
@@ -314,6 +362,7 @@ public sealed class HrLibrary(
 
     public async Task<SharedOutcome> DeleteAsync(User editor, int id, CancellationToken ct = default)
     {
+        if (await IsRulebookCopyAsync(id, ct)) return SharedOutcome.Conflict;
         await ChunkGate.WaitAsync(ct);
         try
         {
@@ -339,6 +388,69 @@ public sealed class HrLibrary(
         indexer.Enqueue(id);
         return SharedOutcome.Ok;
     }
+
+    // ───────────────────────── the Rulebook's copies ─────────────────────────
+    // docs/HR_RULEBOOK_PROMPT.md §3.3. Only HrRulebook calls these; they are the one
+    // way a Rulebook copy changes, which is why Update and Delete above refuse it.
+
+    /// <summary>
+    /// Writes a confirmed page into the Library: on first confirmation a new
+    /// `rules` item in `search` mode; afterwards the same item, its content
+    /// replaced (the version goes up), re-split, re-indexed and switched on again.
+    /// Returns the item's id, or why it could not be written.
+    /// </summary>
+    public async Task<(int? ItemId, string? Error)> WriteRulebookCopyAsync(
+        User editor, int? itemId, string title, string content, string approvedBy, DateTime approvedAt, CancellationToken ct = default)
+    {
+        if (await RulebookCopyNameErrorAsync(title, itemId, ct) is { } nameError) return (null, nameError);
+        var name = RulebookPrefix + title;
+        content = Normalize(content);
+        var existing = await sources.ListSharedAsync(Kind, ct);
+
+        SharedWrite write;
+        if (itemId is int id && existing.Any(i => i.Id == id))
+        {
+            write = await sources.UpdateSharedAsync(editor, Kind, id, i =>
+            {
+                i.Name = name;
+                i.HrType = "rules";
+                i.Mode = "search";
+                i.Content = content;
+                i.IsActive = true;
+                i.ApprovedBy = approvedBy;
+                i.ApprovedAt = approvedAt;
+            }, ct);
+        }
+        else
+        {
+            write = await sources.CreateSharedAsync(editor, new ContextSource
+            {
+                Kind = Kind, Name = name, HrType = "rules", Mode = "search", Content = content, IsActive = true,
+                ApprovedBy = approvedBy, ApprovedAt = approvedAt,
+            }, ct);
+        }
+        if (write.Outcome != SharedOutcome.Ok) return (null, "The Library copy could not be written.");
+
+        await RechunkAsync(write.Item!, ct);
+        return (write.Item!.Id, null);
+    }
+
+    /// <summary>
+    /// Why a page titled <paramref name="title"/> could not have its copy in the
+    /// Library — another item already has the name — or null. Asked before a
+    /// confirmation is recorded, so a confirmed version always gets its copy.
+    /// </summary>
+    public async Task<string?> RulebookCopyNameErrorAsync(string title, int? itemId, CancellationToken ct = default)
+    {
+        var name = RulebookPrefix + title;
+        return (await sources.ListSharedAsync(Kind, ct)).Any(i => i.Id != itemId && string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase))
+            ? $"The Library already has an item named \"{name}\"; rename that item or this page."
+            : null;
+    }
+
+    /// <summary>Switches a retired page's copy off: it is never searched or sent again; its text stays.</summary>
+    public Task DeactivateRulebookCopyAsync(User editor, int itemId, CancellationToken ct = default) =>
+        sources.UpdateSharedAsync(editor, Kind, itemId, i => i.IsActive = false, ct);
 
     // ───────────────────────── uploads ─────────────────────────
 
@@ -621,14 +733,16 @@ public sealed class HrLibrary(
             .ToListAsync(ct))
         .ToDictionary(x => x.Id, x => (x.Chunks, x.Embedded));
 
-    private static HrItemDto Project(ContextSource i, Dictionary<int, (int Chunks, int Embedded)> counts, bool canEdit, bool withContent)
+    private static HrItemDto Project(ContextSource i, Dictionary<int, (int Chunks, int Embedded)> counts,
+        Dictionary<int, int> rulebookPages, bool canEdit, bool withContent)
     {
         var (chunks, embedded) = counts.GetValueOrDefault(i.Id);
         var state = i.IndexError is not null ? "failed" : embedded < chunks ? "indexing" : "ready";
+        int? page = rulebookPages.TryGetValue(i.Id, out var p) ? p : null;
         return new HrItemDto(i.Id, i.Name, i.HrType ?? "note", i.Mode ?? "always", i.Version,
             i.ApprovedBy, i.ApprovedAt, i.IsActive, i.SortOrder,
-            i.Content.Length, PoPromptBuilder.EstimateTokens(i.Content), chunks, embedded, i.UpdatedAt, canEdit,
-            state, i.IndexError, withContent ? i.Content : null);
+            i.Content.Length, PoPromptBuilder.EstimateTokens(i.Content), chunks, embedded, i.UpdatedAt, canEdit && page is null,
+            state, i.IndexError, withContent ? i.Content : null, page);
     }
 
     private static void ApplyApproval(ContextSource item, string? approvedBy)
@@ -640,7 +754,7 @@ public sealed class HrLibrary(
     }
 
     /// <summary>One line ending, no byte-order mark: line numbers then mean the same everywhere.</summary>
-    private static string Normalize(string? text) =>
+    public static string Normalize(string? text) =>
         (text ?? "").Replace("﻿", "").Replace("\r\n", "\n").Replace('\r', '\n');
 
     private static string Preview(string text)

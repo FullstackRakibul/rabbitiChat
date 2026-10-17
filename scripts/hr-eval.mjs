@@ -6,6 +6,11 @@
 //   node scripts/hr-eval.mjs --only G1.5          one gate
 //   node scripts/hr-eval.mjs --no-build           reuse the last eval build
 //   node scripts/hr-eval.mjs --no-suites          skip re-running the other suites in G1.9
+//   node scripts/hr-eval.mjs --phase R1           the Rulebook's Phase R1 (docs/HR_RULEBOOK_PROMPT.md §4)
+//   node scripts/hr-eval.mjs --phase R1 --live    GR1.9 against the real Ollama
+//
+// Without --phase, or with a number, only the module's own phases (1, 2) run; the
+// Rulebook's R phases run only when named, so the module's counts stay comparable.
 //
 // Environment (never written in this file):
 //   HR_EVAL_ADMIN_USER, HR_EVAL_ADMIN_SECRET   the seeded SystemAdmin of the throwaway API
@@ -25,7 +30,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { buildApi, startFakeOllama, startApi, call } from './oddity-eval.mjs'
 
@@ -1064,6 +1069,418 @@ check('G2.16', 2, 'any', 'the frontend builds', async () => {
   return ok(r.status === 0 && /built in/.test(out), `exit ${r.status}; ${(out.match(/built in [\d.]+m?s/) ?? ['no build line'])[0]}`)
 })
 
+// ═══════════════════════════ Rulebook R1 — hand-written pages, paper trail, Library sync ═══════════════════════════
+// docs/HR_RULEBOOK_PROMPT.md §3.1–§3.3 and §3.6, gates GR1.1–GR1.10. Run with --phase R1.
+
+const RB = '/api/hr/rulebook'
+const RB_CATEGORIES = ['settlement', 'salary', 'company-policy', 'leave-approval', 'attendance', 'other']
+/** What the append-only trigger says; the check reads it from SQLite's error, not from the code. */
+const RB_APPEND_ONLY = /append-only/i
+const stamp = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
+
+/** §3.3's header line, written by hand. */
+const rbHeader = (title, version, user, date, category) =>
+  `Rulebook · ${title} · v${version} · confirmed by ${user} on ${date} · category ${category}`
+
+const rbCreate = (user, { title, category = 'other', language = 'en', body, note }) => as(user, 'POST', RB, { title, category, language, body, note })
+const rbSave = (user, id, body, extra = {}) => as(user, 'PUT', `${RB}/${id}`, { body, ...extra })
+const rbConfirm = (user, id, note) => as(user, 'POST', `${RB}/${id}/confirm`, note === undefined ? {} : { note })
+const rbRetire = (user, id, note) => as(user, 'POST', `${RB}/${id}/retire`, note === undefined ? {} : { note })
+const rbRestore = (user, id, version, note) => as(user, 'POST', `${RB}/${id}/restore`, note === undefined ? { version } : { version, note })
+const rbGet = (user, id, version) => as(user, 'GET', `${RB}/${id}${version ? `?version=${version}` : ''}`)
+const rbVersions = async (user, id) => (await as(user, 'GET', `${RB}/${id}/versions`)).json?.versions ?? []
+const rbIds = async (user, query = '') => ((await as(user, 'GET', `${RB}${query ? `?${query}` : ''}`)).json?.pages ?? []).map((p) => p.id)
+
+async function rbEditor() { return (ctx.rbEditor ??= await login(HR_ASSISTANT, SECRET)) }
+async function rbReader() { return (ctx.rbReader ??= await generalUser('rulebook-reader', ['hr'])) }
+
+/** A page written and confirmed by the hr-assistant, its Library item split and embedded. */
+async function rbConfirmed(title, body, category = 'other') {
+  const editor = await rbEditor()
+  const c = await rbCreate(editor, { title, category, body })
+  if (c.status !== 201) throw new Error(`create "${title}" → ${c.status} ${c.text.slice(0, 200)}`)
+  const f = await rbConfirm(editor, c.json.id, 'eval: confirmed for this check')
+  if (f.status !== 200) throw new Error(`confirm "${title}" → ${f.status} ${f.text.slice(0, 200)}`)
+  const item = await waitFor(async () => (await library()).find((i) => i.id === f.json.libraryItemId && i.chunkCount > 0 && i.embeddedCount === i.chunkCount))
+  if (!item) throw new Error(`the Library item of "${title}" was never indexed`)
+  return { page: f.json, item, body }
+}
+
+/** Runs SQL against a database file and returns SQLite's error message, or "no error". */
+async function rbExec(sql, dbPath = ctx.api.dbPath) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(dbPath)
+  try { db.exec(sql); return 'no error' } catch (e) { return e.message } finally { db.close() }
+}
+
+async function rbFetch(user, p) {
+  const res = await fetch(`${ctx.api.url}${p}`, { headers: { Authorization: `Bearer ${user.token}` } })
+  return { status: res.status, type: res.headers.get('content-type') ?? '', disposition: res.headers.get('content-disposition') ?? '', text: await res.text() }
+}
+
+const hasColour = (f) => read(f).split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => /#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(l)).map(([g, n]) => `${g}:${n}`)
+
+const RB_UI = ['frontend/src/components/hr/HrRulebook.vue', 'frontend/src/components/hr/HrRulePage.vue', 'frontend/src/lib/line-diff.js']
+
+// ─────────────────────────── GR1.1 — the section ───────────────────────────
+
+check('GR1.1', 'R1', 'any', 'the Rulebook section sits right of Library; the list groups by category with status chips; search and filters work', async () => {
+  const missing = RB_UI.filter((f) => !fs.existsSync(path.join(REPO, f)))
+  if (missing.length) return ok(false, `missing ${missing.join(', ')}`)
+  const tab = read('frontend/src/components/tabs/HrTab.vue')
+  const list = read('frontend/src/components/hr/HrRulebook.vue')
+  const at = ['প্রশ্ন', 'লাইব্রেরি', 'নিয়মাবলি'].map((s) => tab.indexOf(s))
+  const ui = {
+    section: at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])) && /HrRulebook/.test(tab),
+    chips: ['খসড়া', 'নিশ্চিত', 'বাতিল'].every((s) => list.includes(s)),
+    grouped: /groups?\b/i.test(list) && /category/.test(list),
+    filters: /status=/.test(read('frontend/src/services/hr.service.js')) && /category=/.test(read('frontend/src/services/hr.service.js')),
+  }
+  const colours = RB_UI.flatMap(hasColour)
+
+  // The list API: grouped data, category and status filters, search by title and by text.
+  const editor = await rbEditor()
+  const k = stamp()
+  const a = await rbCreate(editor, { title: `GR11 salary ${k}`, category: 'salary', body: `# Salary\n\nZephyr${k} pays on the 7th.\n` })
+  const b = await rbCreate(editor, { title: `GR11 attendance ${k}`, category: 'attendance', body: '# Attendance\n\nLate after 9:15.\n' })
+  await rbConfirm(editor, b.json?.id, 'eval')
+  const res = await as(editor, 'GET', RB)
+  const cats = (res.json?.categories ?? []).map((c) => c.key)
+  const byCat = await rbIds(editor, 'category=salary'), byStatus = await rbIds(editor, 'status=confirmed')
+  const byText = await rbIds(editor, `q=zephyr${k}`), byTitle = await rbIds(editor, `q=${encodeURIComponent(`attendance ${k}`)}`)
+  const api = {
+    categories: JSON.stringify(cats) === JSON.stringify(RB_CATEGORIES),
+    category: byCat.includes(a.json?.id) && !byCat.includes(b.json?.id),
+    status: byStatus.includes(b.json?.id) && !byStatus.includes(a.json?.id),
+    text: JSON.stringify(byText) === JSON.stringify([a.json?.id]),
+    title: JSON.stringify(byTitle) === JSON.stringify([b.json?.id]),
+  }
+  return ok(Object.values(ui).every(Boolean) && Object.values(api).every(Boolean) && !colours.length,
+    `ui ${JSON.stringify(ui)}; api ${JSON.stringify(api)} (categories [${cats}]); hard-coded colours [${colours}]`)
+})
+
+// ─────────────────────────── GR1.2 — append-only ───────────────────────────
+
+check('GR1.2', 'R1', 'fake', 'a page saved three times has three versions, each body exactly as saved', async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  const bodies = [
+    `# Stamp fee ${k}\n\n1. ৳10 stamp on every settlement.  \n`,
+    `# Stamp fee ${k}\n\n1. ৳10 stamp on every settlement.  \n2. Paid in cash: [[= 10*2 ]].\n`,
+    `# Stamp fee ${k}\n\n1. ৳20 stamp on every settlement.\n2. Paid by cheque.\n\n`,
+  ]
+  const c = await rbCreate(editor, { title: `GR12 stamp fee ${k}`, category: 'settlement', body: bodies[0] })
+  const id = c.json?.id
+  const s2 = await rbSave(editor, id, bodies[1], { note: 'second save' })
+  const s3 = await rbSave(editor, id, bodies[2])
+  const rows = await sqlite(`SELECT Version, Kind, Body FROM HrRulePageVersions WHERE PageId = ${Number(id)} ORDER BY Version`)
+  const viaApi = await Promise.all([1, 2, 3].map(async (v) => (await rbGet(editor, id, v)).json?.version?.body))
+  ctx.gr12 = id
+  return ok(c.status === 201 && s2.status === 200 && s3.status === 200 && rows.length === 3
+      && rows.map((r) => r.Version).join() === '1,2,3' && rows.map((r) => r.Kind).join() === 'written,edited,edited'
+      && rows.every((r, i) => r.Body === bodies[i]) && viaApi.every((b, i) => b === bodies[i]),
+    `create ${c.status}, saves ${s2.status} ${s3.status}; rows ${rows.map((r) => `v${r.Version} ${r.Kind} ${r.Body === bodies[r.Version - 1] ? 'exact' : 'DIFFERS'}`).join(', ')}; `
+    + `API bodies exact ${viaApi.map((b, i) => b === bodies[i]).join()}`)
+})
+
+check('GR1.2', 'R1', 'fake', "a direct UPDATE and DELETE on HrRulePageVersions fail with the trigger's error (fresh database)", async () => {
+  const id = Number(ctx.gr12)
+  if (!id) return ok(false, 'no page from the previous check')
+  const upd = await rbExec(`UPDATE HrRulePageVersions SET Body = 'tampered' WHERE PageId = ${id} AND Version = 1`)
+  const del = await rbExec(`DELETE FROM HrRulePageVersions WHERE PageId = ${id}`)
+  const left = (await sqlite(`SELECT COUNT(*) AS n FROM HrRulePageVersions WHERE PageId = ${id} AND Body <> 'tampered'`))[0]?.n
+  const triggers = (await sqlite(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'HrRulePageVersions'`)).map((t) => t.name)
+  return ok(RB_APPEND_ONLY.test(upd) && RB_APPEND_ONLY.test(del) && left === 3,
+    `UPDATE → "${upd}"; DELETE → "${del}"; versions untouched ${left}/3; triggers [${triggers}]`)
+})
+
+check('GR1.2', 'R1', 'fake', 'on an upgraded copy (a database from before the Rulebook) the tables and triggers are added and hold', async () => {
+  const runDir = fs.mkdtempSync(path.join(EVAL_ROOT, 'pre-rulebook-'))
+  let api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: ctx.env })
+  await api.stop()
+  // Back to the shape of a database made before this build: no Rulebook tables (their triggers go with them).
+  const dropped = await rbExec('DROP TABLE IF EXISTS "HrRulePageVersions"; DROP TABLE IF EXISTS "HrRulePages";', api.dbPath)
+  const before = (await sqlite(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE 'HrRulePage%' OR tbl_name LIKE 'HrRulePage%'`, api.dbPath))[0]?.n
+  api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: ctx.env })
+  try {
+    const admin = await login(process.env.HR_EVAL_ADMIN_USER, process.env.HR_EVAL_ADMIN_SECRET, api)
+    const c = await call(api.url, 'POST', RB, { token: admin.token, body: { title: 'Upgraded copy page', category: 'other', language: 'en', body: '# Upgraded\n\nOne rule.\n' } })
+    const triggers = (await sqlite(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'HrRulePageVersions'`, api.dbPath)).map((t) => t.name)
+    const upd = await rbExec(`UPDATE HrRulePageVersions SET Body = 'tampered'`, api.dbPath)
+    const del = await rbExec('DELETE FROM HrRulePageVersions', api.dbPath)
+    const left = (await sqlite(`SELECT COUNT(*) AS n FROM HrRulePageVersions WHERE Body <> 'tampered'`, api.dbPath))[0]?.n
+    return ok(dropped === 'no error' && before === 0 && c.status === 201 && triggers.length >= 2 && RB_APPEND_ONLY.test(upd) && RB_APPEND_ONLY.test(del) && left === 1,
+      `tables dropped (${dropped}), ${before} left before restart; after restart: create ${c.status}, triggers [${triggers}], UPDATE → "${upd}", DELETE → "${del}", versions kept ${left}`)
+  } finally { await api.stop() }
+})
+
+/** Every .cs file under backend/, without build output. */
+function backendSources(dir = path.join(REPO, 'backend')) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.isDirectory()) return ['bin', 'obj'].includes(e.name) ? [] : backendSources(path.join(dir, e.name))
+    return e.name.endsWith('.cs') ? [path.join(dir, e.name)] : []
+  })
+}
+
+check('GR1.2', 'R1', 'any', 'no route updates or deletes a version, and versions are only ever added (listed routes)', async () => {
+  const routes = [], writes = [], adds = []
+  for (const f of backendSources()) {
+    const src = fs.readFileSync(f, 'utf8'), rel = path.relative(REPO, f).replace(/\\/g, '/')
+    for (const m of src.matchAll(/\.Map(Get|Post|Put|Patch|Delete)\(\s*"([^"]*rulebook[^"]*)"/g)) routes.push(`${m[1].toUpperCase()} ${m[2]}`)
+    for (const m of src.matchAll(/HrRulePageVersions[^;]*?\.(Remove|RemoveRange|Update|UpdateRange|Attach|ExecuteDelete|ExecuteDeleteAsync|ExecuteUpdate|ExecuteUpdateAsync)\b/g)) writes.push(`${rel}: ${m[1]}`)
+    for (const m of src.matchAll(/HrRulePageVersions\.Add\(/g)) adds.push(rel)
+    if (/UPDATE\s+"?HrRulePageVersions|DELETE\s+FROM\s+"?HrRulePageVersions/i.test(src.replace(/RAISE\([^)]*\)/g, '').replace(/BEFORE (UPDATE|DELETE) ON/g, ''))) writes.push(`${rel}: raw SQL`)
+  }
+  const bad = routes.filter((r) => /^(PUT|PATCH|DELETE) /.test(r) && /version/i.test(r) || /^DELETE /.test(r))
+  return ok(routes.length > 0 && !bad.length && !writes.length && adds.length === 1,
+    `routes: ${routes.join(' · ')}; version update/delete routes [${bad}]; code that updates or deletes versions [${writes}]; HrRulePageVersions.Add in [${adds}]`)
+})
+
+// ─────────────────────────── GR1.3 — confirm ───────────────────────────
+
+check('GR1.3', 'R1', 'fake', 'confirm without a note → 400; with one: a confirmed version, Confirmed vN, one Library item with the header line, rules/search, approved, chunks indexed', async () => {
+  const editor = await rbEditor()
+  const k = stamp(), title = `Earned leave ${k}`
+  const body = `# ${title}\n\n## নিয়ম · Rules\n1. One day of earned leave for every 18 days worked (${k}).\n2. Paid at basic/30 per day.\n`
+  const c = await rbCreate(editor, { title, category: 'leave-approval', body })
+  const id = c.json?.id
+  const none = await rbConfirm(editor, id), blank = await rbConfirm(editor, id, '   ')
+  const f = await rbConfirm(editor, id, 'Matches HR_SETTLEMENT_RULES §5')
+  const page = f.json ?? {}
+  const confirmedBody = (await rbGet(editor, id, page.confirmedVersion)).json?.version
+  const named = (await library()).filter((i) => i.name === `Rulebook · ${title}`)
+  const item = await waitFor(async () => (await library()).find((i) => i.id === page.libraryItemId && i.chunkCount > 0 && i.embeddedCount === i.chunkCount))
+  const full = item ? (await asAdmin('GET', `/api/hr/library/${item.id}`)).json : null
+  const header = rbHeader(title, page.confirmedVersion, HR_ASSISTANT, String(page.confirmedAtUtc).slice(0, 10), 'leave-approval')
+  const stats = item ? (await asAdmin('GET', '/api/hr/library/index-stats')).json?.byItem?.[item.id] : null
+  ctx.gr13 = { id, title, body, itemId: item?.id, confirmedVersion: page.confirmedVersion }
+  return ok(none.status === 400 && blank.status === 400 && f.status === 200 && page.status === 'confirmed' && page.confirmedVersion === 2
+      && confirmedBody?.kind === 'confirmed' && confirmedBody?.body === body && confirmedBody?.changeNote === 'Matches HR_SETTLEMENT_RULES §5'
+      && named.length === 1 && full?.content === `${header}\n\n${body}` && full?.hrType === 'rules' && full?.mode === 'search'
+      && full?.approvedBy === HR_ASSISTANT && !!full?.approvedAt && stats?.db > 0 && stats?.index > 0 && stats?.fts > 0,
+    `no note ${none.status}, blank note ${blank.status}, with note ${f.status}: status ${page.status}, Confirmed v${page.confirmedVersion}, version kind ${confirmedBody?.kind}, body exact ${confirmedBody?.body === body}; `
+    + `Library items named "Rulebook · ${title}": ${named.length}; first line "${full?.content?.split('\n')[0]}" (expected "${header}"); content = header + body ${full?.content === `${header}\n\n${body}`}; `
+    + `${full?.hrType}/${full?.mode}, approved by ${full?.approvedBy} at ${full?.approvedAt}; chunks: vector ${stats?.db} (in memory ${stats?.index}), keyword ${stats?.fts}`)
+})
+
+// ─────────────────────────── GR1.4 — edit after confirm ───────────────────────────
+
+check('GR1.4', 'R1', 'fake', 'an edit after confirming is a draft: the Library item and Ask keep the confirmed text byte for byte until the next confirmation', async () => {
+  const g = ctx.gr13
+  if (!g?.itemId) return ok(false, 'no confirmed page from GR1.3')
+  const editor = await rbEditor()
+  const before = (await asAdmin('GET', `/api/hr/library/${g.itemId}`)).json
+  const k = stamp(), clause = `Draftonly clause ${k}`
+  const s = await rbSave(editor, g.id, `${g.body}3. ${clause}: carried-over leave is capped at 40 days.\n`, { note: 'adds clause 3' })
+  const during = (await asAdmin('GET', `/api/hr/library/${g.itemId}`)).json
+
+  const sentBefore = chatRequests().length
+  const asked = await hrChat(ctx.admin, { message: `${clause}: what does the earned leave rule say?`, items: [g.itemId] })
+  const excerpts = (chatRequests().slice(sentBefore)[0]?.body?.messages?.at(-1)?.content ?? '').split('\n\nQuestion:')[0]
+
+  const f = await rbConfirm(editor, g.id, 'clause 3 agreed')
+  const after = await waitFor(async () => {
+    const it = (await library()).find((i) => i.id === g.itemId)
+    return it && it.version > before.version && it.chunkCount > 0 && it.embeddedCount === it.chunkCount ? it : null
+  })
+  const afterFull = (await asAdmin('GET', `/api/hr/library/${g.itemId}`)).json
+  const found = ((await asAdmin('GET', `/api/hr/search?q=${encodeURIComponent(clause)}`)).json?.hits ?? []).filter((h) => h.itemId === g.itemId)
+  return ok(s.status === 200 && s.json?.status === 'confirmed' && s.json?.confirmedVersion === g.confirmedVersion && s.json?.currentVersion === g.confirmedVersion + 1
+      && s.json?.draftInProgress === true && during?.content === before?.content && during?.version === before?.version
+      && asked.status === 200 && excerpts.includes('Rulebook') && !excerpts.includes(clause)
+      && f.status === 200 && f.json?.confirmedVersion === g.confirmedVersion + 2 && afterFull?.content?.includes(clause)
+      && afterFull?.content?.startsWith(`Rulebook · ${g.title} · v${g.confirmedVersion + 2} ·`) && after?.version === before.version + 1 && found.length > 0,
+    `save ${s.status}: "Confirmed v${s.json?.confirmedVersion} · draft v${s.json?.currentVersion}", draft in progress ${s.json?.draftInProgress}; `
+    + `Library content unchanged byte for byte ${during?.content === before?.content}, version ${before?.version}→${during?.version}; `
+    + `Ask was sent the Rulebook excerpt ${excerpts.includes('Rulebook')}, the draft clause ${excerpts.includes(clause)}; `
+    + `confirm ${f.status} → v${f.json?.confirmedVersion}: item version ${before?.version}→${after?.version}, has the clause ${afterFull?.content?.includes(clause)}, keyword hits ${found.length}`)
+})
+
+// ─────────────────────────── GR1.5 — retire ───────────────────────────
+
+check('GR1.5', 'R1', 'fake', 'retire needs a note, adds a retired version; the Library item is inactive and never retrieved; the history stays readable', async () => {
+  const editor = await rbEditor(), reader = await rbReader()
+  const k = stamp(), phrase = `Quokkaclause${k}`
+  const { page, item } = await rbConfirmed(`Retire me ${k}`, `# Retire me ${k}\n\n1. ${phrase} applies to unit 9.\n`)
+  const hits = async () => ((await asAdmin('GET', `/api/hr/search?q=${phrase}`)).json?.hits ?? []).filter((h) => h.itemId === item.id).length
+  const hitsBefore = await hits()
+  const none = await rbRetire(editor, page.id)
+  const r = await rbRetire(editor, page.id, 'Replaced by the 2027 policy')
+  const it = (await library()).find((i) => i.id === item.id)
+  const hitsAfter = await hits()
+  const retrieved = ((await asAdmin('GET', `/api/hr/retrieve?q=${phrase}`)).json?.hits ?? []).filter((h) => h.itemId === item.id).length
+  const history = await rbVersions(editor, page.id)
+  const readerHistory = await as(reader, 'GET', `${RB}/${page.id}/versions`)
+  const readerPage = await rbGet(reader, page.id)
+  return ok(none.status === 400 && r.status === 200 && r.json?.status === 'retired' && history.map((v) => v.kind).join() === 'written,confirmed,retired'
+      && history.at(-1)?.changeNote === 'Replaced by the 2027 policy' && it?.isActive === false && hitsBefore > 0 && hitsAfter === 0 && retrieved === 0
+      && readerHistory.status === 200 && (readerHistory.json?.versions ?? []).some((v) => v.kind === 'retired') && readerPage.status === 200,
+    `no note ${none.status}; with note ${r.status} → ${r.json?.status}; history [${history.map((v) => `v${v.version} ${v.kind}`)}]; Library item active ${it?.isActive}; `
+    + `search hits ${hitsBefore}→${hitsAfter}, retrieve ${retrieved}; reader: history ${readerHistory.status} [${(readerHistory.json?.versions ?? []).map((v) => v.kind)}], page ${readerPage.status}`)
+})
+
+// ─────────────────────────── GR1.6 — history, diff, restore ───────────────────────────
+
+check('GR1.6', 'R1', 'fake', 'the diff of v1 and v3 marks exactly the changed lines; restoring v1 adds a restored draft whose body equals v1', async () => {
+  const file = path.join(REPO, 'frontend/src/lib/line-diff.js')
+  if (!fs.existsSync(file)) return ok(false, 'frontend/src/lib/line-diff.js does not exist')
+  const { diffLines } = await import(pathToFileURL(file).href)
+  const editor = await rbEditor()
+  const k = stamp()
+  const v1 = `# Diff page ${k}\n\n1. Alpha rule stays.\n2. Beta rule is old.\n3. Gamma rule stays.\n4. Delta rule goes.\n`
+  const v2 = `${v1}5. Temporary line.\n`
+  const v3 = `# Diff page ${k}\n\n1. Alpha rule stays.\n2. Beta rule is new.\n3. Gamma rule stays.\n5. Epsilon rule arrives.\n`
+  const c = await rbCreate(editor, { title: `GR16 diff ${k}`, body: v1 })
+  await rbSave(editor, c.json?.id, v2)
+  await rbSave(editor, c.json?.id, v3)
+  const [b1, b3] = await Promise.all([1, 3].map(async (v) => (await rbGet(editor, c.json?.id, v)).json?.version?.body ?? ''))
+  const d = diffLines(b1, b3)
+  const of = (t) => d.filter((x) => x.type === t).map((x) => x.text)
+  const want = {
+    del: ['2. Beta rule is old.', '4. Delta rule goes.'],
+    add: ['2. Beta rule is new.', '5. Epsilon rule arrives.'],
+    same: [`# Diff page ${k}`, '', '1. Alpha rule stays.', '3. Gamma rule stays.'],
+  }
+  const diffOk = ['del', 'add', 'same'].every((t) => JSON.stringify(of(t)) === JSON.stringify(want[t]))
+  const none = await rbRestore(editor, c.json?.id, 1)
+  const r = await rbRestore(editor, c.json?.id, 1, 'back to the first wording')
+  const v4 = (await rbGet(editor, c.json?.id, 4)).json?.version
+  return ok(diffOk && none.status === 400 && r.status === 200 && v4?.kind === 'restored' && v4?.body === b1 && v4?.changeNote === 'back to the first wording'
+      && r.json?.status === 'draft' && r.json?.currentVersion === 4,
+    `removed ${JSON.stringify(of('del'))}, added ${JSON.stringify(of('add'))}, unchanged ${JSON.stringify(of('same'))}; `
+    + `restore without note ${none.status}; with note ${r.status} → v${r.json?.currentVersion} ${v4?.kind}, body equals v1 ${v4?.body === b1}, status ${r.json?.status}`)
+})
+
+// ─────────────────────────── GR1.7 — permissions ───────────────────────────
+
+check('GR1.7', 'R1', 'fake', 'a reader (tab hr, not an editor) sees confirmed and retired pages only and gets 403 on every write and on drafts; editors can do all of them', async () => {
+  const editor = await rbEditor(), reader = await rbReader()
+  const k = stamp()
+  const draft = await rbCreate(editor, { title: `GR17 draft ${k}`, body: `# Draft ${k}\n\nSecret draft text ${k}.\n` })
+  const conf = await rbConfirmed(`GR17 confirmed ${k}`, `# Confirmed ${k}\n\n1. Public rule ${k}.\n`)
+  const edited = await rbSave(editor, conf.page.id, `# Confirmed ${k}\n\n1. Public rule ${k}.\n2. Unconfirmed addition ${k}.\n`)
+  const ret = await rbConfirmed(`GR17 retired ${k}`, `# Retired ${k}\n\n1. Old rule ${k}.\n`)
+  const retired = await rbRetire(editor, ret.page.id, 'eval: retired')
+  const restored = await rbRestore(editor, draft.json?.id, 1, 'eval: restored')
+  const adminSave = await rbSave(ctx.admin, draft.json?.id, `# Draft ${k}\n\nSecret draft text ${k}, edited by the admin.\n`)
+  const editorOk = { create: draft.status, save: edited.status, confirm: conf.page ? 200 : 0, retire: retired.status, restore: restored.status, adminSave: adminSave.status }
+
+  const listed = await rbIds(reader)
+  const sees = { draft: listed.includes(draft.json?.id), confirmed: listed.includes(conf.page.id), retired: listed.includes(ret.page.id) }
+  const confView = await rbGet(reader, conf.page.id)
+  const readerHistory = (await rbVersions(reader, conf.page.id)).map((v) => v.kind)
+  const reads = {
+    draftPage: (await rbGet(reader, draft.json?.id)).status,
+    draftVersion: (await rbGet(reader, conf.page.id, edited.json?.currentVersion)).status,
+    confirmedPage: confView.status,
+    retiredPage: (await rbGet(reader, ret.page.id)).status,
+  }
+  const writes = {
+    create: (await rbCreate(reader, { title: `GR17 reader ${k}`, body: 'x' })).status,
+    save: (await rbSave(reader, conf.page.id, 'tampered')).status,
+    confirm: (await rbConfirm(reader, conf.page.id, 'reader')).status,
+    retire: (await rbRetire(reader, conf.page.id, 'reader')).status,
+    restore: (await rbRestore(reader, conf.page.id, 1, 'reader')).status,
+  }
+  ctx.gr17 = conf
+  return ok(Object.values(editorOk).every((s) => s === 200 || s === 201) && !sees.draft && sees.confirmed && sees.retired
+      && reads.draftPage === 403 && reads.draftVersion === 403 && reads.confirmedPage === 200 && reads.retiredPage === 200
+      && !(confView.json?.version?.body ?? '').includes('Unconfirmed addition') && confView.json?.draftInProgress !== true
+      && readerHistory.every((t) => t === 'confirmed' || t === 'retired') && Object.values(writes).every((s) => s === 403),
+    `editors ${JSON.stringify(editorOk)}; reader's list ${JSON.stringify(sees)}; reader reads ${JSON.stringify(reads)}, confirmed page shows the draft ${(confView.json?.version?.body ?? '').includes('Unconfirmed addition')}, `
+    + `history kinds [${readerHistory}]; reader writes ${JSON.stringify(writes)}`)
+})
+
+check('GR1.7', 'R1', 'fake', 'the Rulebook\'s Library item has no edit button, and its edit route returns 409 "edit it in the Rulebook"', async () => {
+  const conf = ctx.gr17 ?? await rbConfirmed(`GR17 item ${stamp()}`, '# Item\n\n1. A rule.\n')
+  const listed = (await library()).find((i) => i.id === conf.item.id)
+  const before = (await asAdmin('GET', `/api/hr/library/${conf.item.id}`)).json?.content
+  const put = await asAdmin('PUT', `/api/hr/library/${conf.item.id}`, { content: 'tampered from the Library' })
+  const off = await asAdmin('PUT', `/api/hr/library/${conf.item.id}`, { isActive: false })
+  const del = await asAdmin('DELETE', `/api/hr/library/${conf.item.id}`)
+  const after = (await asAdmin('GET', `/api/hr/library/${conf.item.id}`)).json
+  const ui = read('frontend/src/components/hr/HrLibrary.vue')
+  return ok(listed?.rulebookPageId === conf.page.id && listed?.canEdit === false && put.status === 409 && /edit it in the Rulebook/i.test(put.text)
+      && off.status === 409 && del.status === 409 && after?.content === before && after?.isActive === true && /rulebookPageId/.test(ui) && /Rulebook/.test(ui),
+    `listed: rulebookPageId ${listed?.rulebookPageId}, canEdit ${listed?.canEdit}; PUT content ${put.status} "${put.json?.error ?? put.text.slice(0, 80)}", PUT isActive ${off.status}, DELETE ${del.status}; `
+    + `content unchanged ${after?.content === before}, still active ${after?.isActive}; HrLibrary.vue reads rulebookPageId ${/rulebookPageId/.test(ui)}`)
+})
+
+// ─────────────────────────── GR1.8 — print and download ───────────────────────────
+
+check('GR1.8', 'R1', 'fake', "the Markdown download is the version's body plus the header line; Export all confirmed has every confirmed page and no draft", async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  const a = await rbConfirmed(`GR18 alpha ${k}`, `# Alpha ${k}\n\n1. Alpha rule ${k}.\n`, 'salary')
+  const b = await rbConfirmed(`GR18 beta ${k}`, `# Beta ${k}\n\n1. Beta rule ${k}.\n`, 'attendance')
+  await rbSave(editor, b.page.id, `# Beta ${k}\n\n1. Beta rule ${k}.\n2. Beta draft line ${k}.\n`)
+  await rbCreate(editor, { title: `GR18 draft ${k}`, body: `# Draft ${k}\n\nDraft only text ${k}.\n` })
+
+  const dl = await rbFetch(editor, `${RB}/${a.page.id}/download?version=${a.page.confirmedVersion}`)
+  const expected = `${rbHeader(a.page.title, a.page.confirmedVersion, HR_ASSISTANT, String(a.page.confirmedAtUtc).slice(0, 10), 'salary')}\n\n${a.body}`
+  const exp = await rbFetch(editor, `${RB}/export`)
+  const confirmed = (await as(editor, 'GET', `${RB}?status=confirmed`)).json?.pages ?? []
+  const missing = confirmed.filter((p) => !exp.text.includes(rbHeader(p.title, p.confirmedVersion, p.confirmedBy, String(p.confirmedAtUtc).slice(0, 10), p.category)))
+  const leaks = [`Beta draft line ${k}`, `Draft only text ${k}`].filter((s) => exp.text.includes(s))
+  const salaryAt = exp.text.indexOf('## Salary'), attendanceAt = exp.text.indexOf('## Attendance')
+  return ok(dl.status === 200 && /markdown/.test(dl.type) && /attachment/.test(dl.disposition) && dl.text === expected
+      && exp.status === 200 && confirmed.length > 0 && !missing.length && !leaks.length && exp.text.includes(`Beta rule ${k}`) && salaryAt >= 0 && attendanceAt > salaryAt,
+    `download ${dl.status} ${dl.type} "${dl.disposition}", equals header + body ${dl.text === expected}; export ${exp.status}: ${confirmed.length} confirmed pages, missing [${missing.map((p) => p.title)}], `
+    + `drafts leaked [${leaks}], grouped Salary before Attendance ${salaryAt >= 0 && attendanceAt > salaryAt}`)
+})
+
+check('GR1.8', 'R1', 'any', 'the print view has the header (title, category, version, confirmed by, date) and the footer "Mostisko · মানব সম্পদ · printed <date>"', async () => {
+  const file = 'frontend/src/components/hr/HrRulePage.vue'
+  if (!fs.existsSync(path.join(REPO, file))) return ok(false, `${file} does not exist`)
+  const src = read(file), css = read('frontend/src/assets/index.css')
+  const has = {
+    print: /window\.print\(\)/.test(src) && /rulebook-print/.test(src) && /@media print/.test(css) && /rulebook-print/.test(css),
+    header: ['title', 'category', 'confirmedVersion', 'confirmedBy', 'confirmedAtUtc'].every((f) => src.includes(f)),
+    footer: src.includes('Mostisko · মানব সম্পদ · printed'),
+  }
+  return ok(Object.values(has).every(Boolean), JSON.stringify(has))
+})
+
+// ─────────────────────────── GR1.9 — Ask uses it ───────────────────────────
+
+const RB_FIXTURE_RULE = 'Fixture rule: a test allowance of 777 Tk'
+
+async function rbAskFixture(live) {
+  const k = stamp(), title = `Test allowance ${k}`
+  const { page } = await rbConfirmed(title, `# ${title}\n\n## নিয়ম · Rules\n1. ${RB_FIXTURE_RULE} is paid to every trainee in month one.\n`, 'salary')
+  const label = `[Rulebook: ${title} v${page.confirmedVersion}]`
+  const hra = await rbEditor()
+  if (!live) script((body) => {
+    const m = /\[Rulebook: [^\]]+\]/.exec(body.messages.at(-1)?.content ?? '')
+    return { words: ['Every trainee gets a test allowance of 777 Tk in month one ', m ? m[0] : '[no rulebook label]', '.'] }
+  })
+  const before = chatRequests().length
+  const r = await hrChat(hra, { message: `Fixture rule ${k}: how much is the test allowance for a trainee?` })
+  if (!live) script(null)
+  const sent = chatRequests().slice(before)[0]?.body?.messages?.at(-1)?.content ?? ''
+  const cites = (r.context?.excerpts ?? []).map((e) => e.cite)
+  return ok(r.status === 200 && sent.includes(label) && sent.includes(RB_FIXTURE_RULE) && cites.includes(label.slice(1, -1)) && r.answer.includes(label),
+    `${live ? 'live' : 'fake'}: status ${r.status}; the model was sent ${label} ${sent.includes(label)} with the rule ${sent.includes(RB_FIXTURE_RULE)}; `
+    + `receipt cites [${cites.filter(Boolean)}]; answer "${r.answer.replace(/\s+/g, ' ').slice(0, 300)}"`)
+}
+
+check('GR1.9', 'R1', 'fake', 'after confirming a page with a unique rule, Ask answers citing [Rulebook: <Title> v<N>] (fake)', () => rbAskFixture(false))
+check('GR1.9', 'R1', 'live', 'after confirming a page with a unique rule, Ask answers citing [Rulebook: <Title> v<N>] (live)', () => rbAskFixture(true))
+
+// ─────────────────────────── GR1.10 — builds ───────────────────────────
+
+check('GR1.10', 'R1', 'any', 'dotnet build: 0 warnings, 0 errors; npm run build clean', async () => {
+  const d = spawnSync('dotnet', ['build', path.join(REPO, 'backend', 'RabbitIC.Api.csproj'), '-v', 'q', '--nologo', '--no-incremental',
+    '-o', path.join(EVAL_ROOT, 'build-check-r1')], { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' })
+  const dout = (d.stdout ?? '') + (d.stderr ?? '')
+  const warnings = dout.match(/(\d+) Warning\(s\)/)?.[1], errors = dout.match(/(\d+) Error\(s\)/)?.[1]
+  const n = spawnSync('npm', ['run', 'build'], { cwd: path.join(REPO, 'frontend'), encoding: 'utf8', shell: process.platform === 'win32' })
+  const nout = (n.stdout ?? '') + (n.stderr ?? '')
+  return ok(d.status === 0 && warnings === '0' && errors === '0' && n.status === 0 && /built in/.test(nout) && !/\berror\b/i.test(nout),
+    `dotnet exit ${d.status}, ${warnings} warning(s), ${errors} error(s); npm exit ${n.status}, ${(nout.match(/built in [\d.]+m?s/) ?? ['no build line'])[0]}`
+    + `${d.status ? `\n${dout.slice(-600)}` : ''}`)
+})
+
 // ─────────────────────────── runner ───────────────────────────
 
 /** Forwards everything to the real Ollama, recording requests and each chat's final frame. */
@@ -1110,7 +1527,7 @@ function parseArgs(argv) {
   const a = { phase: 99, only: null, build: true, live: false, noSuites: false }
   for (let i = 2; i < argv.length; i++) {
     const v = argv[i]
-    if (v === '--phase') a.phase = Number(argv[++i])
+    if (v === '--phase') a.phase = String(argv[++i])
     else if (v === '--only') a.only = argv[++i]
     else if (v === '--no-build') a.build = false
     else if (v === '--live') a.live = true
@@ -1122,7 +1539,13 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv)
   ctx.args = args
-  const selected = checks.filter((c) => c.phase <= args.phase && (!args.only || c.id === args.only))
+  // "R1": the Rulebook's phases up to R1. A number: the module's phases up to it.
+  const rulebook = /^R\d+$/i.test(String(args.phase))
+  const upTo = Number(String(args.phase).replace(/^R/i, ''))
+  const selected = checks.filter((c) => (rulebook
+      ? typeof c.phase === 'string' && Number(c.phase.slice(1)) <= upTo
+      : typeof c.phase === 'number' && c.phase <= upTo)
+    && (!args.only || c.id === args.only))
     .filter((c) => c.mode === 'any' || c.mode === (args.live ? 'live' : 'fake'))
   if (!selected.length) { console.error('no checks selected'); process.exit(2) }
 

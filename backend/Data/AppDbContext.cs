@@ -27,6 +27,10 @@ public class AppDbContext : DbContext
     /// <summary>Connected sources and buyer profiles — one table, split by Kind.</summary>
     public DbSet<ContextSource> ContextSources => Set<ContextSource>();
 
+    /// <summary>মানব সম্পদ · নিয়মাবলি: HR's rule pages and their append-only history.</summary>
+    public DbSet<HrRulePage> HrRulePages => Set<HrRulePage>();
+    public DbSet<HrRulePageVersion> HrRulePageVersions => Set<HrRulePageVersion>();
+
     /// <summary>Queries the user has run. Never holds result payloads.</summary>
     public DbSet<SearchHistory> SearchHistories => Set<SearchHistory>();
 
@@ -140,6 +144,20 @@ public class AppDbContext : DbContext
 
         // Every context-source query filters on owner first, then kind.
         b.Entity<ContextSource>().HasIndex(s => new { s.OwnerUserId, s.Kind });
+
+        // The Rulebook (docs/HR_RULEBOOK_PROMPT.md §3.1). A title is unique among
+        // pages that are not retired, ignoring case. Versions are keyed by page and
+        // number, and a page can never take its versions with it (Restrict); the
+        // append-only triggers are made in SchemaUpgrade, for every database.
+        b.Entity<HrRulePage>().Property(p => p.Title).UseCollation("NOCASE");
+        b.Entity<HrRulePage>().HasIndex(p => p.Title).IsUnique().HasFilter("\"Status\" <> 'retired'");
+        b.Entity<HrRulePage>().HasIndex(p => p.LibraryItemId);
+        b.Entity<HrRulePageVersion>().HasKey(v => new { v.PageId, v.Version });
+        b.Entity<HrRulePageVersion>()
+            .HasOne<HrRulePage>()
+            .WithMany()
+            .HasForeignKey(v => v.PageId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // The history list is always "my active rows, newest run first" — this
         // index covers the filter and the sort in one.

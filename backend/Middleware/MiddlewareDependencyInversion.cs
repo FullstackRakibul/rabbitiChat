@@ -117,6 +117,7 @@ namespace RabbitIC.Api.Middleware
             var hrApi = app.MapGroup("/api").WithTags("HR Assistant");
 
             hrApi.MapHrApis();
+            hrApi.MapHrRulebookApis();
             return app;
         }
 

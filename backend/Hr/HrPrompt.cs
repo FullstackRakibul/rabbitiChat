@@ -14,7 +14,9 @@ using RabbitIC.Api.Models;
 
 namespace RabbitIC.Api.Hr;
 
-public sealed record HrExcerpt(int ChunkId, int ItemId, string ItemName, int Version, string? SourceRef, int? LineFrom, int? LineTo, string Text, int Tokens, double Score);
+/// <param name="Cite">How the excerpt is cited when it is not by its SourceRef: a Rulebook page's "Rulebook: &lt;Title&gt; v&lt;N&gt;".</param>
+public sealed record HrExcerpt(int ChunkId, int ItemId, string ItemName, int Version, string? SourceRef, int? LineFrom, int? LineTo, string Text, int Tokens, double Score,
+    string? Cite = null);
 
 public static class HrPrompt
 {
@@ -33,7 +35,7 @@ public static class HrPrompt
 
         Follow these rules in every answer:
         1. Answer only from the HR context: the library below and the excerpts sent with the question. Never answer from general knowledge or guess company policy.
-        2. After each statement, cite its source in square brackets as the context labels it: [HR_SETTLEMENT_RULES §5] for a section of a library document, or an excerpt's own label, such as [ProcessFinalSettelment.sql §Service Benefit L686-711].
+        2. After each statement, cite its source in square brackets as the context labels it: [HR_SETTLEMENT_RULES §5] for a section of a library document, or an excerpt's own label, such as [ProcessFinalSettelment.sql §Service Benefit L686-711] or, for a page of HR's Rulebook, exactly its label with nothing added inside the brackets, such as [Rulebook: Earned leave at settlement v4].
         3. When the rules document and a procedure disagree, give the rules document's answer and say that the code does something else.
         4. When the context does not cover the question, say so in one line and name the item HR would need to add. Do not answer it anyway.
         5. For one employee's amount, use only figures the user gave. If one is missing (basic, service length, status, employee type, separation date), ask for it instead of assuming.
@@ -63,8 +65,13 @@ public static class HrPrompt
         if (excerpts.Count == 0) return $"{ContextTitle}\n\n(No excerpt in the library matched this question.)";
         var sb = new System.Text.StringBuilder(ContextTitle).Append("\n\n");
         foreach (var e in excerpts)
-            sb.Append('[').Append(e.SourceRef).Append("] (").Append(e.ItemName).Append(", v").Append(e.Version).Append(")\n")
-              .Append(e.Text.Trim()).Append("\n\n");
+        {
+            // A Rulebook page is cited by page and confirmed version alone: shown its SourceRef
+            // as well, a model folds the section into the citation. The receipt keeps the lines.
+            if (e.Cite is not null) sb.Append('[').Append(e.Cite).Append("]\n");
+            else sb.Append('[').Append(e.SourceRef).Append("] (").Append(e.ItemName).Append(", v").Append(e.Version).Append(")\n");
+            sb.Append(e.Text.Trim()).Append("\n\n");
+        }
         return sb.ToString().TrimEnd();
     }
 

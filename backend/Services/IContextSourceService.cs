@@ -76,7 +76,8 @@ public interface IContextSourceService
     Task<SharedWrite> DeleteSharedAsync(User editor, string kind, int id, CancellationToken ct = default);
 }
 
-public enum SharedOutcome { Ok, NotFound, Forbidden }
+/// <summary>Conflict: the row is kept by something else (a Rulebook page's Library copy) and is changed only there.</summary>
+public enum SharedOutcome { Ok, NotFound, Forbidden, Conflict }
 
 /// <summary>The result of a write to a shared kind, and the row as stored.</summary>
 public sealed record SharedWrite(SharedOutcome Outcome, ContextSource? Item)

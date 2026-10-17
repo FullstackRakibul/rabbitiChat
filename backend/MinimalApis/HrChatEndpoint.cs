@@ -158,7 +158,7 @@ namespace RabbitIC.Api.MinimalApis
                 always = always.Select(i => new { itemId = i.Id, name = i.Name, version = i.Version, tokens = PoPromptBuilder.EstimateTokens(i.Content) }),
                 excerpts = excerpts.Select(e => new
                 {
-                    chunkId = e.ChunkId, itemId = e.ItemId, name = e.ItemName, version = e.Version, sourceRef = e.SourceRef,
+                    chunkId = e.ChunkId, itemId = e.ItemId, name = e.ItemName, version = e.Version, sourceRef = e.SourceRef, cite = e.Cite,
                     lineFrom = e.LineFrom, lineTo = e.LineTo, tokens = e.Tokens, score = e.Score,
                 }),
                 scope = req.Items ?? new List<int>(),

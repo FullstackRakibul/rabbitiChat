@@ -193,3 +193,35 @@
     font-weight: 600;
   }
 }
+
+/* মানব সম্পদ · নিয়মাবলি — a Rulebook page reads like a printed page: larger type,
+   room between numbered rules (HrRulePage.vue). */
+@layer components {
+  .rule-page.md { font-size: 1.0625rem; line-height: 1.75; }
+  .rule-page.md h1 { font-size: 1.5rem; }
+  .rule-page.md h2 { font-size: 1.2rem; margin-top: 1.5rem; }
+  .rule-page.md h3 { font-size: 1.05rem; }
+  .rule-page.md ol > li,
+  .rule-page.md ul > li { margin: 0.375rem 0; padding-left: 0.125rem; }
+}
+
+/* The Rulebook's print view: only the page's print copy prints, with its header
+   and a footer on every sheet; the app itself is hidden. HrRulePage takes the
+   dark class off while printing, so the copy always prints on the light tokens. */
+.rulebook-print { display: none; }
+
+@media print {
+  @page { margin: 16mm 16mm 20mm; }
+  body > #app { display: none !important; }
+  .rulebook-print { display: block; padding-bottom: 2rem; color: hsl(var(--foreground)); }
+  .rulebook-print-header { margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid hsl(var(--border)); font-size: 0.85rem; }
+  .rulebook-print-header h1 { margin: 0.25rem 0 0.375rem; font-size: 1.6rem; font-weight: 600; }
+  .rulebook-print-header p { margin: 0.125rem 0; }
+  .rulebook-print-kicker { text-transform: uppercase; letter-spacing: 0.04em; color: hsl(var(--muted-foreground)); }
+  .rulebook-print-warning { font-weight: 600; }
+  .rulebook-print-footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding-top: 0.25rem; border-top: 1px solid hsl(var(--border));
+    font-size: 0.75rem; color: hsl(var(--muted-foreground));
+  }
+}

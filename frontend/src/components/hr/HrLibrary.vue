@@ -10,7 +10,9 @@
  * them off, and previews a search item's chunks.
  *
  * Who may change the library is the server's decision, reported as `canEdit`;
- * this component only hides the controls that would be refused.
+ * this component only hides the controls that would be refused. A Rulebook
+ * page's confirmed copy (`rulebookPageId`) carries a Rulebook badge and no edit
+ * controls: it is changed only from the Rulebook (the server answers 409).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
@@ -410,6 +412,9 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
                 {{ TYPE_LABELS[item.hrType]?.bn ?? item.hrType }}
                 <span class="text-muted-foreground">{{ TYPE_LABELS[item.hrType]?.en ?? '' }}</span>
               </Badge>
+              <Badge v-if="item.rulebookPageId" class="font-normal" data-rulebook-item :title="'Rulebook page ' + item.rulebookPageId">
+                নিয়মাবলি <span class="opacity-80">Rulebook</span>
+              </Badge>
               <Badge variant="outline" class="font-normal">
                 {{ MODE_LABELS[item.mode]?.bn ?? item.mode }}
                 <span class="text-muted-foreground">{{ MODE_LABELS[item.mode]?.en ?? '' }}</span>
@@ -458,6 +463,11 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
                 <RefreshCw v-else class="h-3.5 w-3.5" />
                 আবার চেষ্টা <span class="text-xs text-muted-foreground">Retry</span>
               </Button>
+              <!-- A Rulebook page's copy is changed only from the Rulebook, so its paper trail can't be bypassed. -->
+              <span v-if="item.rulebookPageId" class="px-2 text-xs text-muted-foreground">
+                নিয়মাবলিতে সম্পাদনা করুন <span>(edit it in the Rulebook)</span>
+              </span>
+              <template v-else>
               <label class="flex h-8 items-center gap-1.5 px-2 text-xs text-muted-foreground" :title="item.isActive ? 'On' : 'Off'">
                 <Switch :model-value="item.isActive" :disabled="busy !== 0" @update:model-value="(v) => setActive(item, v)" />
                 চালু
@@ -473,6 +483,7 @@ const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '')
               <Button size="icon" variant="ghost" class="h-8 w-8 text-destructive" aria-label="Delete" :disabled="busy !== 0" @click="remove(item)">
                 <Trash2 class="h-3.5 w-3.5" />
               </Button>
+              </template>
             </template>
           </div>
         </div>

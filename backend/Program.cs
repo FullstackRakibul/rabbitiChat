@@ -176,6 +176,8 @@ builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
 
 // ---- মানব সম্পদ (HR Assistant): the HR library (docs/HR_MODULE_PROMPT.md) ----
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
+// মানব সম্পদ · নিয়মাবলি: HR's rule pages, their append-only history and their Library copies.
+builder.Services.AddScoped<RabbitIC.Api.Hr.HrRulebook>();
 // Embeddings for the HR library are made in the background, one item at a time;
 // a save or a 200-file upload never waits on Ollama.
 builder.Services.AddSingleton<RabbitIC.Api.Hr.HrIndexer>();

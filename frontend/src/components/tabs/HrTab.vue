@@ -2,22 +2,29 @@
 /**
  * মানব সম্পদ (HR Assistant) — the tab (docs/HR_MODULE_PROMPT.md §3.4).
  *
- * Two sections: প্রশ্ন (Ask), the HR chat with instant search and its own
- * conversation list, and লাইব্রেরি (Library), HR's context. Ask is what HR opens
- * the tab for, so it comes first.
+ * Three sections: প্রশ্ন (Ask), the HR chat with instant search and its own
+ * conversation list; লাইব্রেরি (Library), HR's context; and নিয়মাবলি (Rulebook),
+ * HR's own rule pages with their paper trail (docs/HR_RULEBOOK_PROMPT.md). Ask is
+ * what HR opens the tab for, so it comes first.
  *
  * Bengali labels with English in smaller text, theme tokens only.
  */
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import HrAsk from '@/components/hr/HrAsk.vue'
 import HrLibrary from '@/components/hr/HrLibrary.vue'
+import HrRulebook from '@/components/hr/HrRulebook.vue'
 
 const SECTIONS = [
   { key: 'ask', bn: 'প্রশ্ন', en: 'Ask' },
   { key: 'library', bn: 'লাইব্রেরি', en: 'Library' },
+  { key: 'rulebook', bn: 'নিয়মাবলি', en: 'Rulebook' },
 ]
 
 const section = ref('ask')
+
+/** Sections opened at least once; the Rulebook loads on its first visit and then stays. */
+const visited = ref({ ask: true })
+watch(section, (s) => { visited.value[s] = true })
 </script>
 
 <template>
@@ -51,6 +58,11 @@ const section = ref('ask')
       <div class="mx-auto w-full max-w-5xl">
         <HrLibrary />
       </div>
+    </div>
+
+    <!-- Kept mounted once opened, so a page being edited survives a look at Ask or the Library. -->
+    <div v-if="visited.rulebook" v-show="section === 'rulebook'" class="min-h-0 flex-1 overflow-y-auto">
+      <HrRulebook />
     </div>
   </div>
 </template>

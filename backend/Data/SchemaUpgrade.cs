@@ -32,6 +32,7 @@ public static class SchemaUpgrade
         EnsureMessageWebSearchColumn(db);
         EnsureContextSourceTable(db);
         EnsureHrLibrarySchema(db);
+        EnsureHrRulebookSchema(db);
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
@@ -474,6 +475,66 @@ public static class SchemaUpgrade
     /// Runs a literal ADD COLUMN only when the column is absent, so the upgrade is
     /// idempotent on a database that already has it.
     /// </summary>
+    /// <summary>
+    /// মানব সম্পদ · নিয়মাবলি (docs/HR_RULEBOOK_PROMPT.md §3.1). The two tables, for
+    /// a database made before the Rulebook (EnsureCreated makes them on a new
+    /// file, from the EF model, with the same shape), and on every database the
+    /// triggers that make HrRulePageVersions append-only: SQLite itself refuses an
+    /// UPDATE or DELETE of a saved version, whoever sends it. Run() reaches here on
+    /// a new file too (EnsureCreated has made Conversations by then), so a fresh
+    /// database and an upgraded one end up with the same triggers.
+    /// </summary>
+    public static void EnsureHrRulebookSchema(AppDbContext db)
+    {
+        if (!TableExists(db, "HrRulePages"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrRulePages"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_HrRulePages"" PRIMARY KEY AUTOINCREMENT,
+                    ""Title"" TEXT COLLATE NOCASE NOT NULL,
+                    ""Category"" TEXT NOT NULL,
+                    ""Language"" TEXT NOT NULL,
+                    ""Status"" TEXT NOT NULL,
+                    ""CurrentVersion"" INTEGER NOT NULL,
+                    ""ConfirmedVersion"" INTEGER NULL,
+                    ""LibraryItemId"" INTEGER NULL,
+                    ""CreatedByUserId"" INTEGER NOT NULL,
+                    ""CreatedAtUtc"" TEXT NOT NULL,
+                    ""UpdatedAtUtc"" TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE UNIQUE INDEX ""IX_HrRulePages_Title"" ON ""HrRulePages"" (""Title"") WHERE ""Status"" <> 'retired';");
+            db.Database.ExecuteSqlRaw(
+                @"CREATE INDEX ""IX_HrRulePages_LibraryItemId"" ON ""HrRulePages"" (""LibraryItemId"");");
+        }
+
+        if (!TableExists(db, "HrRulePageVersions"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrRulePageVersions"" (
+                    ""PageId"" INTEGER NOT NULL,
+                    ""Version"" INTEGER NOT NULL,
+                    ""Kind"" TEXT NOT NULL,
+                    ""Body"" TEXT NOT NULL,
+                    ""ChangeNote"" TEXT NULL,
+                    ""AuthorUserId"" INTEGER NOT NULL,
+                    ""AtUtc"" TEXT NOT NULL,
+                    ""SourcesJson"" TEXT NULL,
+                    ""ModelJson"" TEXT NULL,
+                    CONSTRAINT ""PK_HrRulePageVersions"" PRIMARY KEY (""PageId"", ""Version""),
+                    CONSTRAINT ""FK_HrRulePageVersions_HrRulePages_PageId"" FOREIGN KEY (""PageId"")
+                        REFERENCES ""HrRulePages"" (""Id"") ON DELETE RESTRICT
+                );");
+        }
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""HrRulePageVersions_NoUpdate"" BEFORE UPDATE ON ""HrRulePageVersions""
+            BEGIN SELECT RAISE(ABORT, 'HrRulePageVersions is append-only: a saved version is never updated'); END");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""HrRulePageVersions_NoDelete"" BEFORE DELETE ON ""HrRulePageVersions""
+            BEGIN SELECT RAISE(ABORT, 'HrRulePageVersions is append-only: a saved version is never deleted'); END");
+    }
+
     private static void AddColumnIfMissing(AppDbContext db, string table, string column, string ddl)
     {
         if (!ColumnExists(db, table, column)) db.Database.ExecuteSqlRaw(ddl);

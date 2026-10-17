@@ -26,6 +26,7 @@ import {
 import MarkdownBody from '@/components/MarkdownBody.vue'
 import { Button } from '@/components/ui/button'
 import HrItemViewer from '@/components/hr/HrItemViewer.vue'
+import { escapeHtml, withFormulas } from '@/lib/hr-text'
 
 const EXAMPLES = [
   'Schedule-A কর্মী ৭ বছর ৮ মাস চাকরি করে ইস্তফা দিলে সার্ভিস বেনিফিট কীভাবে হিসাব হয়?',
@@ -182,33 +183,8 @@ function askAbout(hit) {
 
 // ---- rendering ----
 
-const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
 /** "…«match»…" → highlighted, with everything else escaped. */
 const snippetHtml = (s) => escapeHtml(s ?? '').replace(/«/g, '<mark class="rounded-sm bg-primary/15 px-0.5 text-foreground">').replace(/»/g, '</mark>')
-
-/** For a title attribute: escaped, and without brackets the citation pass would read as a citation. */
-const attr = (s) => escapeHtml(s).replace(/\[/g, '&#91;').replace(/\]/g, '&#93;')
-
-/**
- * Each amount the server calculated, wrapped where it sits (the server sends its
- * offset), so hovering or tapping it shows the formula. Inserted from the end, so
- * the earlier offsets stay valid.
- */
-function withFormulas(content, formulas) {
-  let text = content || ''
-  const list = (formulas ?? []).map((f, i) => ({ ...f, i }))
-    .filter((f) => f.offset >= 0 && f.offset + f.length <= text.length)
-    .sort((a, b) => b.offset - a.offset)
-  for (const f of list) {
-    const title = f.ok ? `= ${f.expression}` : `${f.expression} — ${f.error ?? ''}`
-    const cls = f.ok
-      ? 'cursor-help rounded-sm bg-primary/10 px-0.5 font-medium underline decoration-dotted underline-offset-2'
-      : 'cursor-help rounded-sm bg-destructive/10 px-0.5 text-destructive dark:text-foreground'
-    text = `${text.slice(0, f.offset)}<span data-formula="${f.i}" title="${attr(title)}" class="${cls}">${escapeHtml(text.slice(f.offset, f.offset + f.length))}</span>${text.slice(f.offset + f.length)}`
-  }
-  return text
-}
 
 /**
  * The answer's markdown with every [citation] made a button that opens the cited
@@ -224,7 +200,8 @@ function withCites(content) {
 
 /** A citation → the item and place to open, from what this answer was sent, then from the library by name. */
 function resolveCite(message, label) {
-  const excerpt = message.context?.excerpts?.find((e) => e.sourceRef === label)
+  // A Rulebook page is cited as "Rulebook: <Title> v<N>" (its `cite`); anything else by its SourceRef.
+  const excerpt = message.context?.excerpts?.find((e) => e.cite === label || e.sourceRef === label)
   if (excerpt) return { itemId: excerpt.itemId, label, lineFrom: excerpt.lineFrom, lineTo: excerpt.lineTo }
 
   const known = [...(message.context?.always ?? []).map((a) => ({ id: a.itemId, name: a.name })), ...items.value.map((i) => ({ id: i.id, name: i.name }))]

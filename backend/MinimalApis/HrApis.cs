@@ -10,6 +10,7 @@
 //   DELETE /api/hr/library/{id}                                                  (HrAssistant, SystemAdmin)
 //   POST   /api/hr/library/{id}/retry      re-queue an item whose embedding failed (editors)
 //   POST   /api/hr/library/embed           re-queue every item with un-embedded chunks (editors)
+//   (A Rulebook page's Library copy answers PUT and DELETE with 409: it is edited in the Rulebook.)
 //   GET    /api/hr/library/index-stats     chunks in memory / database / keyword index (SystemAdmin)
 // Ask
 //   GET    /api/hr/search?q=…&items=…      instant hybrid search, no model
@@ -129,6 +130,7 @@ namespace RabbitIC.Api.MinimalApis
                 {
                     SharedOutcome.Ok => Results.Ok(item),
                     SharedOutcome.Forbidden => Forbidden(),
+                    SharedOutcome.Conflict => RulebookOwned(),
                     _ => Results.NotFound(),
                 };
             });
@@ -141,6 +143,7 @@ namespace RabbitIC.Api.MinimalApis
                 {
                     SharedOutcome.Ok => Results.NoContent(),
                     SharedOutcome.Forbidden => Forbidden(),
+                    SharedOutcome.Conflict => RulebookOwned(),
                     _ => Results.NotFound(),
                 };
             });
@@ -256,6 +259,10 @@ namespace RabbitIC.Api.MinimalApis
         // Not Results.Forbid(): it needs an authentication scheme this app has none of.
         private static IResult Forbidden() =>
             Results.Json(new { error = "Only hr-assistant and SystemAdmin users can change the HR library." }, statusCode: 403);
+
+        /// <summary>A Rulebook page's Library copy: changed only from the Rulebook (docs/HR_RULEBOOK_PROMPT.md §3.3).</summary>
+        private static IResult RulebookOwned() =>
+            Results.Json(new { error = HrLibrary.RulebookOwned }, statusCode: StatusCodes.Status409Conflict);
 
         private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
