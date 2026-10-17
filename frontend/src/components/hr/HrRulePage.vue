@@ -48,7 +48,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { diffLines, diffStats } from '@/lib/line-diff'
-import { attr, escapeHtml, markUnverified, taka, withFormulas } from '@/lib/hr-text'
+import { attr, escapeHtml, markUnknownSources, markUnverified, taka, UNKNOWN_SOURCE, withFormulas } from '@/lib/hr-text'
 import { toDate } from '@/lib/time'
 
 const props = defineProps({
@@ -112,6 +112,8 @@ const printedAt = ref(new Date())
 /** The number check of the version shown (editors): { unverified, failedFormulas, generatedVersion }. */
 const check = ref(null)
 const unverified = computed(() => check.value?.unverified ?? [])
+/** Citations that name no place the page was drafted from: "unknown source". */
+const unknownSources = computed(() => check.value?.unknownSources ?? [])
 
 /** Draft from library: the dialog's fields, and the draft while it streams. */
 const gen = ref(null)              // { title, category, language, items: [], instruction, keywords, filter }
@@ -130,7 +132,7 @@ const shown = computed(() => page.value?.version ?? null)
 const latest = computed(() => !page.value || shown.value?.version === page.value.currentVersion)
 const category = computed(() => props.categories.find((c) => c.key === (editing.value ? form.value.category : page.value?.category)))
 const pageHtml = computed(() => (shown.value
-  ? markUnverified(withSources(withFormulas(shown.value.display, shown.value.formulas), shown.value.sources), unverified.value)
+  ? markUnknownSources(markUnverified(withSources(withFormulas(shown.value.display, shown.value.formulas), shown.value.sources), unverified.value), unknownSources.value)
   : ''))
 const retired = computed(() => page.value?.status === 'retired')
 const canConfirm = computed(() => props.canEdit && page.value && !retired.value && page.value.confirmedVersion !== page.value.currentVersion)
@@ -215,7 +217,7 @@ function withPreviewFormulas(text) {
 
 const previewHtml = computed(() => {
   calcTick.value   // re-render when an answer arrives
-  return markUnverified(withPreviewFormulas(form.value.body), unverified.value)
+  return markUnknownSources(markUnverified(withPreviewFormulas(form.value.body), unverified.value), unknownSources.value)
 })
 
 // ───────────────────────── sources ─────────────────────────
@@ -334,13 +336,14 @@ function goBack() {
 
 async function openDialog(action, version) {
   error.value = ''
-  const d = { action, version, note: '', summary: null, firstConfirmation: false, unverified: [], failedFormulas: [] }
+  const d = { action, version, note: '', summary: null, firstConfirmation: false, unverified: [], failedFormulas: [], unknownSources: [] }
   if (action === 'confirm') {
     // What changed since the last confirmation: the confirmed text against the latest.
     try {
       const latestCheck = await checkRulePage(props.pageId)
       d.unverified = latestCheck.unverified ?? []
       d.failedFormulas = latestCheck.failedFormulas ?? []
+      d.unknownSources = latestCheck.unknownSources ?? []
       const current = latest.value ? page.value.version.body : (await getRulePage(props.pageId)).version.body
       if (page.value.confirmedVersion) {
         const before = (await getRulePage(props.pageId, page.value.confirmedVersion)).version.body
@@ -487,9 +490,11 @@ async function download() {
           <p class="mt-1 text-xs text-muted-foreground">শেষ হলে খসড়াটি টেমপ্লেট অনুযায়ী সাজিয়ে একটি নতুন সংস্করণ হিসেবে রাখা হবে — নিশ্চিত নয়। When it ends, the draft is put into the template and saved as a new version — not confirmed.</p>
         </section>
 
-        <p v-if="unverified.length && !streaming" class="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm" data-testid="unverified-line">
+        <p v-if="(unverified.length || unknownSources.length) && !streaming" class="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm" data-testid="unverified-line">
           <TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-          <span>এই সংখ্যাগুলো খসড়ার উৎসে পাওয়া যায়নি: {{ unverified.map(taka).join(', ') }}।
+          <span>
+            <template v-if="unverified.length">এই সংখ্যাগুলো খসড়ার উৎসে পাওয়া যায়নি: {{ unverified.map(taka).join(', ') }}। </template>
+            <template v-if="unknownSources.length">{{ UNKNOWN_SOURCE }}: {{ unknownSources.map((s) => `[${s}]`).join(', ') }}। </template>
             <span class="text-xs text-muted-foreground">Not found in the sources this page was drafted from — check them before confirming.</span></span>
         </p>
         <!-- Editor -->
@@ -664,11 +669,12 @@ async function download() {
           </template>
         </div>
 
-        <div v-if="dialog.action === 'confirm' && (dialog.unverified.length || dialog.failedFormulas.length)"
+        <div v-if="dialog.action === 'confirm' && (dialog.unverified.length || dialog.failedFormulas.length || dialog.unknownSources.length)"
           class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="confirm-unverified">
           <p class="flex items-center gap-2 font-medium"><TriangleAlert class="size-4 text-destructive" aria-hidden="true" /> যাচাই করা যায়নি · Not verified</p>
           <p v-if="dialog.unverified.length" class="mt-1">উৎসে পাওয়া যায়নি · Not in the sources: {{ dialog.unverified.map(taka).join(', ') }}</p>
           <p v-if="dialog.failedFormulas.length" class="mt-1 font-mono text-xs">গণনা করা যায়নি · Could not be worked out: {{ dialog.failedFormulas.join(' · ') }}</p>
+          <p v-if="dialog.unknownSources.length" class="mt-1">{{ UNKNOWN_SOURCE }}: <span class="font-mono text-xs">{{ dialog.unknownSources.map((s) => `[${s}]`).join(' · ') }}</span></p>
         </div>
 
         <div class="grid gap-1.5">

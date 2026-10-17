@@ -1,0 +1,228 @@
+Column,Value,Label,Source
+EmpTypeID,1,Management,Common_EmploymentType
+EmpTypeID,2,Non-Management,Common_EmploymentType
+EmpTypeID,3,Schedule-A,Common_EmploymentType
+EmpTypeID,4,Schedule-B,Common_EmploymentType
+EmpTypeID,5,Day Labour,Common_EmploymentType
+EmpTypeID,6,Test (inactive),Common_EmploymentType
+EmpCategoryID,1,Permanent,EmpCategory
+EmpCategoryID,2,Contractual,EmpCategory
+EmpCategoryID,3,Expatriate,EmpCategory
+EmpCategoryID,4,Project Staff,EmpCategory
+EmpCategoryID,5,Hour Basis,EmpCategory
+EmpCategoryID,6,Day Basis,EmpCategory
+EmpStatusID,1,Active,Common_EmploymentStatus
+EmpStatusID,2,Retirement,Common_EmploymentStatus
+EmpStatusID,3,Resignation,Common_EmploymentStatus
+EmpStatusID,4,Termination,Common_EmploymentStatus
+EmpStatusID,5,Left,Common_EmploymentStatus
+EmpStatusID,6,Suspension,Common_EmploymentStatus
+EmpStatusID,7,Unauthorized Absence (UA),Common_EmploymentStatus
+EmpStatusID,8,Death,Common_EmploymentStatus
+EmpStatusID,9,Dismiss,Common_EmploymentStatus
+EmpStatusID,10,Discharge,Common_EmploymentStatus
+EmpStatusID,11,Retrenchment,Common_EmploymentStatus
+EmpStatusID,12,Contract Expiration,Common_EmploymentStatus
+EmpStatusID,13,Removal,Common_EmploymentStatus
+EmpStatusID,14,Tongi Team Payroll,Common_EmploymentStatus
+EmpStatusID,15,Discontinuation,Common_EmploymentStatus
+EmpStatusID,16,Extra,Common_EmploymentStatus
+PaymentModeId,1,Bank,PaymentMode
+PaymentModeId,2,Cash,PaymentMode
+PaymentModeId,3,Cheque,PaymentMode
+CalculationFormulaId,1,Non Management,salary formula table
+CalculationFormulaId,2,Management,salary formula table
+CalculationFormulaId,3,Non Management (Denim),salary formula table
+CalculationFormulaId,4,Management (Factory),salary formula table
+CalculationFormulaId,5,Non Management (SPL),salary formula table
+CalculationFormulaId,6,Worker - A (Garments),salary formula table
+CalculationFormulaId,7,Management (Denim),salary formula table
+CalculationFormulaId,8,Hourly/Labor,salary formula table
+CalculationFormulaId,9,Management (50%),salary formula table
+CalculationFormulaId,10,Plastic Gazette,salary formula table
+CalculationFormulaId,11,Management (C&F),salary formula table
+CalculationFormulaId,12,Non Management (C&F),salary formula table
+CalculationFormulaId,13,Management (60%),salary formula table
+SalaryHeadId,1,Basic,salary formula table
+SalaryHeadId,2,House Rent,salary formula table
+SalaryHeadId,3,Conveyance,salary formula table
+SalaryHeadId,4,Food,salary formula table
+SalaryHeadId,5,Others,salary formula table
+SalaryHeadId,6,Medical,salary formula table
+ZoneId,1,Corporate Head Office,zone table
+ZoneId,2,Ashulia,zone table
+ZoneId,3,Tongi,zone table
+ZoneId,4,Dhaka,zone table
+ZoneId,5,Mawna,zone table
+ZoneId,6,Tangail,zone table
+ZoneId,7,Sylhet,zone table
+ZoneId,8,Kaliganj,zone table
+ZoneId,9,Chottagram,zone table
+ZoneId,10,Pagar,zone table
+ZoneId,11,Vogra,zone table
+CompanyId,1,HO Ha-Meem Group,company table
+CompanyId,2,AGL Apparel Gallery Ltd.,company table
+CompanyId,3,ADL Artistic Design Ltd.,company table
+CompanyId,4,BECL Bango Engineering Company Ltd.,company table
+CompanyId,5,BWL Bright Wash Ltd.,company table
+CompanyId,6,CCL Creative Collections Ltd.,company table
+CompanyId,7,CWDL Creative Wash Ltd.,company table
+CompanyId,8,ELL Explore Lingerie Limited,company table
+CompanyId,9,EWDL Express Washing & Dyeing Limited,company table
+CompanyId,10,FCKL Fauji Chat Kal Limited,company table
+CompanyId,11,HAL Ha-Meem Apparels Limited,company table
+CompanyId,12,HDL Ha-Meem Design Limited,company table
+CompanyId,13,HDML Ha-Meem Denim Limited,company table
+CompanyId,14,MHJML M. H. Jute Mills Limited,company table
+CompanyId,15,MCCL Modern Cargo Carrier Limited,company table
+CompanyId,16,NCL Next Collections Ltd.,company table
+CompanyId,17,NPPL Nishat Packaging & Printing Ind. Ltd.,company table
+CompanyId,18,RGL Refat Garments Ltd.,company table
+CompanyId,19,RPPIL Refat Packaging & Printing Industries Ltd.,company table
+CompanyId,20,SWDL Sajid Washing & Dyeing Ltd,company table
+CompanyId,21,SPIL Sakib Poly Industries Ltd.,company table
+CompanyId,22,SPL Sylhet Planters Ltd.,company table
+CompanyId,23,TIFL That's It Fashions Ltd.,company table
+CompanyId,24,TIGL That's It Garments Ltd.,company table
+CompanyId,25,TIKL That's It Knit Ltd.,company table
+CompanyId,26,TISWL Thats It Sports Wear Ltd,company table
+CompanyId,27,TISL That's It Sweater Ltd.,company table
+CompanyId,28,TML Times Media Ltd.,company table
+CompanyId,29,NJML Nishat Jute Mills Ltd.,company table
+CompanyId,30,HSML Ha-Meem Spinning Mills Limited,company table
+CompanyId,31,MWDL Modern Washing And Dyeing Ind. Ltd.,company table
+CompanyId,32,EGL Explore Garments Ltd.,company table
+CompanyId,33,SZWDL Shahzaib Washing & Dyeing Limited,company table
+CompanyId,34,CGL Casual Garments Ltd.,company table
+CompanyId,37,HTL Ha-Meem Textiles Limited,company table
+CompanyId,38,Muslim Cotton Mills Limited,company table
+CompanyId,39,HAPL Humana Apparels (Pvt) Ltd,company table
+CompanyId,41,NCP Nishat Central Project,company table
+CompanyId,45,CH24 Channel 24,company table
+CompanyId,46,RU Rotor Unit,company table
+CompanyId,53,TIEA That`s It Embroidery And Accessories,company table
+CompanyId,59,HTZ Central Ha-meem Textile Zone,company table
+CompanyId,61,YD Yarn Dyeing,company table
+CompanyId,69,NWL Next Wash Limited,company table
+CompanyId,73,TSTIL Trend Setters Trims Industries Ltd,company table
+CompanyId,79,HCTPAL Ha-Meem Ching Tai Pocketing & Accessories Ltd,company table
+UnitId,1,Corporate Office,unit table
+UnitId,2,CCL Unit - 01B,unit table
+UnitId,3,CCL Unit - 02,unit table
+UnitId,4,CCL Unit - 03,unit table
+UnitId,5,CCL Unit - 04,unit table
+UnitId,6,CCL-C-Bond,unit table
+UnitId,7,TSWL Unit - 01,unit table
+UnitId,8,TSWL Unit - 02,unit table
+UnitId,9,TSWL Unit - 03,unit table
+UnitId,10,TSWL Unit - 04,unit table
+UnitId,11,TSWL Unit - 05,unit table
+UnitId,12,Dhaka Office,unit table
+UnitId,13,Luhayuni Garden,unit table
+UnitId,14,Holichera Garden,unit table
+UnitId,15,Tea Factory,unit table
+UnitId,16,TSWL Unit - 04B,unit table
+UnitId,17,Channel 24,unit table
+UnitId,18,Daily Samakal,unit table
+UnitId,19,Sampling,unit table
+UnitId,20,CCL Unit - 01A,unit table
+UnitId,21,Chittagong Office,unit table
+UnitId,22,NCL Unit-1,unit table
+UnitId,23,NCL Unit-2,unit table
+UnitId,24,NCL-Central,unit table
+UnitId,25,TSWL-Central,unit table
+UnitId,26,TIKL,unit table
+UnitId,27,Textile Head Office,unit table
+UnitId,28,M. H. Jute Unit,unit table
+UnitId,29,Kaligonj (Central),unit table
+UnitId,30,TIFL-Vogra,unit table
+UnitId,31,HTL-Denim Unit,unit table
+UnitId,32,HTL-Woven Unit,unit table
+UnitId,33,NPPL-Printing,unit table
+UnitId,34,CCL Bond,unit table
+UnitId,35,FCKL-Central,unit table
+UnitId,36,HG-Chittagong,unit table
+UnitId,37,HG-MCCL,unit table
+UnitId,38,HDL Unit-1,unit table
+UnitId,39,HTL-Spinning Unit,unit table
+UnitId,40,BECL-Engineering,unit table
+UnitId,41,CCL-Embroidary,unit table
+UnitId,42,CCL-Printing,unit table
+UnitId,43,CCL Central,unit table
+UnitId,44,EGL-Unit - 01,unit table
+UnitId,45,Corporate Office Tongi Zone,unit table
+UnitId,46,ADL-Unit-2,unit table
+UnitId,47,ADL-Unit-1,unit table
+UnitId,48,ADL-Central,unit table
+UnitId,49,TISWL-Belt Factory,unit table
+UnitId,50,SZWDL - Deying Unit,unit table
+UnitId,51,CGL Unit-01,unit table
+UnitId,53,EGL-Central Unit,unit table
+UnitId,54,AGL-Unit-01,unit table
+UnitId,55,AGL-Unit-03,unit table
+UnitId,56,BWDL-1,unit table
+UnitId,57,BWDL-2,unit table
+UnitId,58,Sample Tongi Zone,unit table
+UnitId,59,EWDL,unit table
+UnitId,60,SZWDL - Washing Unit,unit table
+UnitId,61,AGL-Unit-02,unit table
+UnitId,62,RGL-Central,unit table
+UnitId,63,SPIL,unit table
+UnitId,64,CGL Unit-02,unit table
+UnitId,65,CGL Central Unit,unit table
+UnitId,66,HDL-Embroidary,unit table
+UnitId,67,RPPIL-Auto,unit table
+UnitId,68,RPPIL-Manual,unit table
+UnitId,69,SWDL,unit table
+UnitId,70,CWDL-Unit-1,unit table
+UnitId,71,CWDL-Unit-2,unit table
+UnitId,72,CWDL-Unit-3,unit table
+UnitId,73,CWDL-Unit-4,unit table
+UnitId,74,NCP-Tongi,unit table
+UnitId,75,Creative Wash Ltd.-Lab,unit table
+UnitId,76,Creative Wash Ltd.-Central Laser Unit,unit table
+UnitId,77,Creative Wash Central,unit table
+UnitId,78,Hameem Industrial Park,unit table
+UnitId,79,TISL-Ashulia,unit table
+UnitId,81,Humana Apparels (Pvt) Ltd - JV-Unit-1,unit table
+UnitId,82,RGL-BELT,unit table
+UnitId,85,NCP,unit table
+UnitId,86,Zone Central,unit table
+UnitId,87,HTL-Rotor Unit,unit table
+UnitId,90,AGL-Unit-04,unit table
+UnitId,91,ADL-Unit-3,unit table
+UnitId,92,Site Office,unit table
+UnitId,93,RGL,unit table
+UnitId,94,EGL-Unit-02,unit table
+UnitId,95,EGL-Unit-1B,unit table
+UnitId,96,Explore Embroidery,unit table
+UnitId,97,Embroidery,unit table
+UnitId,98,Screen Printing,unit table
+UnitId,99,Woven Label,unit table
+UnitId,100,"Belt, Twill Tape & Elastic",unit table
+UnitId,102,17 Bigha,unit table
+UnitId,104,TIEA Embroidery,unit table
+UnitId,105,TIEA Screen Printing,unit table
+UnitId,106,TIEA Woven Label,unit table
+UnitId,107,"TIEA Belt, Twill Tape & Elastic",unit table
+UnitId,108,HTZ Central,unit table
+UnitId,109,CGL Unit-03,unit table
+UnitId,110,Merchant Central,unit table
+UnitId,111,Corporate Office Tongi-Merchant,unit table
+UnitId,112,Ashulia-Sample B,unit table
+UnitId,113,EGL Unit 03,unit table
+UnitId,114,Yarn Dyeing,unit table
+UnitId,115,Day Labour,unit table
+UnitId,116,Sampling TIFL,unit table
+UnitId,117,Sample Kaliganj,unit table
+UnitId,118,NWL Unit-1,unit table
+UnitId,119,HDL Unit-2,unit table
+UnitId,120,HDL Central,unit table
+UnitId,121,Ashulia Zone,unit table
+UnitId,122,RGL-Sample,unit table
+UnitId,123,Trend Setters Trims Industries Ltd,unit table
+UnitId,124,HTL-Recycle Plant,unit table
+UnitId,125,HCTPAL,unit table
+UnitId,126,HTL-Rotor Extension,unit table
+UnitId,130,BWDL-3,unit table
+UnitId,131,RPPIL-2,unit table

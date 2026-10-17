@@ -57,9 +57,11 @@ public sealed record HrHitDto(
 /// One hybrid-search result. Score is the reciprocal-rank sum; each side's own
 /// rank is kept so the merge can be checked (null: that side did not find it).
 /// </summary>
+/// <param name="HeadingMatch">A heading of the chunk holds a word of the query; the score includes the heading bonus.</param>
 public sealed record HrSearchHit(
     int ChunkId, int ItemId, string ItemName, int Version, string? SourceRef, string? Section,
-    int? LineFrom, int? LineTo, double Score, int? VectorRank, int? KeywordRank, string Text, string? Snippet);
+    int? LineFrom, int? LineTo, double Score, int? VectorRank, int? KeywordRank, string Text, string? Snippet,
+    bool HeadingMatch = false);
 
 /// <summary>Create or change an item. Null members mean "leave unchanged"; ApprovedBy "" clears the approval.</summary>
 public sealed record HrItemInput(
@@ -71,7 +73,10 @@ public sealed class HrLibrary(
 {
     public const string Kind = ContextSource.KindHr;
 
-    public static readonly string[] Types = { "rules", "procedure", "codes", "note" };
+    /// <summary>"glossary": the Bengali ↔ English term list the search reads (HrGlossary); at most one active.</summary>
+    public const string GlossaryType = "glossary";
+
+    public static readonly string[] Types = { "rules", "procedure", "codes", "note", GlossaryType };
     public static readonly string[] Modes = { "always", "search" };
     public static readonly string[] UploadExtensions = { ".md", ".txt", ".sql", ".json", ".csv", ".pdf", ".xlsx" };
     public const long MaxUploadBytes = 20L * 1024 * 1024;   // the same limit as Documents
@@ -174,18 +179,29 @@ public sealed class HrLibrary(
         var keywordRanks = keyword.ToDictionary(k => k.ChunkId, k => k.Rank);
         var snippets = keyword.ToDictionary(k => k.ChunkId, k => k.Snippet);
 
-        var merged = vectorRanks.Keys.Union(keywordRanks.Keys)
-            .Select(id => (Id: id, Score:
-                (vectorRanks.TryGetValue(id, out var v) ? 1.0 / (60 + v) : 0) +
-                (keywordRanks.TryGetValue(id, out var k) ? 1.0 / (60 + k) : 0)))
-            .OrderByDescending(x => x.Score).ThenBy(x => x.Id)
-            .Take(top).ToList();
-
-        var ids = merged.Select(m => m.Id).ToList();
+        var candidates = vectorRanks.Keys.Union(keywordRanks.Keys).ToList();
         var rows = await db.EmbeddingChunks.AsNoTracking()
-            .Where(c => ids.Contains(c.Id))
+            .Where(c => candidates.Contains(c.Id))
             .Select(c => new { c.Id, c.ContextSourceId, c.SourceRef, c.Text, c.LineFrom, c.LineTo })
             .ToDictionaryAsync(c => c.Id, ct);
+
+        // A chunk whose heading (its section, or a heading inside it) holds a word of the
+        // query gets a small bonus: "§8.2 Retrenchment" for a question about Retrenchment.
+        var terms = HeadingTerms(query);
+        bool HeadingMatch(int id) => terms.Count > 0 && rows.TryGetValue(id, out var r)
+            && HrCitations.HeadingsOf(r.SourceRef, r.Text).SelectMany(h => HeadingTerms(h)).Any(terms.Contains);
+
+        var merged = candidates
+            .Select(id =>
+            {
+                var heading = HeadingMatch(id);
+                return (Id: id, Heading: heading, Score:
+                    (vectorRanks.TryGetValue(id, out var v) ? 1.0 / (60 + v) : 0) +
+                    (keywordRanks.TryGetValue(id, out var k) ? 1.0 / (60 + k) : 0) +
+                    (heading ? HeadingBonus : 0));
+            })
+            .OrderByDescending(x => x.Score).ThenBy(x => x.Id)
+            .Take(top).ToList();
 
         return merged.Where(m => rows.ContainsKey(m.Id) && rows[m.Id].ContextSourceId is int item && items.ContainsKey(item))
             .Select(m =>
@@ -195,9 +211,23 @@ public sealed class HrLibrary(
                 return new HrSearchHit(r.Id, item.Id, item.Name, item.Version, r.SourceRef, SectionOf(r.SourceRef), r.LineFrom, r.LineTo,
                     Math.Round(m.Score, 6), vectorRanks.TryGetValue(r.Id, out var v) ? v : null,
                     keywordRanks.TryGetValue(r.Id, out var k) ? k : null, r.Text,
-                    snippets.TryGetValue(r.Id, out var s) && s is not null ? s : Preview(r.Text));
+                    snippets.TryGetValue(r.Id, out var s) && s is not null ? s : Preview(r.Text), m.Heading);
             }).ToList();
     }
+
+    /// <summary>
+    /// The heading bonus: about what one side's rank 1 is worth over its rank 20
+    /// (1/61 − 1/80 ≈ 0.004), so a heading match moves a chunk a few places, never
+    /// from nowhere to the top. Hr:HeadingBonus overrides it.
+    /// </summary>
+    private double HeadingBonus =>
+        double.TryParse(config["Hr:HeadingBonus"], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var b) ? b : 0.005;
+
+    /// <summary>The words of four letters or more, lower-cased: short words ("the", "and", "কী") would match every heading.</summary>
+    private static HashSet<string> HeadingTerms(string text) =>
+        System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), @"[\p{L}\p{M}\p{N}]+")
+            .Select(m => m.Value).Where(w => w.Length >= 4).ToHashSet();
 
     /// <summary>Excerpts per question: the best 5, whole chunks only, up to 1,500 tokens (§3.3).</summary>
     public const int MaxExcerpts = 5;
@@ -259,10 +289,35 @@ public sealed class HrLibrary(
 
     // ───────────────────────── the glossary ─────────────────────────
 
-    /// <summary>The Library item that holds the glossary (HrGlossary): Hr:GlossaryItem, by default "hr-glossary".</summary>
-    private string GlossaryName => config["Hr:GlossaryItem"] is { Length: > 0 } name ? name : "hr-glossary";
+    /// <summary>The glossary is the item of the glossary type (HrGlossary), whatever it is called.</summary>
+    private static bool IsGlossary(ContextSource item) => item.HrType == GlossaryType;
 
-    private bool IsGlossary(ContextSource item) => string.Equals(item.Name, GlossaryName, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// The message for a change that would make a second active glossary, or null:
+    /// the search reads one glossary, so another is refused rather than guessed between.
+    /// </summary>
+    private static string? GlossaryError(IEnumerable<ContextSource> all, int? changedId, string? type, bool active)
+    {
+        if (type != GlossaryType || !active) return null;
+        var other = all.FirstOrDefault(i => i.Id != changedId && i.IsActive && IsGlossary(i));
+        return other is null ? null
+            : $"Only one glossary can be active, and \"{other.Name}\" is. Switch it off first, or give this item another type.";
+    }
+
+    /// <summary>
+    /// Once, on start: a Library from before the glossary type keeps its glossary as
+    /// the item named "hr-glossary" (KAKAROT's was a code table). When no item has
+    /// the type yet, that item gets it; its content and version are untouched.
+    /// </summary>
+    public async Task<bool> MigrateGlossaryTypeAsync(CancellationToken ct = default)
+    {
+        var all = await sources.ListSharedAsync(Kind, ct);
+        if (all.Any(IsGlossary)) return false;
+        var old = all.FirstOrDefault(i => string.Equals(i.Name, "hr-glossary", StringComparison.OrdinalIgnoreCase));
+        if (old is null) return false;
+        await db.ContextSources.Where(s => s.Id == old.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.HrType, GlossaryType), ct);
+        return true;
+    }
 
     /// <summary>The glossary as HR keeps it now: the active glossary item, read afresh, or an empty one.</summary>
     public async Task<HrGlossary> GlossaryAsync(CancellationToken ct = default)
@@ -436,6 +491,7 @@ public sealed class HrLibrary(
         if (HrSplitter.Validate(name, content) is { } invalid) return (SharedOutcome.Ok, null, invalid);
 
         var active = input.IsActive ?? true;
+        if (GlossaryError(existing, null, type, active) is { } glossaryError) return (SharedOutcome.Ok, null, glossaryError);
         if (AlwaysCapError(existing, null, active && mode == "always" ? content : null) is { } capError)
             return (SharedOutcome.Ok, null, capError);
 
@@ -472,6 +528,8 @@ public sealed class HrLibrary(
             var willBeAlways = (mode ?? current.Mode) == "always" && (input.IsActive ?? current.IsActive);
             if (AlwaysCapError(all, id, willBeAlways ? content : null) is { } capError)
                 return (SharedOutcome.Ok, null, capError);
+            if (GlossaryError(all, id, type ?? current.HrType, input.IsActive ?? current.IsActive) is { } glossaryError)
+                return (SharedOutcome.Ok, null, glossaryError);
         }
 
         string? beforeName = null, beforeMode = null, beforeContent = null;
@@ -648,6 +706,7 @@ public sealed class HrLibrary(
             ".sql" => (fileName, "procedure"),
             ".csv" => (fileName, "codes"),
             ".json" or ".pdf" or ".xlsx" => (fileName, "note"),
+            _ when bare.Contains("GLOSSARY", StringComparison.OrdinalIgnoreCase) => (bare, GlossaryType),
             _ when bare.Contains("RULES", StringComparison.OrdinalIgnoreCase) => (bare, "rules"),
             _ when bare.Contains("CODE", StringComparison.OrdinalIgnoreCase) => (bare, "codes"),
             _ => (bare, "note"),

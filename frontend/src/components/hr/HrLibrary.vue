@@ -38,6 +38,8 @@ const TYPE_LABELS = {
   procedure: { bn: 'প্রসিডিউর', en: 'Procedure' },
   codes: { bn: 'কোড টেবিল', en: 'Code table' },
   note: { bn: 'নোট', en: 'Note' },
+  // The Bengali ↔ English term list the search reads; one may be active.
+  glossary: { bn: 'শব্দকোষ', en: 'Glossary' },
 }
 const MODE_LABELS = {
   always: { bn: 'সবসময়', en: 'Always sent' },

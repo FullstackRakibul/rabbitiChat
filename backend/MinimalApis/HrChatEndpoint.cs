@@ -25,7 +25,7 @@
 //
 // Frames: "status" (twice), "context" (the receipt the "Context used" panel
 // shows), then content frames with a "formula" frame after each result, "error",
-// "unverified", and "done".
+// "unverified" (amounts, formulas, and citations that name nothing sent), and "done".
 
 using System.Text;
 using System.Text.Json;
@@ -214,7 +214,7 @@ namespace RabbitIC.Api.MinimalApis
             }
             catch (OperationCanceledException)
             {
-                await SaveAsync(db, convo.Id, answer.ToString(), receipt, formulas.Formulas, Array.Empty<decimal>(), Array.Empty<string>(), CancellationToken.None);
+                await SaveAsync(db, convo.Id, answer.ToString(), receipt, formulas.Formulas, Array.Empty<decimal>(), Array.Empty<string>(), CancellationToken.None, Array.Empty<string>());
                 return;
             }
 
@@ -223,17 +223,21 @@ namespace RabbitIC.Api.MinimalApis
             var calculated = formulas.Formulas.Where(f => f.Ok).Select(f => f.Value!.Value);
             var unverified = HrNumberCheck.Unverified(answer.ToString(), userText.Concat(new[] { system, excerptBlock }), calculated);
             var failed = formulas.Formulas.Where(f => !f.Ok).Select(f => f.Expression).ToList();
-            await writer.FrameAsync(new { type = "unverified", amounts = unverified, formulas = failed });
+            // Citations that name nothing this answer was sent: "unknown source", listed with the amounts.
+            var citations = HrCitations.Unknown(answer.ToString(), excerpts.Select(HrCitable.Of)
+                .Concat(always.Select(i => new HrCitable(i.Name, null, Array.Empty<string>(), Whole: true))).ToList());
+            await writer.FrameAsync(new { type = "unverified", amounts = unverified, formulas = failed, citations });
             await writer.DoneAsync(false);
 
-            await SaveAsync(db, convo.Id, answer.ToString(), receipt, formulas.Formulas, unverified, failed, ct);
+            await SaveAsync(db, convo.Id, answer.ToString(), receipt, formulas.Formulas, unverified, failed, ct, citations);
             log.LogInformation("HR chat: {Excerpts} excerpts, {History} history turns ({Dropped} dropped), {Formulas} formulas ({Failed} failed), {Unverified} unverified.",
                 excerpts.Count, history.Count, dropped, formulas.Formulas.Count, failed.Count, unverified.Count);
         }
 
         /// <summary>The answer, with what the "Context used" panel, the formulas and the warning line need on reopening.</summary>
         private static async Task SaveAsync(AppDbContext db, int conversationId, string answer, object receipt,
-            IReadOnlyList<HrFormula> formulas, IReadOnlyList<decimal> unverified, IReadOnlyList<string> failedFormulas, CancellationToken ct)
+            IReadOnlyList<HrFormula> formulas, IReadOnlyList<decimal> unverified, IReadOnlyList<string> failedFormulas, CancellationToken ct,
+            IReadOnlyList<string> unknownCitations)
         {
             if (string.IsNullOrEmpty(answer)) return;
             db.Messages.Add(new Message
@@ -251,6 +255,7 @@ namespace RabbitIC.Api.MinimalApis
                     }),
                     unverified,
                     unverifiedFormulas = failedFormulas,
+                    unverifiedCitations = unknownCitations,
                 }, Json),
             });
             await db.SaveChangesAsync(ct);

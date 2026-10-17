@@ -125,8 +125,11 @@ async function restartApi() {
 function expectedSeed() {
   const out = []
   for (const f of fs.readdirSync(LIBRARY).filter((f) => f.toLowerCase().endsWith('.md')))
-    // Phase 2 contract: rules and codes default to always, notes to search.
-    out.push({ name: f.replace(/\.md$/i, ''), hrType: /rules/i.test(f) ? 'rules' : 'note', mode: /rules/i.test(f) ? 'always' : 'search' })
+    // Phase 2 contract: rules and codes default to always, notes to search. Since the
+    // Rulebook's R2 follow-ups a glossary file is the glossary type, searched (never sent).
+    out.push(/glossary/i.test(f)
+      ? { name: f.replace(/\.md$/i, ''), hrType: 'glossary', mode: 'search' }
+      : { name: f.replace(/\.md$/i, ''), hrType: /rules/i.test(f) ? 'rules' : 'note', mode: /rules/i.test(f) ? 'always' : 'search' })
   for (const f of fs.readdirSync(path.join(LIBRARY, 'procedures')).filter((f) => f.toLowerCase().endsWith('.sql')))
     out.push({ name: f, hrType: 'procedure', mode: 'search' })
   return out
@@ -1877,13 +1880,14 @@ check('GR2.12', 'R2', 'fake', 'Ask too: a Bengali question is also searched in E
   const last = chatRequests().at(-1)?.body?.messages?.at(-1)?.content ?? ''
   const blocks = last.split(/\n(?=\[)/).filter((b) => b.startsWith(`[${RB_RULES}`))
   const retrenchment = blocks.filter((b) => /Retrenchment/.test(b)).length
-  const glossary = ex.filter((e) => e.name === 'hr-glossary').length
+  const glossaryId = (await library()).find((i) => i.hrType === 'glossary')?.id
+  const glossary = ex.filter((e) => e.itemId === glossaryId).length
   return ok(r.status === 200 && terms.includes('Retrenchment') && retrenchment > 0 && glossary === 0,
     `search terms added ${JSON.stringify(terms)}; ${retrenchment} of the ${ex.length} excerpts are ${RB_RULES} chunks on Retrenchment; §8.2 itself among them ${/8\.2 Retrenchment/.test(last)}; glossary excerpts ${glossary} [${ex.map((e) => e.sourceRef).join(' | ')}]`)
 })
 
 check('GR2.12', 'R2', 'fake', 'the glossary is Library data: a line HR adds is used at once; the code holds no word list; the draft dialog has an "English keywords" field', async () => {
-  const glossary = (await library()).find((i) => i.name === 'hr-glossary')
+  const glossary = (await library()).find((i) => i.hrType === 'glossary' && i.isActive)
   const full = glossary ? (await asAdmin('GET', `/api/hr/library/${glossary.id}`)).json : null
   const k = stamp()
   const put = full ? await asAdmin('PUT', `/api/hr/library/${glossary.id}`, { content: `${full.content.trimEnd()}\nকোয়াসার${k} | Quasarbonus${k} | qsr${k}\n` }) : null
@@ -1950,6 +1954,104 @@ check('GR2.14', 'R2', 'fake', 'Sources lists the excerpts the draft cites; the o
 check('GR2.15', 'R2', 'any', "Ask's persona says formulas are written as [[= numbers only ]]", async () => {
   const persona = read('backend/Hr/HrPrompt.cs')
   return ok(/\[\[= numbers only \]\]/.test(persona), `HrPrompt.cs has "[[= numbers only ]]" ${/\[\[= numbers only \]\]/.test(persona)}`)
+})
+
+// ─────────────────────────── R2 follow-ups, second round (KAKAROT) ───────────────────────────
+// GR2.16 heading boost; GR2.17 unknown citations in drafts and Ask; GR2.18 the
+// glossary is an HrType, at most one active, the old hr-glossary item migrated.
+
+const RB_FAKE_CITE = 'ProcessFinalSettelment.sql §Notice pay (Retrenchment)'
+
+check('GR2.16', 'R2', 'fake', 'heading boost: "ছাঁটাই হলে Non-Management কী পাবে?" gets §8.2 among Ask’s 5 excerpts; a hit says when its heading matched', async () => {
+  await rbRulesSearched()
+  const q = 'ছাঁটাই হলে Non-Management কী পাবে?'
+  const r = await hrChat(await rbEditor(), { message: q })
+  const last = chatRequests().at(-1)?.body?.messages?.at(-1)?.content ?? ''
+  const ex = r.context?.excerpts ?? []
+  const hits = (await asAdmin('GET', `/api/hr/search?q=${encodeURIComponent('Retrenchment notice pay')}`)).json?.hits ?? []
+  return ok(r.status === 200 && ex.length <= 5 && /### 8\.2 Retrenchment \(11\)/.test(last) && hits.some((h) => h.headingMatch === true),
+    `searched with [${r.context?.searchTerms}]; §8.2 among the ${ex.length} excerpts ${/### 8\.2 Retrenchment \(11\)/.test(last)} [${ex.map((e) => e.sourceRef).join(' | ')}]; `
+    + `/hr/search "Retrenchment notice pay": heading matched on ${hits.filter((h) => h.headingMatch).length} of ${hits.length} hits`)
+})
+
+check('GR2.17', 'R2', 'fake', 'a draft citing a label that was never sent ("§Notice pay (Retrenchment)") marks it "unknown source", keeps it out of Sources, and lists it before Confirm', async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  let real = null
+  script((body) => {
+    real = [...(body.messages.at(-1)?.content ?? '').matchAll(/^\[([^\]\n]+ L\d+-\d+)\]$/gm)].map((m) => m[1])[0]
+    return { words: words(rbFakeDraft(`Retrenchment notice ${k}`, {
+      purpose: 'Notice pay on Retrenchment.', rules: `1. Day's basic × notice days [${real}].\n2. Basic ÷ 30 × notice days [${RB_FAKE_CITE}].`,
+      calculation: 'Basic ÷ 30 × days.', exceptions: '', review: '', sources: '',
+    })) }
+  })
+  const g = await rbGenerate(editor, { title: `Retrenchment notice ${k}`, category: 'settlement', language: 'en' })
+  script(null)
+  const pageId = g.draft?.pageId
+  const before = pageId ? (await as(editor, 'GET', `${RB}/${pageId}/check`)).json : null
+  if (pageId) await rbSave(editor, pageId, `${g.draft.body}\nAn HR note.\n`)
+  const after = pageId ? (await as(editor, 'GET', `${RB}/${pageId}/check`)).json : null
+  const sources = rbSection(g.draft?.body ?? '', '## উৎস · Sources') ?? ''
+  const ui = read('frontend/src/components/hr/HrRulePage.vue') + read('frontend/src/lib/hr-text.js')
+  return ok(g.status === 200 && JSON.stringify(g.draft?.unknownSources) === JSON.stringify([RB_FAKE_CITE])
+      && JSON.stringify(before?.unknownSources) === JSON.stringify([RB_FAKE_CITE]) && JSON.stringify(after?.unknownSources) === JSON.stringify([RB_FAKE_CITE])
+      && !sources.includes(RB_FAKE_CITE) && sources.includes(real) && /data-unknown-source/.test(ui) && /অজানা উৎস · unknown source/.test(ui) && /unknownSources/.test(read('frontend/src/components/hr/HrRulePage.vue')),
+    `the real label cited: ${real}; draft frame unknown [${g.draft?.unknownSources}]; check before Confirm [${before?.unknownSources}], after an HR edit [${after?.unknownSources}]; `
+    + `Sources lists the made-up label ${sources.includes(RB_FAKE_CITE)}; marked in the page (data-unknown-source) ${/data-unknown-source/.test(ui)}`)
+})
+
+check('GR2.17', 'R2', 'fake', 'an Ask answer citing a label that was never sent marks it "unknown source", listed with the unverified amounts and kept with the answer', async () => {
+  await rbRulesSearched()
+  let real = null
+  script((body) => {
+    real = [...(body.messages.at(-1)?.content ?? '').matchAll(/^\[([^\]\n]+)\] \(/gm)].map((m) => m[1])[0]
+    return { words: words(`Notice pay is day's basic × notice days [${real}]. The code says the same [${RB_FAKE_CITE}].`) }
+  })
+  const r = await hrChat(await rbEditor(), { message: 'What is notice pay on Retrenchment?' })
+  script(null)
+  const frame = r.frames.find((f) => f.type === 'unverified')
+  const saved = r.convId ? (await asAdmin('GET', `/api/hr/conversations/${r.convId}`)).json?.messages?.at(-1)?.meta : null
+  const ui = read('frontend/src/components/hr/HrAsk.vue') + read('frontend/src/lib/hr-text.js')
+  return ok(r.status === 200 && !!real && JSON.stringify(frame?.citations) === JSON.stringify([RB_FAKE_CITE]) && JSON.stringify(saved?.unverifiedCitations) === JSON.stringify([RB_FAKE_CITE])
+      && /data-unknown-source/.test(ui) && /অজানা উৎস · unknown source/.test(ui),
+    `real label ${real}; unverified frame citations [${frame?.citations}]; saved with the answer [${saved?.unverifiedCitations}]; HrAsk marks them ${/data-unknown-source/.test(ui)}`)
+})
+
+check('GR2.18', 'R2', 'fake', 'the glossary is HrType glossary: one active at most (a second is refused with a message), selectable in the Library, no fixed name in the code', async () => {
+  const lib = (await asAdmin('GET', '/api/hr/library')).json
+  const glossaries = (lib?.items ?? []).filter((i) => i.hrType === 'glossary')
+  const k = stamp()
+  const second = await asAdmin('POST', '/api/hr/library', { name: `eval-gr218-${k}`, hrType: 'glossary', content: 'ক | K |\n' })
+  const off = await asAdmin('POST', '/api/hr/library', { name: `eval-gr218-off-${k}`, hrType: 'glossary', content: 'খ | Kh |\n', isActive: false } )
+  const on = off.json?.id ? await asAdmin('PUT', `/api/hr/library/${off.json.id}`, { isActive: true }) : null
+  const retype = await asAdmin('POST', '/api/hr/library', { name: `eval-gr218-note-${k}`, hrType: 'note', content: 'গ | G |\n' })
+  const toGlossary = retype.json?.id ? await asAdmin('PUT', `/api/hr/library/${retype.json.id}`, { hrType: 'glossary' }) : null
+  for (const id of [off.json?.id, retype.json?.id]) if (id) await asAdmin('DELETE', `/api/hr/library/${id}`)
+  const code = backendSources().map((f) => fs.readFileSync(f, 'utf8')).join('\n')
+  const ui = read('frontend/src/components/hr/HrLibrary.vue')
+  return ok((lib?.types ?? []).includes('glossary') && glossaries.length === 1 && glossaries[0].name === 'hr-glossary' && glossaries[0].isActive
+      && second.status === 400 && /glossary/i.test(second.json?.error ?? '') && off.status === 201 && on?.status === 400 && toGlossary?.status === 400
+      && !/Hr:GlossaryItem/.test(code) && /glossary/.test(ui),
+    `types [${lib?.types}]; glossaries [${glossaries.map((g) => `${g.name} active ${g.isActive}`)}]; a second active → ${second.status} "${second.json?.error}"; `
+    + `an inactive one → ${off.status}, switched on → ${on?.status}; a note retyped to glossary → ${toGlossary?.status}; Hr:GlossaryItem in the code ${/Hr:GlossaryItem/.test(code)}; Library UI labels it ${/glossary/.test(ui)}`)
+})
+
+check('GR2.18', 'R2', 'fake', 'an existing hr-glossary item of another type is migrated to the glossary type on start', async () => {
+  const runDir = fs.mkdtempSync(path.join(EVAL_ROOT, 'glossary-migration-'))
+  let api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: ctx.env })
+  await api.stop()
+  // As KAKAROT's Library had it: the glossary uploaded as a code table.
+  const set = await rbExec(`UPDATE ContextSources SET HrType = 'codes' WHERE Kind = 'hr' AND Name = 'hr-glossary'`, api.dbPath)
+  const before = (await sqlite(`SELECT HrType FROM ContextSources WHERE Name = 'hr-glossary'`, api.dbPath))[0]?.HrType
+  api = await startApi({ fakeUrl: ctx.fakeUrl, runDir, env: ctx.env })
+  try {
+    const after = (await sqlite(`SELECT HrType, Version FROM ContextSources WHERE Name = 'hr-glossary'`, api.dbPath))[0]
+    const admin = await login(process.env.HR_EVAL_ADMIN_USER, process.env.HR_EVAL_ADMIN_SECRET, api)
+    const r = await call(api.url, 'POST', '/api/hr/chat', { token: admin.token, body: { message: 'ছাঁটাই হলে কী পাওনা?' } })
+    const context = r.text.split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((f) => f?.type === 'context')
+    return ok(set === 'no error' && before === 'codes' && after?.HrType === 'glossary' && (context?.searchTerms ?? []).includes('Retrenchment'),
+      `before start ${before}; after start ${after?.HrType} (version ${after?.Version}); a Bengali question then adds [${context?.searchTerms}]`)
+  } finally { await api.stop() }
 })
 
 // ─────────────────────────── runner ───────────────────────────

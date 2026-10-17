@@ -424,6 +424,9 @@ using (var scope = app.Services.CreateScope())
 			.SeedAsync(hrSeedDir, hrSeedOwner).GetAwaiter().GetResult();
 		if (added > 0) app.Logger.LogInformation("HR library: seeded {Count} item(s) from {Dir}.", added, hrSeedDir);
 	}
+	// A Library from before the glossary type: its "hr-glossary" item becomes the glossary, once.
+	if (scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>().MigrateGlossaryTypeAsync().GetAwaiter().GetResult())
+		app.Logger.LogInformation("HR library: hr-glossary is now the glossary type.");
 	// Items split by an older splitter are re-split once; their embeddings follow in the background.
 	var hrResplit = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>().ResplitOutdatedAsync().GetAwaiter().GetResult();
 	if (hrResplit > 0) app.Logger.LogInformation("HR library: re-split {Count} item(s) for the new chunk size.", hrResplit);

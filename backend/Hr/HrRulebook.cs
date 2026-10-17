@@ -61,8 +61,13 @@ public sealed record HrRuleGenerateRequest(
 /// <summary>What a draft is about, once the request is checked.</summary>
 public sealed record HrRuleDraftTarget(int? PageId, string Title, HrRuleCategory Category, string Language);
 
-/// <summary>The number check before Confirm: amounts no source of the draft accounts for, and formulas that cannot be worked out.</summary>
-public sealed record HrRuleCheckDto(int Version, int? GeneratedVersion, IReadOnlyList<decimal> Unverified, IReadOnlyList<string> FailedFormulas);
+/// <summary>
+/// The check before Confirm: amounts no source of the draft accounts for, formulas
+/// that cannot be worked out, and citations that name no place the draft was
+/// written from (HrCitations).
+/// </summary>
+public sealed record HrRuleCheckDto(int Version, int? GeneratedVersion, IReadOnlyList<decimal> Unverified, IReadOnlyList<string> FailedFormulas,
+    IReadOnlyList<string> UnknownSources);
 
 public sealed record HrRuleFormulaDto(int Offset, int Length, string Expression, string Display, bool Ok, string? Error);
 
@@ -447,10 +452,17 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
         if (row is null) return (HrRuleOutcome.NotFound, null);
 
         var generated = await LatestGeneratedAsync(id, number, ct);
-        var known = generated is null ? null : ReadSources(generated.SourcesJson)?.KnownAmounts;
-        var (unverified, failed) = HrRuleDraft.Check(row.Body, known ?? new List<decimal>());
-        return (HrRuleOutcome.Ok, new HrRuleCheckDto(number, generated?.Version, generated is null ? Array.Empty<decimal>() : unverified, failed));
+        var drafted = generated is null ? null : ReadSources(generated.SourcesJson);
+        var (unverified, failed) = HrRuleDraft.Check(row.Body, drafted?.KnownAmounts ?? new List<decimal>());
+        var unknown = drafted is null ? Array.Empty<string>() : HrRuleDraft.UnknownSources(row.Body, Citables(drafted));
+        return (HrRuleOutcome.Ok, new HrRuleCheckDto(number, generated?.Version, generated is null ? Array.Empty<decimal>() : unverified, failed, unknown));
     }
+
+    /// <summary>The places a draft was written from, as citations are matched against them.</summary>
+    private static List<HrCitable> Citables(DraftSources drafted) =>
+        (drafted.Excerpts ?? new()).Select(e => new HrCitable(e.Name, e.SourceRef, e.Headings ?? new List<string>()))
+            .Concat((drafted.Always ?? new()).Select(a => new HrCitable(a.Name, null, Array.Empty<string>(), Whole: true)))
+            .ToList();
 
     private Task<HrRulePageVersion?> LatestGeneratedAsync(int pageId, int upTo, CancellationToken ct) =>
         db.HrRulePageVersions.AsNoTracking()
@@ -463,7 +475,9 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     public sealed record DraftSources(
         string? Query, List<int>? Scope, List<DraftAlways>? Always, List<DraftExcerpt>? Excerpts, List<decimal>? KnownAmounts);
     public sealed record DraftAlways(int ItemId, string Name, int Version);
-    public sealed record DraftExcerpt(int ChunkId, int ItemId, string Name, int Version, string? SourceRef, int? LineFrom, int? LineTo, int Tokens, double Score);
+    /// <param name="Headings">The section and the headings inside the chunk, so a citation can still be matched after HR edits.</param>
+    public sealed record DraftExcerpt(int ChunkId, int ItemId, string Name, int Version, string? SourceRef, int? LineFrom, int? LineTo, int Tokens, double Score,
+        List<string>? Headings = null);
 
     public static string WriteSources(DraftSources sources) => System.Text.Json.JsonSerializer.Serialize(sources, Json);
 

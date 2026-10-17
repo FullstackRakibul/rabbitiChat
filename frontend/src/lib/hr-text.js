@@ -44,6 +44,21 @@ export function markUnverified(html, amounts) {
     : m)))).join('')
 }
 
+export const UNKNOWN_SOURCE = 'অজানা উৎস · unknown source'
+
+/**
+ * Citations that name no place that was sent (the server's HrCitations), marked
+ * where they appear as "unknown source" (data-unknown-source), the way an
+ * unverified amount is. Only text between tags is touched.
+ */
+export function markUnknownSources(html, labels) {
+  if (!labels?.length) return html
+  return String(html).split(/(<[^>]*>)/).map((part, i) => (i % 2 === 1 ? part : labels.reduce((text, label) => {
+    const plain = `[${escapeHtml(label)}]`
+    return text.split(plain).join(`<mark data-unknown-source title="${attr(UNKNOWN_SOURCE)}" class="rounded-sm bg-destructive/15 px-0.5 text-foreground underline decoration-destructive decoration-wavy underline-offset-2">${plain}</mark>`)
+  }, part))).join('')
+}
+
 /** ৳ with the separators HR reads (৳77,777; ৳1,20,000) — for listing an amount, as HrFormulas.Taka shows one. */
 export function taka(n) {
   return `৳${Number(n).toLocaleString('en-IN')}`

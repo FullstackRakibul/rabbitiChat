@@ -26,7 +26,7 @@ import {
 import MarkdownBody from '@/components/MarkdownBody.vue'
 import { Button } from '@/components/ui/button'
 import HrItemViewer from '@/components/hr/HrItemViewer.vue'
-import { escapeHtml, withFormulas } from '@/lib/hr-text'
+import { attr, escapeHtml, UNKNOWN_SOURCE, withFormulas } from '@/lib/hr-text'
 
 /** A Rulebook citation was clicked: the tab opens that page at that version ({ pageId | title, version }). */
 const emit = defineEmits(['open-rule'])
@@ -90,6 +90,7 @@ async function openConversation(id) {
       formulas: m.meta?.formulas ?? [],
       unverified: m.meta?.unverified ?? [],
       unverifiedFormulas: m.meta?.unverifiedFormulas ?? [],
+      unverifiedCitations: m.meta?.unverifiedCitations ?? [],
       shownFormula: null,
     }))
     scrollDown()
@@ -128,7 +129,7 @@ async function send(text = input.value) {
   // answer would sit behind the "…" until the stream ended.
   const reply = reactive({
     role: 'assistant', content: '', status: '', context: null, formulas: [],
-    unverified: [], unverifiedFormulas: [], shownFormula: null, error: '',
+    unverified: [], unverifiedFormulas: [], unverifiedCitations: [], shownFormula: null, error: '',
   })
   messages.value.push(reply)
   scrollDown()
@@ -141,7 +142,7 @@ async function send(text = input.value) {
       onContext: (c) => { reply.context = c },
       onContent: (chunk) => { reply.content += chunk; scrollDown() },
       onFormula: (f) => { reply.formulas.push(f) },
-      onUnverified: (amounts, formulas) => { reply.unverified = amounts; reply.unverifiedFormulas = formulas },
+      onUnverified: (amounts, formulas, citations) => { reply.unverified = amounts; reply.unverifiedFormulas = formulas; reply.unverifiedCitations = citations },
       onError: (message) => { reply.error = message },
     }, controller.signal)
     if (currentId.value == null) {
@@ -194,11 +195,14 @@ const snippetHtml = (s) => escapeHtml(s ?? '').replace(/«/g, '<mark class="roun
  * place. MarkdownBody renders it through the same sanitizer as the main chat,
  * which keeps <button>, <span> and data-* attributes.
  */
-function withCites(content) {
+function withCites(content, unknown = []) {
   return (content || '').replace(/\[([^[\]\n]{2,200})\](?!\()/g, (all, label) => label === 'calculate'
     // Not a place in the library: the amount came from the calculator, shown above the answer.
     ? `<span title="Worked out with the calculate tool" class="mx-0.5 rounded border border-dashed px-1 py-px align-baseline font-mono text-[11px] text-muted-foreground">calculate</span>`
-    : `<button type="button" data-cite="${escapeHtml(label)}" class="mx-0.5 rounded border bg-muted/60 px-1 py-px align-baseline font-mono text-[11px] text-foreground hover:bg-accent">${escapeHtml(label)}</button>`)
+    : unknown.includes(label)
+      // Names nothing this answer was sent: marked as an unverified amount is, and not openable.
+      ? `<mark data-unknown-source title="${attr(UNKNOWN_SOURCE)}" class="mx-0.5 rounded border border-destructive/60 bg-destructive/15 px-1 py-px align-baseline font-mono text-[11px] text-foreground underline decoration-destructive decoration-wavy underline-offset-2">${escapeHtml(label)}</mark>`
+      : `<button type="button" data-cite="${escapeHtml(label)}" class="mx-0.5 rounded border bg-muted/60 px-1 py-px align-baseline font-mono text-[11px] text-foreground hover:bg-accent">${escapeHtml(label)}</button>`)
 }
 
 /** A citation → the item and place to open, from what this answer was sent, then from the library by name. */
@@ -359,7 +363,7 @@ const contextTokens = (c) => c ? c.tokens.system + c.tokens.excerpts + c.tokens.
 
             <div v-else class="flex min-w-0 flex-col gap-2" data-role="assistant">
               <div v-if="m.content" class="min-w-0 wrap-break-word text-sm" @click="onAnswerClick(m, $event)">
-                <MarkdownBody :content="withCites(withFormulas(m.content, m.formulas))" />
+                <MarkdownBody :content="withCites(withFormulas(m.content, m.formulas), m.unverifiedCitations)" />
               </div>
 
               <!-- Until the first word: what the server is doing, within a second of asking. -->
@@ -384,11 +388,12 @@ const contextTokens = (c) => c ? c.tokens.system + c.tokens.excerpts + c.tokens.
               <p v-if="m.error" class="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ m.error }}</p>
 
               <!-- The number check's verdict, in the answer's own place. -->
-              <p v-if="m.unverified?.length || m.unverifiedFormulas?.length" class="flex items-start gap-1.5 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2 text-xs text-destructive dark:bg-destructive/30 dark:text-foreground">
+              <p v-if="m.unverified?.length || m.unverifiedFormulas?.length || m.unverifiedCitations?.length" class="flex items-start gap-1.5 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2 text-xs text-destructive dark:bg-destructive/30 dark:text-foreground">
                 <TriangleAlert class="mt-px h-3.5 w-3.5 shrink-0" />
                 <span>
                   এই সংখ্যাগুলো যাচাই করা যায়নি / Not verified:
-                  {{ [...(m.unverified ?? []).map(formatAmount), ...(m.unverifiedFormulas ?? []).map((x) => `গণনা করা যায়নি (could not calculate): ${x}`)].join(', ') }}
+                  {{ [...(m.unverified ?? []).map(formatAmount), ...(m.unverifiedFormulas ?? []).map((x) => `গণনা করা যায়নি (could not calculate): ${x}`),
+                     ...(m.unverifiedCitations ?? []).map((x) => `${UNKNOWN_SOURCE}: [${x}]`)].join(', ') }}
                 </span>
               </p>
 

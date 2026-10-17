@@ -259,11 +259,13 @@ namespace RabbitIC.Api.MinimalApis
             var known = HrRuleDraft.KnownAmounts(always.Select(i => i.Content)
                 .Append(HrRuleDraft.Excerpts(excerpts)).Append(target.Title).Append(req.Instruction ?? ""));
             var (unverified, failed) = HrRuleDraft.Check(body, known);
+            var unknownSources = HrRuleDraft.UnknownSources(body, excerpts.Select(HrCitable.Of).Concat(always.Select(HrRuleDraft.Whole)).ToList());
 
             var sources = HrRulebook.WriteSources(new HrRulebook.DraftSources(
                 query, req.Items ?? new List<int>(),
                 always.Select(i => new HrRulebook.DraftAlways(i.Id, i.Name, i.Version)).ToList(),
-                excerpts.Select(e => new HrRulebook.DraftExcerpt(e.ChunkId, e.ItemId, e.ItemName, e.Version, e.SourceRef, e.LineFrom, e.LineTo, e.Tokens, e.Score)).ToList(),
+                excerpts.Select(e => new HrRulebook.DraftExcerpt(e.ChunkId, e.ItemId, e.ItemName, e.Version, e.SourceRef, e.LineFrom, e.LineTo, e.Tokens, e.Score,
+                    HrCitations.HeadingsOf(e.SourceRef, e.Text))).ToList(),
                 known));
             var modelJson = JsonSerializer.Serialize(new
             {
@@ -275,6 +277,7 @@ namespace RabbitIC.Api.MinimalApis
                 temperature,
                 unverified,
                 failedFormulas = failed,
+                unknownSources,
             }, Json);
 
             var saved = await rulebook.SaveGeneratedAsync(user, target, body, sources, modelJson, $"Drafted from the Library by {model}", CancellationToken.None);
@@ -288,7 +291,7 @@ namespace RabbitIC.Api.MinimalApis
             await writer.FrameAsync(new
             {
                 type = "draft", pageId = saved.Page!.Id, version = saved.Page.CurrentVersion, body,
-                unverified, formulas = failed, firstTokenMs, durationMs = clock.ElapsedMilliseconds,
+                unverified, formulas = failed, unknownSources, firstTokenMs, durationMs = clock.ElapsedMilliseconds,
             });
             await writer.DoneAsync(false);
             log.LogInformation("Rulebook draft: page {Page} v{Version}, {Excerpts} excerpts, {Unverified} unverified, {Ms} ms.",

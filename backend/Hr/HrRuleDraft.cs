@@ -185,10 +185,10 @@ public static class HrRuleDraft
         body[UnderReview] = Related(body[UnderReview], excerpts, $"{title}\n{body[Rules]}", glossary, reviewSections);
 
         // Sources: what the draft cites, then the rest of what was sent, collapsed.
-        var cited = Labels(string.Join("\n", body.Take(Sources)));
+        var cited = HrCitations.Labels(string.Join("\n", body.Take(Sources)));
         var sent = excerpts.Where(e => !string.IsNullOrWhiteSpace(e.SourceRef)).DistinctBy(e => e.SourceRef).ToList();
-        var used = sent.Where(e => Cites(cited, e)).Select(e => e.SourceRef!)
-            .Concat(always.Where(i => cited.Any(l => l.StartsWith(i.Name, StringComparison.Ordinal))).Select(i => i.Name)).ToList();
+        var used = sent.Where(e => cited.Any(l => HrCitations.Cites(l, HrCitable.Of(e)))).Select(e => e.SourceRef!)
+            .Concat(always.Where(i => cited.Any(l => HrCitations.Cites(l, Whole(i)))).Select(i => i.Name)).ToList();
         var rest = sent.Select(e => e.SourceRef!).Concat(always.Select(i => i.Name)).Where(r => !used.Contains(r)).ToList();
         var sources = new StringBuilder(used.Count > 0 ? string.Join("\n", used.Select(r => $"- [{r}]")) : NoSourceCited);
         if (rest.Count > 0)
@@ -242,29 +242,18 @@ public static class HrRuleDraft
     /// <summary>A point without its list marker.</summary>
     private static string Plain(string point) => Regex.Replace(point, @"^\s*([-*]|\d+[.)])\s*", "");
 
-    /// <summary>The [labels] a text cites.</summary>
-    private static List<string> Labels(string text) =>
-        Regex.Matches(text, @"\[([^\[\]\n]{2,200})\](?!\()").Select(m => m.Groups[1].Value.Trim()).Distinct().ToList();
+    /// <summary>An always item as a place cited: sent whole, so any section of it is known.</summary>
+    public static HrCitable Whole(ContextSource item) => new(item.Name, null, Array.Empty<string>(), Whole: true);
 
     /// <summary>
-    /// Whether the draft cites an excerpt: by its whole SourceRef, or by its item
-    /// and a section — "[HR_SETTLEMENT_RULES §8.2]" cites the chunk whose section, or
-    /// one of whose headings, starts with "8.2" (small sections share a chunk).
+    /// The page's citations that name no place the draft was written from (HrCitations):
+    /// a made-up label, shown as "unknown source" and listed before Confirm. The
+    /// Sources list itself is left out — it is the server's.
     /// </summary>
-    private static bool Cites(IEnumerable<string> labels, HrExcerpt e)
+    public static IReadOnlyList<string> UnknownSources(string body, IReadOnlyList<HrCitable> sent)
     {
-        foreach (var label in labels)
-        {
-            if (label == e.SourceRef) return true;
-            if (!label.StartsWith(e.ItemName, StringComparison.Ordinal)) continue;
-            var rest = Regex.Replace(label[e.ItemName.Length..].Trim().TrimStart('§').Trim(), @"\s*L\d+-\d+$", "");
-            if (rest.Length == 0) return true;
-            var section = e.SourceRef is null ? null : HrSplitter.SourceRefPattern.Match(e.SourceRef).Groups["section"].Value;
-            if (!string.IsNullOrEmpty(section) && section.StartsWith(rest, StringComparison.OrdinalIgnoreCase)) return true;
-            var heading = new Regex(@"^\s{0,3}#{1,6}\s+" + Regex.Escape(rest) + @"(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.Multiline);
-            if (heading.IsMatch(e.Text)) return true;
-        }
-        return false;
+        var at = body.IndexOf(Headings[Sources], StringComparison.Ordinal);
+        return HrCitations.Unknown(at >= 0 ? body[..at] : body, sent);
     }
 
     /// <summary>Nothing said: blank, or only dashes, dots or "none"-like filler.</summary>

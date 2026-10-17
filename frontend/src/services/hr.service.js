@@ -113,7 +113,7 @@ export async function streamHrChat({ conversationId, message, items = [], model 
       case 'content': handlers.onContent?.(frame.text ?? ''); break
       case 'formula': handlers.onFormula?.(frame); break
       case 'error': handlers.onError?.(frame.message ?? 'The model failed.'); break
-      case 'unverified': handlers.onUnverified?.(frame.amounts ?? [], frame.formulas ?? []); break
+      case 'unverified': handlers.onUnverified?.(frame.amounts ?? [], frame.formulas ?? [], frame.citations ?? []); break
     }
   }
   const res = await http.stream('/hr/chat', { conversationId, message, items, model }, (chunk) => {
