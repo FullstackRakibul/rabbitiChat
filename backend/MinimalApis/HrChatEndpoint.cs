@@ -127,6 +127,7 @@ namespace RabbitIC.Api.MinimalApis
 
             // ---- 3. excerpts: the best 5, whole chunks, up to 1,500 tokens ----
             var excerpts = await library.SelectExcerptsAsync(question, req.Items, ct);
+            var (_, searchTerms) = await library.ExpandAsync(question, ct);
             await writer.FrameAsync(new { type = "status", text = HrPrompt.Found(excerpts.Count), found = (int?)excerpts.Count });
             var excerptBlock = HrPrompt.Excerpts(excerpts);
             var last = HrPrompt.Question(excerpts, question);
@@ -163,6 +164,7 @@ namespace RabbitIC.Api.MinimalApis
                     lineFrom = e.LineFrom, lineTo = e.LineTo, tokens = e.Tokens, score = e.Score,
                 }),
                 scope = req.Items ?? new List<int>(),
+                searchTerms,
                 historyTurns = history.Count,
                 historyDropped = dropped,
                 tokens = new

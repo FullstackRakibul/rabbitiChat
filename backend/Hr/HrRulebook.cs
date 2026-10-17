@@ -50,9 +50,13 @@ public sealed record HrRuleVersionDto(
 /// <summary>A Library place a draft was written from. LineFrom is null for an always item, sent whole.</summary>
 public sealed record HrRuleSourceDto(int ItemId, string Name, string SourceRef, int? LineFrom, int? LineTo);
 
-/// <summary>A draft from the Library (§3.4). PageId: a new version of that page; otherwise a new page from Title, Category, Language.</summary>
+/// <summary>
+/// A draft from the Library (§3.4). PageId: a new version of that page; otherwise a new page from Title, Category, Language.
+/// Keywords: English words HR adds to the search (the glossary adds its own).
+/// </summary>
 public sealed record HrRuleGenerateRequest(
-    int? PageId, string? Title, string? Category, string? Language, List<int>? Items, string? Instruction, string? Model);
+    int? PageId, string? Title, string? Category, string? Language, List<int>? Items, string? Instruction, string? Model,
+    string? Keywords = null);
 
 /// <summary>What a draft is about, once the request is checked.</summary>
 public sealed record HrRuleDraftTarget(int? PageId, string Title, HrRuleCategory Category, string Language);

@@ -224,9 +224,10 @@ export function checkRulePage(id, version) {
  * shown until the first word), `context` (what was sent), `content` (the model's
  * words), `error`, then `draft` — the page as saved: { pageId, version, body,
  * unverified, formulas }. `pageId` adds a version to that page; without it a new
- * page is made from title, category and language.
+ * page is made from title, category and language. `keywords`: English words HR
+ * adds to the search; the Library's glossary adds the English of Bengali terms itself.
  */
-export async function streamRulebookDraft({ pageId, title, category, language, items = [], instruction }, handlers, signal) {
+export async function streamRulebookDraft({ pageId, title, category, language, items = [], instruction, keywords }, handlers, signal) {
   let buffer = ''
   const consume = (line) => {
     const trimmed = line.trim()
@@ -241,7 +242,7 @@ export async function streamRulebookDraft({ pageId, title, category, language, i
       case 'draft': handlers.onDraft?.(frame); break
     }
   }
-  await http.stream('/hr/rulebook/generate', { pageId, title, category, language, items, instruction }, (chunk) => {
+  await http.stream('/hr/rulebook/generate', { pageId, title, category, language, items, instruction, keywords }, (chunk) => {
     buffer += chunk
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''

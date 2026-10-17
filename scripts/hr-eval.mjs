@@ -1626,28 +1626,28 @@ check('GR2.2', 'R2', 'fake', 'with two Library items picked, the excerpts come f
 
 // ─────────────────────────── GR2.3 — not invented ───────────────────────────
 
-check('GR2.3', 'R2', 'fake', 'a topic the library lacks gets "Not in the library" under its heading, never a rule; every ⚠ line in the excerpts is under Under review', async () => {
+check('GR2.3', 'R2', 'fake', 'a topic the library lacks gets "Not in the library" under its heading, never a rule; a ⚠ line in the excerpts that shares a term with the rules is under Under review, an unrelated one is not', async () => {
   const editor = await rbEditor()
   const k = stamp()
   const a = await asAdmin('POST', '/api/hr/library', { name: `eval-gr23-quasar-${k}`, hrType: 'note', mode: 'search', content:
-    `# Quasar bonus ${k}\n\n## Rule\nThe Quasar bonus ${k} is one month's basic, paid in December.\n\n## Doubts\n⚠ Quasar bonus ${k} for unit 9 is under review by HR.\n` })
+    `# Quasar bonus ${k}\n\n## Rule\nThe Quasar bonus ${k} is one month's basic, paid in December.\n\n## Doubts\n⚠ Quasar bonus ${k} on Retrenchment in unit 9 is under review by HR.\n` })
   const b = await asAdmin('POST', '/api/hr/library', { name: `eval-gr23-quasar-units-${k}`, hrType: 'note', mode: 'search', content:
-    `# Quasar bonus ${k} by unit\n\nUnits 1 and 27 pay the Quasar bonus ${k} in two halves.\n⚠ Quasar bonus ${k} for Day Labour: the code and the policy differ.\n` })
+    `# Quasar bonus ${k} by unit\n\nUnits 1 and 27 pay the Quasar bonus ${k} in two halves.\n⚠ Quasar bonus ${k} after a Death: the code and the policy differ.\n` })
   await embedded()
   const before = chatRequests().length
   // The model leaves Exceptions and Under review empty, as a model does when the excerpts say nothing.
   script(() => ({ words: words(rbFakeDraft(`Quasar bonus ${k}`, {
-    purpose: 'A yearly bonus.', rules: `1. One month's basic, paid in December.`, calculation: 'Basic × 1.', exceptions: '', review: '', sources: '',
+    purpose: 'A yearly bonus.', rules: `1. One month's basic, paid in December, also on Retrenchment.`, calculation: 'Basic × 1.', exceptions: '', review: '', sources: '',
   })) }))
   const g = await rbGenerate(editor, { title: `Quasar bonus ${k}`, category: 'salary', language: 'en', items: [a.json?.id, b.json?.id] })
   script(null)
   const sys = chatRequests().slice(before)[0]?.body?.messages?.[0]?.content ?? ''
   const body = g.draft?.body ?? ''
   const exceptions = rbSection(body, '## ব্যতিক্রম · Exceptions'), review = rbSection(body, '## পর্যালোচনাধীন · Under review') ?? ''
-  const warnings = [`⚠ Quasar bonus ${k} for unit 9 is under review by HR.`, `⚠ Quasar bonus ${k} for Day Labour: the code and the policy differ.`]
+  const related = `⚠ Quasar bonus ${k} on Retrenchment in unit 9 is under review by HR.`, unrelated = `⚠ Quasar bonus ${k} after a Death: the code and the policy differ.`
   for (const id of [a.json?.id, b.json?.id]) if (id) await asAdmin('DELETE', `/api/hr/library/${id}`)
-  return ok(g.status === 200 && exceptions === RB_NOT_IN_LIBRARY && warnings.every((w) => review.includes(w)) && sys.includes(RB_NOT_IN_LIBRARY) && /⚠/.test(sys),
-    `Exceptions → "${exceptions}"; Under review has both ⚠ lines ${warnings.every((w) => review.includes(w))} ("${review.replace(/\n/g, ' / ').slice(0, 200)}"); `
+  return ok(g.status === 200 && exceptions === RB_NOT_IN_LIBRARY && review.includes(related) && !review.includes(unrelated) && sys.includes(RB_NOT_IN_LIBRARY) && /⚠/.test(sys),
+    `Exceptions → "${exceptions}"; Under review has the related ⚠ line ${review.includes(related)}, the unrelated one ${review.includes(unrelated)} ("${review.replace(/\n/g, ' / ').slice(0, 200)}"); `
     + `the model is told to write "Not in the library" ${sys.includes(RB_NOT_IN_LIBRARY)} and to keep ⚠ ${/⚠/.test(sys)}`)
 })
 
@@ -1741,22 +1741,28 @@ check('GR2.6', 'R2', 'fake', "a question naming a confirmed page's title gets it
 
 // ─────────────────────────── GR2.7 — live ───────────────────────────
 
-check('GR2.7', 'R2', 'live', 'live gemma4:12b on the real library: "রিট্রেঞ্চমেন্ট সুবিধা" (bn) and "Earned leave at settlement" (en): template, sources, times; drafts written for review', async () => {
+check('GR2.7', 'R2', 'live', 'live gemma4:12b on the real library: "রিট্রেঞ্চমেন্ট সুবিধা" (bn) and "Earned leave at settlement" (en): template, sources, times; §8.2 reached; no unrelated doubts; drafts written for review', async () => {
   const editor = await rbEditor()
-  await embedded(600_000)
+  await rbRulesSearched()
   const out = []
   for (const [title, language] of [['রিট্রেঞ্চমেন্ট সুবিধা', 'bn'], ['Earned leave at settlement', 'en']]) {
+    const before = chatRequests().length
     const g = await rbGenerate(editor, { title, category: 'settlement', language })
+    const sent = chatRequests().slice(before)[0]?.body?.messages?.at(-1)?.content ?? ''
     const body = g.draft?.body ?? ''
+    const review = rbSection(body, '## পর্যালোচনাধীন · Under review') ?? ''
     const file = path.join(EVAL_ROOT, `gr27-${language}.md`)
     fs.writeFileSync(file, `<!-- first word ${g.firstContentMs} ms · end ${g.endMs} ms · unverified ${JSON.stringify(g.draft?.unverified)} -->\n\n${body}\n\n<!-- streamed:\n${g.streamed}\n-->\n`)
     out.push({ title, status: g.status, headings: JSON.stringify(rbHeadingOrder(body)) === JSON.stringify(RB_TEMPLATE),
+      section82: language !== 'bn' || /### 8\.2 Retrenchment \(11\)/.test(sent),
+      unrelated: language === 'en' ? review.split('\n').filter((l) => /death|discharge|currency/i.test(l)).length : 0,
+      query: g.context?.query,
       sources: (g.context?.excerpts ?? []).length, firstMs: g.firstContentMs, endMs: g.endMs, unverified: g.draft?.unverified ?? null,
       failed: g.draft?.formulas ?? [], file, error: g.error })
   }
   // "No invented rule" is judged by reading the drafts against HR_SETTLEMENT_RULES; unverified amounts are listed, not failed.
-  return ok(out.every((o) => o.status === 200 && o.headings && o.sources > 0 && Array.isArray(o.unverified) && !o.error),
-    out.map((o) => `${o.title}: ${o.status}, template ${o.headings}, ${o.sources} excerpts, first word ${o.firstMs} ms, end ${o.endMs} ms, unverified ${JSON.stringify(o.unverified)}, formulas not worked out ${JSON.stringify(o.failed)}${o.error ? `, error ${o.error}` : ''} → ${o.file}`).join('\n    '))
+  return ok(out.every((o) => o.status === 200 && o.headings && o.sources > 0 && Array.isArray(o.unverified) && !o.error && o.section82 && o.unrelated === 0),
+    out.map((o) => `${o.title}: ${o.status}, searched as "${o.query}", §8.2 sent ${o.section82}, unrelated doubts ${o.unrelated}, template ${o.headings}, ${o.sources} excerpts, first word ${o.firstMs} ms, end ${o.endMs} ms, unverified ${JSON.stringify(o.unverified)}, formulas not worked out ${JSON.stringify(o.failed)}${o.error ? `, error ${o.error}` : ''} → ${o.file}`).join('\n    '))
 })
 
 // ─────────────────────────── GR2.8 — builds ───────────────────────────
@@ -1833,6 +1839,117 @@ check('GR2.11', 'R2', 'fake', 'a page titled "Notice.sql" is split as Markdown i
   return ok(item.name === 'Rulebook · Notice.sql' && chunks.length === 1 && all.includes('-- SET aside: this line looks like dead SQL') && all.includes(`(${k})`)
       && chunks.every((c) => /^Rulebook · Notice\.sql §.+ L\d+-\d+$/.test(c.sourceRef)),
     `${item.name}: ${chunks.length} chunk(s) [${chunks.map((c) => c.sourceRef).join(' | ')}]; the "-- SET" line kept ${all.includes('-- SET aside')}`)
+})
+
+// ─────────────────────────── R2 follow-ups (KAKAROT, after the R2 report) ───────────────────────────
+// GR2.12 Bengali searched in English through the Library's glossary; GR2.13 Under
+// review keeps only related items, at most 5; GR2.14 Sources lists what the draft
+// cites, the rest "Also consulted"; GR2.15 Ask's persona states the formula form.
+
+const RB_RULES = 'HR_SETTLEMENT_RULES'
+
+/** KAKAROT's Library searches the full rules document (settlement-quick-rules is the one sent whole). */
+async function rbRulesSearched() {
+  const item = (await library()).find((i) => i.name === RB_RULES)
+  if (item && item.mode !== 'search') await asAdmin('PUT', `/api/hr/library/${item.id}`, { mode: 'search' })
+  await embedded(600_000)
+  return (await library()).find((i) => i.name === RB_RULES)
+}
+
+check('GR2.12', 'R2', 'fake', 'the Bengali title "রিট্রেঞ্চমেন্ট সুবিধা" retrieves HR_SETTLEMENT_RULES §8.2: the glossary adds "Retrenchment" to the search', async () => {
+  const rules = await rbRulesSearched()
+  const editor = await rbEditor()
+  const before = chatRequests().length
+  const g = await rbGenerate(editor, { title: 'রিট্রেঞ্চমেন্ট সুবিধা', category: 'settlement', language: 'bn' })
+  const last = chatRequests().slice(before)[0]?.body?.messages?.at(-1)?.content ?? ''
+  const sent = (g.context?.excerpts ?? []).filter((e) => e.itemId === rules?.id)
+  const query = g.context?.query ?? ''
+  const found = /### 8\.2 Retrenchment \(11\)/.test(last) && sent.length > 0
+  return ok(g.status === 200 && rules?.mode === 'search' && /Retrenchment/.test(query) && found,
+    `${RB_RULES} mode ${rules?.mode}; searched as "${query}"; ${sent.length} excerpt(s) from ${RB_RULES} [${sent.map((e) => e.sourceRef).join(' | ')}]; §8.2 in what the model was sent ${/### 8\.2 Retrenchment \(11\)/.test(last)}`)
+})
+
+check('GR2.12', 'R2', 'fake', 'Ask too: a Bengali question is also searched in English, and its excerpts carry the Retrenchment rules of the rules document (not glossary lines)', async () => {
+  await rbRulesSearched()
+  const r = await hrChat(await rbEditor(), { message: 'ছাঁটাই হলে কর্মী কী পাওনা পায়?' })
+  const terms = r.context?.searchTerms ?? []
+  const ex = r.context?.excerpts ?? []
+  const last = chatRequests().at(-1)?.body?.messages?.at(-1)?.content ?? ''
+  const blocks = last.split(/\n(?=\[)/).filter((b) => b.startsWith(`[${RB_RULES}`))
+  const retrenchment = blocks.filter((b) => /Retrenchment/.test(b)).length
+  const glossary = ex.filter((e) => e.name === 'hr-glossary').length
+  return ok(r.status === 200 && terms.includes('Retrenchment') && retrenchment > 0 && glossary === 0,
+    `search terms added ${JSON.stringify(terms)}; ${retrenchment} of the ${ex.length} excerpts are ${RB_RULES} chunks on Retrenchment; §8.2 itself among them ${/8\.2 Retrenchment/.test(last)}; glossary excerpts ${glossary} [${ex.map((e) => e.sourceRef).join(' | ')}]`)
+})
+
+check('GR2.12', 'R2', 'fake', 'the glossary is Library data: a line HR adds is used at once; the code holds no word list; the draft dialog has an "English keywords" field', async () => {
+  const glossary = (await library()).find((i) => i.name === 'hr-glossary')
+  const full = glossary ? (await asAdmin('GET', `/api/hr/library/${glossary.id}`)).json : null
+  const k = stamp()
+  const put = full ? await asAdmin('PUT', `/api/hr/library/${glossary.id}`, { content: `${full.content.trimEnd()}\nকোয়াসার${k} | Quasarbonus${k} | qsr${k}\n` }) : null
+  const r = await hrChat(await rbEditor(), { message: `কোয়াসার${k} কীভাবে দেওয়া হয়?` })
+  const alt = await hrChat(await rbEditor(), { message: `How is qsr${k} paid?` })
+  const terms = r.context?.searchTerms ?? [], altTerms = alt.context?.searchTerms ?? []
+  const code = read('backend/Hr/HrGlossary.cs')
+  const noWordList = !/[ঀ-৿]/.test(code)
+  const ui = read('frontend/src/components/hr/HrRulePage.vue')
+  return ok(put?.status === 200 && terms.includes(`Quasarbonus${k}`) && altTerms.includes(`Quasarbonus${k}`) && noWordList && /keywords/.test(ui) && /English keywords/.test(ui),
+    `glossary edited ${put?.status}; Bengali term → [${terms}]; other spelling → [${altTerms}]; HrGlossary.cs has no Bengali word in it ${noWordList}; draft dialog has English keywords ${/English keywords/.test(ui)}`)
+})
+
+check('GR2.13', 'R2', 'fake', 'Under review keeps only items that share a status, benefit or rule name with the page\'s rules, at most 5', async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  const review = [
+    '⚠ The death rule depends on the day the settlement is run, not the separation date.',
+    '⚠ Discharge pays both the discharge benefit and the service benefit.',
+    '⚠ Currency rate: the lookup skips the previous December\'s rate.',
+    '⚠ Special cases: employees 015405 and 041870 (earned leave) are fixed in code.',
+    '⚠ Earned leave for unit 36 counts from 1 January; HR to confirm.',
+    '⚠ The earned leave cap of 40 days for Non-Management is under review.',
+    '⚠ Late attendance takes earned leave first; HR to confirm.',
+    '⚠ Worked days counting for earned leave after a leave payment; HR to confirm.',
+    '⚠ Fraction days and earned leave; HR to confirm.',
+  ].join('\n')
+  script(() => ({ words: words(rbFakeDraft(`Earned leave at settlement ${k}`, {
+    purpose: 'Earned leave at settlement.', rules: '1. Earned leave: 1 day for every 18 worked days.\n2. Cap: 40 days for Non-Management.',
+    calculation: 'Gross ÷ 30 × days.', exceptions: '', review, sources: '',
+  })) }))
+  const g = await rbGenerate(editor, { title: `Earned leave at settlement ${k}`, category: 'leave-approval', language: 'en' })
+  script(null)
+  const kept = (rbSection(g.draft?.body ?? '', '## পর্যালোচনাধীন · Under review') ?? '').split('\n').filter((l) => l.trim())
+  const unrelated = kept.filter((l) => /death|discharge|currency/i.test(l))
+  return ok(g.status === 200 && kept.length > 0 && kept.length <= 5 && unrelated.length === 0 && kept.every((l) => /earned leave|late attendance|worked days|fraction days/i.test(l)),
+    `${kept.length} kept: ${kept.map((l) => `"${l.slice(0, 50)}"`).join(' | ')}; death/discharge/currency kept ${unrelated.length}`)
+})
+
+check('GR2.14', 'R2', 'fake', 'Sources lists the excerpts the draft cites; the others are under a collapsed "Also consulted"', async () => {
+  const editor = await rbEditor()
+  const k = stamp()
+  let cited = []
+  script((body) => {
+    const labels = [...(body.messages.at(-1)?.content ?? '').matchAll(/^\[([^\]\n]+ L\d+-\d+)\]$/gm)].map((m) => m[1])
+    cited = labels.slice(0, 2)
+    return { words: words(rbFakeDraft(`Notice pay ${k}`, {
+      purpose: 'Notice pay.', rules: `1. Day's basic × notice-period days [${cited[0]}].\n2. Retrenchment only [${cited[1]}].`,
+      calculation: 'Basic ÷ 30 × days.', exceptions: '', review: '', sources: '',
+    })) }
+  })
+  const g = await rbGenerate(editor, { title: `Notice pay ${k}`, category: 'settlement', language: 'en' })
+  script(null)
+  const sources = rbSection(g.draft?.body ?? '', '## উৎস · Sources') ?? ''
+  const [main, also = ''] = sources.split(/<details>/)
+  const mainRefs = [...main.matchAll(/^- \[(.+)\]$/gm)].map((m) => m[1])
+  const alsoRefs = [...also.matchAll(/^- \[(.+)\]$/gm)].map((m) => m[1])
+  const sent = [...new Set((g.context?.excerpts ?? []).map((e) => e.sourceRef))]
+  return ok(g.status === 200 && cited.length === 2 && JSON.stringify([...mainRefs].sort()) === JSON.stringify([...cited].sort())
+      && /<summary>[^<]*Also consulted/.test(also ? `<details>${also}` : '') && sent.filter((r) => !cited.includes(r)).every((r) => alsoRefs.includes(r)),
+    `cited [${cited.join(' | ')}]; Sources lists [${mainRefs.join(' | ')}]; Also consulted ${alsoRefs.length} of ${sent.length - cited.length} others; collapsed ${/<details>/.test(sources)}`)
+})
+
+check('GR2.15', 'R2', 'any', "Ask's persona says formulas are written as [[= numbers only ]]", async () => {
+  const persona = read('backend/Hr/HrPrompt.cs')
+  return ok(/\[\[= numbers only \]\]/.test(persona), `HrPrompt.cs has "[[= numbers only ]]" ${/\[\[= numbers only \]\]/.test(persona)}`)
 })
 
 // ─────────────────────────── runner ───────────────────────────

@@ -114,7 +114,7 @@ const check = ref(null)
 const unverified = computed(() => check.value?.unverified ?? [])
 
 /** Draft from library: the dialog's fields, and the draft while it streams. */
-const gen = ref(null)              // { title, category, language, items: [], instruction, filter }
+const gen = ref(null)              // { title, category, language, items: [], instruction, keywords, filter }
 const libraryItems = ref([])
 const streaming = ref(null)        // { status, text, error }
 let streamAbort = null
@@ -250,8 +250,8 @@ function onPageClick(event) {
 async function openGenerate() {
   error.value = ''
   gen.value = page.value
-    ? { title: page.value.title, category: page.value.category, language: page.value.language, items: [], instruction: '', filter: '' }
-    : { title: '', category: 'settlement', language: 'bn', items: [], instruction: '', filter: '' }
+    ? { title: page.value.title, category: page.value.category, language: page.value.language, items: [], instruction: '', keywords: '', filter: '' }
+    : { title: '', category: 'settlement', language: 'bn', items: [], instruction: '', keywords: '', filter: '' }
   try {
     libraryItems.value = (await listHrLibrary()).items ?? []
   } catch (e) {
@@ -286,6 +286,7 @@ async function runGenerate() {
     await streamRulebookDraft({
       pageId: props.pageId ?? undefined,
       title: g.title.trim(), category: g.category, language: g.language, items: g.items, instruction: g.instruction.trim() || undefined,
+      keywords: g.keywords.trim() || undefined,
     }, {
       onStatus: (t) => { streaming.value.status = t },
       onContent: (t) => { streaming.value.status = ''; streaming.value.text += t },
@@ -731,6 +732,11 @@ async function download() {
           <div class="grid gap-1.5">
             <Label for="gen-instruction">নির্দেশনা (ঐচ্ছিক) <span class="text-xs text-muted-foreground">Instruction — optional</span></Label>
             <Input id="gen-instruction" v-model="gen.instruction" placeholder="যেমন: Non-Management-এর উপর জোর · e.g. focus on Non-Management" />
+          </div>
+          <div class="grid gap-1.5">
+            <Label for="gen-keywords">ইংরেজি শব্দ (ঐচ্ছিক) <span class="text-xs text-muted-foreground">English keywords — optional</span></Label>
+            <Input id="gen-keywords" v-model="gen.keywords" placeholder="e.g. Retrenchment notice pay" />
+            <p class="text-xs text-muted-foreground">লাইব্রেরির শব্দকোষ (hr-glossary) বাংলা শব্দের ইংরেজিও নিজে খোঁজে। The Library's glossary searches the English of Bengali terms by itself.</p>
           </div>
           <div class="grid gap-1.5">
             <Label>কোথা থেকে <span class="text-xs text-muted-foreground">Draw from — none picked: the whole Library</span></Label>

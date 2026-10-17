@@ -214,7 +214,11 @@ public sealed class HrLibrary(
         // Pinned first (docs/HR_RULEBOOK_PROMPT.md §3.5): a confirmed Rulebook page the
         // question names keeps its best chunk among the excerpts, whatever the ranks say.
         var pinned = await PinnedRulebookHitsAsync(question, scope, ct);
-        var hits = pinned.Concat((await SearchAsync(question, scope, MaxExcerpts, ct)).Where(h => pinned.All(p => p.ChunkId != h.ChunkId))).ToList();
+        // Searched as asked and, through the glossary, in English too; the glossary's own
+        // term lists are not excerpts (unless "Search in" picks the glossary itself).
+        var (query, _) = await ExpandAsync(question, ct);
+        var searchScope = scope is { Count: > 0 } ? scope : await DefaultScopeAsync(excludeRulebookCopies: false, ct);
+        var hits = pinned.Concat((await SearchAsync(query, searchScope, MaxExcerpts, ct)).Where(h => pinned.All(p => p.ChunkId != h.ChunkId))).ToList();
         var pinnedIds = pinned.Select(p => p.ChunkId).ToHashSet();
         var excerpts = await TakeExcerptsAsync(hits, MaxExcerpts, ExcerptBudget, pinnedIds, ct);
 
@@ -235,15 +239,43 @@ public sealed class HrLibrary(
     /// </summary>
     public async Task<List<HrExcerpt>> SelectDraftExcerptsAsync(string query, IReadOnlyCollection<int>? items, CancellationToken ct = default)
     {
-        IReadOnlyCollection<int> scope;
-        if (items is { Count: > 0 }) scope = items;
-        else
-        {
-            var copies = (await RulebookPagesAsync(ct)).Keys.ToHashSet();
-            scope = (await sources.ListSharedAsync(Kind, ct)).Where(i => i.IsActive && !copies.Contains(i.Id)).Select(i => i.Id).ToList();
-            if (scope.Count == 0) return new();
-        }
+        var scope = items is { Count: > 0 } ? items : await DefaultScopeAsync(excludeRulebookCopies: true, ct);
+        if (scope.Count == 0) return new();
         return await TakeExcerptsAsync(await SearchAsync(query, scope, DraftMaxExcerpts, ct), DraftMaxExcerpts, DraftExcerptBudget, new HashSet<int>(), ct);
+    }
+
+    /// <summary>
+    /// What is searched when nothing is picked: every active item but the glossary
+    /// (a list of terms, which helps the search but answers nothing) and, for a
+    /// draft, the Rulebook's own copies.
+    /// </summary>
+    private async Task<IReadOnlyCollection<int>> DefaultScopeAsync(bool excludeRulebookCopies, CancellationToken ct)
+    {
+        var copies = excludeRulebookCopies ? (await RulebookPagesAsync(ct)).Keys.ToHashSet() : new HashSet<int>();
+        return (await sources.ListSharedAsync(Kind, ct))
+            .Where(i => i.IsActive && !copies.Contains(i.Id) && !IsGlossary(i))
+            .Select(i => i.Id).ToList();
+    }
+
+    // ───────────────────────── the glossary ─────────────────────────
+
+    /// <summary>The Library item that holds the glossary (HrGlossary): Hr:GlossaryItem, by default "hr-glossary".</summary>
+    private string GlossaryName => config["Hr:GlossaryItem"] is { Length: > 0 } name ? name : "hr-glossary";
+
+    private bool IsGlossary(ContextSource item) => string.Equals(item.Name, GlossaryName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The glossary as HR keeps it now: the active glossary item, read afresh, or an empty one.</summary>
+    public async Task<HrGlossary> GlossaryAsync(CancellationToken ct = default)
+    {
+        var item = (await sources.ListSharedAsync(Kind, ct)).FirstOrDefault(i => i.IsActive && IsGlossary(i));
+        return item is null ? HrGlossary.Empty : HrGlossary.Parse(item.Content);
+    }
+
+    /// <summary>The text with the English term added for every Bengali (or other) term of the glossary it holds, and those terms.</summary>
+    public async Task<(string Query, IReadOnlyList<string> Terms)> ExpandAsync(string text, CancellationToken ct = default)
+    {
+        var terms = (await GlossaryAsync(ct)).EnglishFor(text);
+        return (terms.Count == 0 ? text : $"{text} {string.Join(" ", terms)}", terms);
     }
 
     /// <summary>Whole chunks in the order given, up to <paramref name="max"/> and within <paramref name="budget"/> tokens (a chunk that does not fit is skipped; a smaller one may still).</summary>

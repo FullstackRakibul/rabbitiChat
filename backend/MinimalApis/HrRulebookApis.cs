@@ -196,7 +196,11 @@ namespace RabbitIC.Api.MinimalApis
             var writer = new ChatStreamWriter(ctx.Response, ct);
             await writer.FrameAsync(new { type = "status", text = HrPrompt.Searching, found = (int?)null });
 
-            var query = HrRuleDraft.Query(target!.Title, req.Instruction);
+            // The title and instruction as written, HR's English keywords, and the glossary's
+            // English for every Bengali term in them — so a Bengali title finds English rules.
+            var glossary = await library.GlossaryAsync(ct);
+            var searchTerms = glossary.EnglishFor($"{target!.Title}\n{req.Instruction}");
+            var query = string.Join(" ", new[] { HrRuleDraft.Query(target.Title, req.Instruction, req.Keywords) }.Concat(searchTerms));
             var excerpts = await library.SelectDraftExcerptsAsync(query, req.Items, ct);
             await writer.FrameAsync(new { type = "status", text = HrPrompt.Found(excerpts.Count), found = (int?)excerpts.Count });
 
@@ -213,6 +217,8 @@ namespace RabbitIC.Api.MinimalApis
                     lineFrom = e.LineFrom, lineTo = e.LineTo, tokens = e.Tokens, score = e.Score,
                 }),
                 scope = req.Items ?? new List<int>(),
+                query,
+                searchTerms,
                 tokens = new { system = systemTokens, excerpts = excerptTokens, request = PoPromptBuilder.EstimateTokens(request), window, reserved = ReservedForDraft },
             });
 
@@ -247,7 +253,9 @@ namespace RabbitIC.Api.MinimalApis
             }
 
             // The template's promises kept, then the number check against what the draft was written from.
-            var body = HrRuleDraft.Shape(answer.ToString(), target.Title, target.Category, excerpts, always);
+            var reviewSections = (config["Hr:ReviewTermSections"] is { Length: > 0 } configured ? configured : HrRuleDraft.DefaultReviewSections)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var body = HrRuleDraft.Shape(answer.ToString(), target.Title, target.Category, excerpts, always, glossary, reviewSections);
             var known = HrRuleDraft.KnownAmounts(always.Select(i => i.Content)
                 .Append(HrRuleDraft.Excerpts(excerpts)).Append(target.Title).Append(req.Instruction ?? ""));
             var (unverified, failed) = HrRuleDraft.Check(body, known);
