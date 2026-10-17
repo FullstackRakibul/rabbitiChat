@@ -95,6 +95,7 @@ function logout() {
   // one's tabs for even a frame.
   allowedTabs.value = null
   myRole.value = ''
+  myRoleLabel.value = ''
   isSystemAdmin.value = false
   myUserId.value = 0
 }
@@ -444,6 +445,7 @@ const ALL_TABS = [
 // stays empty for that moment rather than flashing modules the user may not have.
 const allowedTabs = ref(null)
 const myRole = ref('')
+const myRoleLabel = ref('')
 const isSystemAdmin = ref(false)
 const myUserId = ref(0)
 
@@ -472,6 +474,7 @@ async function refreshPermissions() {
     const me = await myTabs()
     allowedTabs.value = me.tabs
     myRole.value = me.role
+    myRoleLabel.value = me.roleLabel ?? me.role
     isSystemAdmin.value = me.isSystemAdmin
     myUserId.value = me.id
 
@@ -1049,10 +1052,11 @@ const notesTabRef = ref(null)
          alive across switches, so a streaming reply survives navigating away. -->
     <Tabs v-else v-model="activeTab" :unmount-on-hide="false" class="contents">
     <AppShell ref="shell" :tabs="tabs" :active-tab="activeTab" :user-id="myUserId" :loading="allowedTabs === null"
+      :username="username" :role="myRoleLabel"
       :theme="theme" :connected="connected" :status="status"
       :has-sidebar="tabHasSidebar" :sidebar-open="!sidebarCollapsed"
       v-model:mobile-open="mobileSidebarOpen"
-      @toggle-theme="toggleTheme" @open-palette="paletteOpen = true" @navigate="goTab">
+      @toggle-theme="toggleTheme" @open-palette="paletteOpen = true" @navigate="goTab" @logout="logout">
       <!-- Sidebar slot: filled only by the tabs that have one. -->
       <template v-if="tabHasSidebar" #sidebar>
         <ChatSidebar v-show="activeTab === 'chat'" v-model:source-search="sourceSearch"

@@ -71,6 +71,7 @@ public class RbacService
             user.Id,
             user.Username,
             role,
+            UserRoles.LabelFor(role),
             role == UserRoles.SystemAdmin,
             TabCatalog.EffectiveTabs(role, grants));
     }

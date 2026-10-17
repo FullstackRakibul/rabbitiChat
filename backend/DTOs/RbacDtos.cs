@@ -39,9 +39,10 @@ public record RoleOptionDto(string Key, string Label, List<string> DefaultTabs);
 /// <summary>
 /// What the shell asks for on login: the caller's own role and tabs. Deliberately
 /// not the admin detail shape — it carries no other user's data and needs no
-/// admin rights.
+/// admin rights. RoleLabel is how the role is shown (e.g. "hr-assistant"), so the
+/// header's user block needs no copy of the label list.
 /// </summary>
-public record MyTabsDto(int Id, string Username, string Role, bool IsSystemAdmin, List<string> Tabs);
+public record MyTabsDto(int Id, string Username, string Role, string RoleLabel, bool IsSystemAdmin, List<string> Tabs);
 
 // ---- Input ----
 

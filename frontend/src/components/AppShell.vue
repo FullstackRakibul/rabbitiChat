@@ -5,8 +5,9 @@
  *
  * The header lives here and is never unmounted, so switching modules never
  * rebuilds the brand, the module launcher or the theme toggle. Navigation is the
- * Google-apps pattern: a chip names the open module, and it and the grid button
- * both open the launcher — every module the user may open, as tiles. The
+ * Google-apps pattern: a chip names the open module and opens the launcher —
+ * every module the user may open, as tiles. The grid button on the right opens
+ * the System menu: the System modules, who is signed in, and log out. The
  * `sidebar` slot is filled only by tabs that need one (Chat, Workspace); when
  * nothing is passed the body stretches full-bleed.
  */
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import ModuleLauncher from '@/components/launcher/ModuleLauncher.vue'
+import SystemMenu from '@/components/launcher/SystemMenu.vue'
 
 const props = defineProps({
   /** The modules this user may open: [{ id, label, icon, group }]. */
@@ -24,6 +26,10 @@ const props = defineProps({
   activeTab: { type: String, default: '' },
   /** The signed-in user's id (0 until known): keys their launcher favourites. */
   userId: { type: Number, default: 0 },
+  /** Who is signed in, for the System menu's user block. */
+  username: { type: String, default: '' },
+  /** Their role as the server labels it (e.g. "hr-assistant"); empty until known. */
+  role: { type: String, default: '' },
   /** Permissions still loading: the chip shows a placeholder, never a guess. */
   loading: { type: Boolean, default: false },
   theme: { type: String, default: 'light' },
@@ -42,17 +48,17 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:sidebarOpen', 'update:mobileOpen', 'toggle-theme', 'open-palette', 'navigate',
+  'update:sidebarOpen', 'update:mobileOpen', 'toggle-theme', 'open-palette', 'navigate', 'logout',
 ])
 
 const showSidebar = computed(() => props.hasSidebar)
 
 const current = computed(() => props.tabs.find((t) => t.id === props.activeTab) ?? null)
 
-/** The grid button's launcher: what "g then m" and the palette open. */
-const gridLauncher = ref(null)
+/** The module chip's launcher: what "g then m" and the palette open. */
+const chipLauncher = ref(null)
 
-defineExpose({ openLauncher: () => gridLauncher.value?.show() })
+defineExpose({ openLauncher: () => chipLauncher.value?.show() })
 </script>
 
 <template>
@@ -78,6 +84,7 @@ defineExpose({ openLauncher: () => gridLauncher.value?.show() })
       <div v-if="loading" class="h-9 w-36 shrink-0 animate-pulse rounded-full bg-muted" aria-hidden="true" />
       <ModuleLauncher
         v-else-if="tabs.length"
+        ref="chipLauncher"
         :tabs="tabs"
         :active-tab="activeTab"
         :user-id="userId"
@@ -131,27 +138,28 @@ defineExpose({ openLauncher: () => gridLauncher.value?.show() })
           <span class="sr-only">Toggle theme</span>
         </Button>
 
-        <ModuleLauncher
-          v-if="!loading && tabs.length"
-          ref="gridLauncher"
+        <!-- Always present, even before permissions load: log out must never
+             depend on the tab list answering. -->
+        <SystemMenu
           :tabs="tabs"
           :active-tab="activeTab"
-          :user-id="userId"
-          align="end"
+          :username="username"
+          :role="role"
           @launch="emit('navigate', $event)"
+          @logout="emit('logout')"
         >
           <template #trigger>
             <button
               type="button"
-              data-testid="launcher-button"
+              data-testid="system-menu-button"
               class="inline-flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              title="Modules (g then m)"
-              aria-label="Open the module launcher"
+              title="System"
+              aria-label="Open the System menu"
             >
               <Grip class="size-5" aria-hidden="true" />
             </button>
           </template>
-        </ModuleLauncher>
+        </SystemMenu>
       </div>
     </header>
 
