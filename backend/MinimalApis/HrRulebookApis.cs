@@ -41,7 +41,7 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(new
                 {
                     pages = await rulebook.ListAsync(user, q, category, status, ct),
-                    canEdit = HrRulebook.CanEdit(user),
+                    canEdit = await rulebook.CanEditAsync(user, ct),
                     categories = HrRulebook.Categories,
                     languages = HrRulebook.Languages,
                     statuses = HrRulebook.Statuses,

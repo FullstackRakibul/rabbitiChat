@@ -13,7 +13,7 @@ import {
   uploadDocument, listDocuments, deleteDocument, workspaceChat,
   listBuyerProfiles, extractDocument,
   login, getToken, getUsername, clearSession, AuthError,
-  listContextSources, myTabs
+  listContextSources, myAccess, onAccessChange
 } from './services/index.js'
 import {
   createBuyerProfile, updateBuyerProfile, deleteBuyerProfile, previewPrompt,
@@ -96,7 +96,6 @@ function logout() {
   allowedTabs.value = null
   myRole.value = ''
   myRoleLabel.value = ''
-  isSystemAdmin.value = false
   myUserId.value = 0
 }
 
@@ -378,6 +377,25 @@ onMounted(() => {
   if (loggedIn.value) bootstrap()
 })
 
+// Someone changed access (a role preset, this user's overrides or role): the
+// next response says so, and the menus are redrawn from the server's answer.
+onAccessChange(() => {
+  if (loggedIn.value) refreshPermissions()
+})
+
+// Coming back to the window is a natural "next call": re-read access then, at
+// most once a second (focus and visibilitychange arrive together), so a change
+// made while it sat in the background shows.
+let lastAccessCheck = 0
+function recheckAccess() {
+  if (!loggedIn.value || document.visibilityState === 'hidden') return
+  if (Date.now() - lastAccessCheck < 1000) return
+  lastAccessCheck = Date.now()
+  refreshPermissions()
+}
+window.addEventListener('focus', recheckAccess)
+document.addEventListener('visibilitychange', recheckAccess)
+
 // ─────────────────────────────────────────────────────────────
 // WORKSPACE ADDITIONS (UI-only local state — no API changes)
 // ─────────────────────────────────────────────────────────────
@@ -409,50 +427,47 @@ const isPublicNote = computed(() => route.name === 'public-note')
 const isPublicDocs = computed(() => route.name === 'oddity-docs')
 
 /**
- * Every tab this build can render, with the id the backend knows it by. Which of
- * these a given user actually sees is decided by the server (see `allowedTabs`),
- * never here — there is deliberately no per-role list in the frontend, so
- * changing someone's access needs no release.
- *
- * `group` is the section the module launcher files it under; it changes only
- * how the grid is arranged, never who may open what.
+ * The icon for each module this build can render, by the tab key the backend
+ * knows it by. Nothing else about a tab lives here: its label, its menu group,
+ * its order and whether this user may open it all come from the server
+ * (/api/me/access, drawn from the permission catalog), so changing a name or
+ * someone's access needs no release. A tab with no icon here (`docs`, which
+ * Workspace Studio shows) is not a module of its own and is not listed.
  */
-const ALL_TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Work' },
-  { id: 'chat', label: 'Chat', icon: MessageSquare, group: 'Work' },
-  // One tab for what used to be Workspace and Documents. The key stays
-  // `workspace`; the `docs` key still gates /api/documents and /api/buyer-profiles
-  // on the server, so existing grants keep working unchanged.
-  { id: 'workspace', label: 'Workspace Studio', icon: Brain, group: 'Work' },
-  // মানব সম্পদ (HR Assistant): HR's library and, from Phase 2, its chat.
-  { id: 'hr', label: 'মানব সম্পদ', icon: Users, group: 'Work' },
-  { id: 'todo', label: 'To-Do', icon: ListTodo, group: 'Work' },
-  { id: 'search', label: 'Search', icon: Globe, group: 'Work' },
-  { id: 'jsonto', label: 'JSON to ...', icon: Table, group: 'Tools' },
-  { id: '5lakhs', label: '5Lakhs', icon: BadgeDollarSign, group: 'Tools' },
-  { id: 'ielts', label: 'IELTS', icon: GraduationCap, group: 'Tools' },
-  { id: 'component-splitter', label: 'Splitter', icon: Scissors, group: 'Tools' },
-  { id: 'sources', label: 'Sources', icon: Plug, group: 'System' },
-  { id: 'settings', label: 'Settings', icon: Settings, group: 'System' },
-  { id: 'rbac', label: 'Access', icon: ShieldCheck, group: 'System' },
-  { id: 'notes', label: 'Notes', icon: StickyNote, group: 'Work' },
-  { id: 'logs', label: 'Logs', icon: Activity, group: 'System' },
-  { id: 'oddity', label: 'Oddity', icon: Satellite, group: 'System' },
-]
+const MODULE_ICONS = {
+  dashboard: LayoutDashboard,
+  chat: MessageSquare,
+  workspace: Brain,
+  hr: Users,
+  todo: ListTodo,
+  search: Globe,
+  notes: StickyNote,
+  jsonto: Table,
+  '5lakhs': BadgeDollarSign,
+  ielts: GraduationCap,
+  'component-splitter': Scissors,
+  sources: Plug,
+  settings: Settings,
+  rbac: ShieldCheck,
+  logs: Activity,
+  oddity: Satellite,
+}
 
 // ---- Permissions ----
-// What /api/me/tabs said this user may see. Null until it answers: the launcher
+// What /api/me/access said this user may see. Null until it answers: the launcher
 // stays empty for that moment rather than flashing modules the user may not have.
 const allowedTabs = ref(null)
+const myModules = ref([])        // [{ key, label, group }] in the catalog's order
 const myRole = ref('')
 const myRoleLabel = ref('')
-const isSystemAdmin = ref(false)
 const myUserId = ref(0)
 
-/** The tabs actually rendered — the catalogue filtered by the server's answer. */
+/** The modules actually rendered: the server's list, each with its icon. */
 const tabs = computed(() => {
   if (allowedTabs.value === null) return []
-  return ALL_TABS.filter((t) => allowedTabs.value.includes(t.id))
+  return myModules.value
+    .filter((m) => MODULE_ICONS[m.key])
+    .map((m) => ({ id: m.key, label: m.label, icon: MODULE_ICONS[m.key], group: m.group }))
 })
 
 /** Where a user with no access to the requested module should land. */
@@ -471,11 +486,11 @@ useRoutePermissions(() => ({
 
 async function refreshPermissions() {
   try {
-    const me = await myTabs()
+    const me = await myAccess()
     allowedTabs.value = me.tabs
+    myModules.value = me.modules
     myRole.value = me.role
     myRoleLabel.value = me.roleLabel ?? me.role
-    isSystemAdmin.value = me.isSystemAdmin
     myUserId.value = me.id
 
     // The guard only runs on navigation, so a deep link that was already
@@ -1133,9 +1148,9 @@ const notesTabRef = ref(null)
         <SourcesTab ref="sourcesTab" @changed="onSourcesChanged" />
       </TabsContent>
 
-      <!-- Access control. Rendered only for a SystemAdmin — and the admin APIs
-           refuse anyone else regardless, so this is convenience, not the control. -->
-      <TabsContent v-if="isSystemAdmin" value="rbac"
+      <!-- Access. Rendered only for a user who has the tab — and the access APIs
+           refuse anyone who may not manage access, so this is convenience, not the control. -->
+      <TabsContent v-if="allowedTabs?.includes('rbac')" value="rbac"
         class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <RbacTab :current-user-id="myUserId" />
       </TabsContent>

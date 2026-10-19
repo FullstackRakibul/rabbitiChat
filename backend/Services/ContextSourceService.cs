@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Rbac;
 
 namespace RabbitIC.Api.Services;
 
@@ -23,8 +24,13 @@ public class ContextSourceService : IContextSourceService
     private const int MaxContentCharsPerSource = 8000;
 
     private readonly AppDbContext _db;
+    private readonly AccessPolicy _access;
 
-    public ContextSourceService(AppDbContext db) => _db = db;
+    public ContextSourceService(AppDbContext db, AccessPolicy access)
+    {
+        _db = db;
+        _access = access;
+    }
 
     public async Task<IReadOnlyList<ContextSourceDto>> ListAsync(
         int userId, string? kind = null, CancellationToken ct = default)
@@ -160,11 +166,12 @@ public class ContextSourceService : IContextSourceService
     public static bool IsShared(string? kind) => kind is not null && SharedKinds.Contains(kind);
 
     /// <summary>
-    /// Who may change a shared row: HrAssistant and SystemAdmin. Reading is the
-    /// calling route's decision (its tab gate); writing is decided here, once.
+    /// Who may change a shared row: whoever holds action:hr.library.edit (seeded
+    /// for HrAssistant; SystemAdmin always). Reading is the calling route's
+    /// decision (its tab gate); writing is decided here, once.
     /// </summary>
-    public static bool CanEditShared(User user) =>
-        UserRoles.Normalize(user.Role) is UserRoles.HrAssistant or UserRoles.SystemAdmin;
+    public Task<bool> CanEditSharedAsync(User user, CancellationToken ct = default) =>
+        _access.HasAsync(user, PermissionKeys.HrLibraryEdit, ct);
 
     public async Task<IReadOnlyList<ContextSource>> ListSharedAsync(string kind, CancellationToken ct = default) =>
         await Shared(kind).OrderBy(s => s.SortOrder).ThenBy(s => s.Id).ToListAsync(ct);
@@ -175,7 +182,7 @@ public class ContextSourceService : IContextSourceService
     public async Task<SharedWrite> CreateSharedAsync(User editor, ContextSource item, CancellationToken ct = default)
     {
         if (!IsShared(item.Kind)) throw new ArgumentException($"'{item.Kind}' is not a shared kind.", nameof(item));
-        if (!CanEditShared(editor)) return SharedWrite.Forbidden;
+        if (!await CanEditSharedAsync(editor, ct)) return SharedWrite.Forbidden;
 
         var max = await Shared(item.Kind).Select(s => (int?)s.SortOrder).MaxAsync(ct);
         item.OwnerUserId = editor.Id;
@@ -193,7 +200,7 @@ public class ContextSourceService : IContextSourceService
     {
         var item = await Shared(kind).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (item is null) return SharedWrite.NotFound;
-        if (!CanEditShared(editor)) return SharedWrite.Forbidden;
+        if (!await CanEditSharedAsync(editor, ct)) return SharedWrite.Forbidden;
 
         var content = item.Content;
         apply(item);
@@ -209,7 +216,7 @@ public class ContextSourceService : IContextSourceService
     {
         var item = await Shared(kind).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (item is null) return SharedWrite.NotFound;
-        if (!CanEditShared(editor)) return SharedWrite.Forbidden;
+        if (!await CanEditSharedAsync(editor, ct)) return SharedWrite.Forbidden;
 
         _db.Remove(item);
         await _db.SaveChangesAsync(ct);

@@ -45,8 +45,9 @@ public sealed class ModelPolicy(AppDbContext db, IMemoryCache cache)
     /// </summary>
     public async Task<IReadOnlyList<string>> AllowedAsync(User user, CancellationToken ct = default)
     {
+        // SystemAdmin is never restricted — AccessPolicy's one rule for it.
+        if (AccessPolicy.IsSuperUser(user)) return Array.Empty<string>();
         var role = UserRoles.Normalize(user.Role);
-        if (role == UserRoles.SystemAdmin) return Array.Empty<string>();
 
         var rows = await RowsAsync(ct);
         return rows.TryGetValue(role, out var row) ? Split(row.AllowedModels) : Array.Empty<string>();
@@ -62,8 +63,8 @@ public sealed class ModelPolicy(AppDbContext db, IMemoryCache cache)
     /// </summary>
     public async Task<string?> DefaultForAsync(User user, CancellationToken ct = default)
     {
+        if (AccessPolicy.IsSuperUser(user)) return null;
         var role = UserRoles.Normalize(user.Role);
-        if (role == UserRoles.SystemAdmin) return null;
 
         var rows = await RowsAsync(ct);
         if (!rows.TryGetValue(role, out var row)) return null;

@@ -82,3 +82,42 @@ public record RoleModelPolicyDto(
 /// cleared too — the caller's own fallback decides, as it always has.
 /// </summary>
 public record RoleModelPolicyInput(List<string>? AllowedModels, string? DefaultModel);
+
+// ---- Access: the catalog, role presets and the caller's own access (docs/RBAC_ROLES_PROMPT.md §3) ----
+
+/// <summary>One permission as the Access screen draws it. AlwaysOn: no role may turn it off (Settings).</summary>
+public record PermissionDto(string Key, string Kind, string En, string Bn, string Label, string Group, string? Parent, bool AlwaysOn);
+
+/// <summary>GET /api/access/catalog — every permission, in display order, and the module menu's groups.</summary>
+public record CatalogDto(List<string> Groups, List<PermissionDto> Permissions);
+
+/// <summary>
+/// What one role gets, for every catalog key. Locked: SystemAdmin, whose column
+/// cannot be changed. UserCount: how many users a change would reach.
+/// </summary>
+public record RolePresetDto(string Role, string Label, bool Locked, int UserCount, Dictionary<string, bool> Values);
+
+public record RolePresetsDto(List<RolePresetDto> Roles);
+
+/// <summary>PUT /api/access/roles/{role}. Only keys whose value differs are written.</summary>
+public record SaveRolePresetInput(Dictionary<string, bool>? Values, string? Note);
+
+public record AccessChangeDto(string Key, bool Before, bool After);
+
+/// <summary>What a save changed, and how many users of the role it reached (0 when nothing changed).</summary>
+public record SaveRolePresetResult(string Role, List<AccessChangeDto> Changed, int AffectedUsers, Dictionary<string, bool> Values);
+
+/// <summary>One module the caller may open, as the shell's menus show it.</summary>
+public record MyModuleDto(string Key, string Label, string En, string Bn, string Group);
+
+/// <summary>The caller's model policy: an empty Allowed means no restriction.</summary>
+public record MyModelsDto(List<string> Allowed, string? Default, bool Locked);
+
+/// <summary>
+/// GET /api/me/access — everything the shell draws from, in one response. Tabs is
+/// the same list /api/me/tabs returns; Revision is the X-Access-Rev it was built at.
+/// </summary>
+public record MyAccessDto(
+    int Id, string Username, string Role, string RoleLabel, bool IsSystemAdmin,
+    List<string> Tabs, List<string> Sections, List<string> Actions,
+    List<MyModuleDto> Modules, MyModelsDto Models, string Revision);

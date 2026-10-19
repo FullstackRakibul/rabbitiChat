@@ -14,11 +14,14 @@
 //
 // Requests that match no prefix are untouched, so chat, auth, models, health and
 // every other shared route behave exactly as before.
+//
+// Whether the caller has the tab is AccessPolicy's answer ("tab:<key>"), the same
+// one /api/me/tabs gives. Every response also carries X-Access-Rev, the policy's
+// revision, so a shell sees on its next call that its menus are stale.
 
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Rbac;
-using RabbitIC.Api.Repositories;
 
 namespace RabbitIC.Api.Middleware;
 
@@ -68,8 +71,14 @@ public class TabAccessMiddleware
 
     public TabAccessMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext ctx, AppDbContext db, IRbacRepository repo)
+    public async Task InvokeAsync(HttpContext ctx, AppDbContext db, AccessPolicy access)
     {
+        ctx.Response.OnStarting(() =>
+        {
+            ctx.Response.Headers["X-Access-Rev"] = AccessPolicy.Revision;
+            return Task.CompletedTask;
+        });
+
         var tab = TabForPath(ctx.Request.Path.Value);
 
         if (tab is null)
@@ -88,10 +97,7 @@ public class TabAccessMiddleware
             return;
         }
 
-        var grants = await repo.GetGrantsAsync(user.Id, ctx.RequestAborted);
-        var effective = TabCatalog.EffectiveTabs(user.Role, grants);
-
-        if (!effective.Contains(tab, StringComparer.OrdinalIgnoreCase))
+        if (!await access.HasAsync(user, PermissionKeys.Tab(tab), ctx.RequestAborted))
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             await ctx.Response.WriteAsJsonAsync(new

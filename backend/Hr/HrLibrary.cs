@@ -107,14 +107,14 @@ public sealed class HrLibrary(
         var items = await sources.ListSharedAsync(Kind, ct);
         var counts = await ChunkCountsAsync(ct);
         var pages = await RulebookPagesAsync(ct);
-        var canEdit = ContextSourceService.CanEditShared(caller);
+        var canEdit = await sources.CanEditSharedAsync(caller, ct);
         return items.Select(i => Project(i, counts, pages, canEdit, withContent: false)).ToList();
     }
 
     public async Task<HrItemDto?> GetAsync(User caller, int id, CancellationToken ct = default)
     {
         var item = await sources.GetSharedAsync(Kind, id, ct);
-        return item is null ? null : Project(item, await ChunkCountsAsync(ct), await RulebookPagesAsync(ct), ContextSourceService.CanEditShared(caller), withContent: true);
+        return item is null ? null : Project(item, await ChunkCountsAsync(ct), await RulebookPagesAsync(ct), await sources.CanEditSharedAsync(caller, ct), withContent: true);
     }
 
     /// <summary>Library item id → the Rulebook page it is the confirmed copy of.</summary>
@@ -481,7 +481,7 @@ public sealed class HrLibrary(
         if (!Types.Contains(type)) return (SharedOutcome.Ok, null, $"type must be one of: {string.Join(", ", Types)}.");
         var mode = (input.Mode ?? DefaultMode(type)).Trim().ToLowerInvariant();
         if (!Modes.Contains(mode)) return (SharedOutcome.Ok, null, $"mode must be one of: {string.Join(", ", Modes)}.");
-        if (!ContextSourceService.CanEditShared(editor)) return (SharedOutcome.Forbidden, null, null);
+        if (!await sources.CanEditSharedAsync(editor, ct)) return (SharedOutcome.Forbidden, null, null);
 
         var existing = await sources.ListSharedAsync(Kind, ct);
         if (existing.Any(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase)))
@@ -519,7 +519,7 @@ public sealed class HrLibrary(
         // The state the item would be in after this change — checked before anything is written.
         var all = await sources.ListSharedAsync(Kind, ct);
         var current = all.FirstOrDefault(i => i.Id == id);
-        if (current is not null && ContextSourceService.CanEditShared(editor))
+        if (current is not null && await sources.CanEditSharedAsync(editor, ct))
         {
             var name = string.IsNullOrWhiteSpace(input.Name) ? current.Name : input.Name.Trim();
             var content = input.Content is null ? current.Content : Normalize(input.Content);
@@ -576,7 +576,7 @@ public sealed class HrLibrary(
     public async Task<SharedOutcome> RetryAsync(User editor, int id, CancellationToken ct = default)
     {
         if (await sources.GetSharedAsync(Kind, id, ct) is null) return SharedOutcome.NotFound;
-        if (!ContextSourceService.CanEditShared(editor)) return SharedOutcome.Forbidden;
+        if (!await sources.CanEditSharedAsync(editor, ct)) return SharedOutcome.Forbidden;
         await db.ContextSources.Where(s => s.Id == id).ExecuteUpdateAsync(s => s.SetProperty(x => x.IndexError, (string?)null), ct);
         indexer.Enqueue(id);
         return SharedOutcome.Ok;
@@ -649,7 +649,7 @@ public sealed class HrLibrary(
     /// The Library copy of an uploaded procedure (docs/HR_PROCEDURE_ANALYZER_PROMPT.md
     /// §3.1): a `procedure` item in `search` mode named "&lt;Object&gt;.sql", the
     /// newest version's text, so Ask cites the latest code. The upload's own
-    /// permission (DevOps, SystemAdmin) already decided who may write it, so it is
+    /// permission (action:hr.procedures.upload) already decided who may write it, so it is
     /// written here directly, not through the Library editors' check. An unchanged
     /// text leaves the item and its chunks as they are.
     /// </summary>

@@ -15,6 +15,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Rbac;
 
 namespace RabbitIC.Api.Hr;
 
@@ -50,7 +51,7 @@ public sealed record HrProcResult<T>(HrProcOutcome Outcome, T? Value, string? Er
     public static HrProcResult<T> Fail(HrProcOutcome outcome, string error) => new(outcome, default, error);
 }
 
-public sealed class HrProcedures(AppDbContext db, HrLibrary library, IConfiguration config, ILogger<HrProcedures> log)
+public sealed class HrProcedures(AppDbContext db, HrLibrary library, AccessPolicy access, IConfiguration config, ILogger<HrProcedures> log)
 {
     public const long MaxUploadBytes = 2L * 1024 * 1024;
 
@@ -68,9 +69,11 @@ public sealed class HrProcedures(AppDbContext db, HrLibrary library, IConfigurat
 
     // ───────────────────────── who may do what (§3.7) ─────────────────────────
 
-    public static bool CanUpload(User u) => UserRoles.Normalize(u.Role) is UserRoles.DevOps or UserRoles.SystemAdmin;
-    public static bool CanAnswer(User u) => UserRoles.Normalize(u.Role) is UserRoles.DevOps or UserRoles.HrAssistant or UserRoles.SystemAdmin;
-    public static bool CanEditRegistry(User u) => UserRoles.Normalize(u.Role) is UserRoles.DevOps or UserRoles.SystemAdmin;
+    // Each is one key in the Access catalog, seeded with who held it before role
+    // presets: upload and the registry for DevOps, answers for DevOps and hr-assistant.
+    public Task<bool> CanUploadAsync(User u, CancellationToken ct = default) => access.HasAsync(u, PermissionKeys.HrProceduresUpload, ct);
+    public Task<bool> CanAnswerAsync(User u, CancellationToken ct = default) => access.HasAsync(u, PermissionKeys.HrProceduresAnswer, ct);
+    public Task<bool> CanEditRegistryAsync(User u, CancellationToken ct = default) => access.HasAsync(u, PermissionKeys.HrLookupsEdit, ct);
 
     private HrScanSettings Settings => HrScanSettings.From(config["Hr:Analyzer:Columns"], config["Hr:Analyzer:Aliases"]);
 
@@ -162,7 +165,7 @@ public sealed class HrProcedures(AppDbContext db, HrLibrary library, IConfigurat
     public async Task<HrProcResult<(HrProcedureDto Procedure, HrProcedureVersionDto Version)>> UploadAsync(
         User user, IFormFile file, string? note, CancellationToken ct = default)
     {
-        if (!CanUpload(user)) return Fail<(HrProcedureDto, HrProcedureVersionDto)>(HrProcOutcome.Forbidden, "Only DevOps and SystemAdmin users can upload procedures.");
+        if (!await CanUploadAsync(user, ct)) return Fail<(HrProcedureDto, HrProcedureVersionDto)>(HrProcOutcome.Forbidden, "Only DevOps and SystemAdmin users can upload procedures.");
         if (!string.Equals(Path.GetExtension(file.FileName), ".sql", StringComparison.OrdinalIgnoreCase))
             return Fail<(HrProcedureDto, HrProcedureVersionDto)>(HrProcOutcome.Invalid, "Only .sql files can be uploaded here.");
         if (file.Length > MaxUploadBytes)
@@ -392,7 +395,7 @@ public sealed class HrProcedures(AppDbContext db, HrLibrary library, IConfigurat
     /// </summary>
     public async Task<HrProcResult<HrQuestionDto>> AnswerAsync(User user, int id, HrAnswerInput input, CancellationToken ct = default)
     {
-        if (!CanAnswer(user)) return Fail<HrQuestionDto>(HrProcOutcome.Forbidden, "Only DevOps, hr-assistant and SystemAdmin users can answer questions.");
+        if (!await CanAnswerAsync(user, ct)) return Fail<HrQuestionDto>(HrProcOutcome.Forbidden, "Only DevOps, hr-assistant and SystemAdmin users can answer questions.");
         var q = await db.HrReviewQuestions.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (q is null) return Fail<HrQuestionDto>(HrProcOutcome.NotFound, "No such question.");
         if (q.Status != HrReviewQuestion.StatusOpen) return Fail<HrQuestionDto>(HrProcOutcome.Conflict, "This question is already closed.");
@@ -452,7 +455,7 @@ public sealed class HrProcedures(AppDbContext db, HrLibrary library, IConfigurat
     /// <summary>Adds or changes one registry row, logged; a label closes the open question for that value.</summary>
     public async Task<HrProcResult<HrLookupDto>> EditLookupAsync(User user, HrLookupInput input, CancellationToken ct = default)
     {
-        if (!CanEditRegistry(user)) return Fail<HrLookupDto>(HrProcOutcome.Forbidden, "Only DevOps and SystemAdmin users can edit the registry.");
+        if (!await CanEditRegistryAsync(user, ct)) return Fail<HrLookupDto>(HrProcOutcome.Forbidden, "Only DevOps and SystemAdmin users can edit the registry.");
         var column = input.Column?.Trim() ?? "";
         var value = input.Value?.Trim() ?? "";
         if (column.Length == 0 || value.Length == 0) return Fail<HrLookupDto>(HrProcOutcome.Invalid, "Column and value are required.");

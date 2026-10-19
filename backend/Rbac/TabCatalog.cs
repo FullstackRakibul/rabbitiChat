@@ -1,79 +1,25 @@
-// RBAC — the tab catalogue and the role → default-tabs map.
+// RBAC — tab keys: their canonical spelling and the aliases accepted on input.
 //
-// Deliberately a constant map rather than a table: role baselines change when
-// the SHIPPED TAB SET changes, which is a code change anyway. Keeping it here
-// means a new tab is one line in one file, and there is no migration or admin
-// step needed before the new tab can be granted.
-
-using RabbitIC.Api.Models;
+// What tabs exist, their labels and their groups are declared in
+// PermissionCatalog; what each role gets is data (RolePermissions), seeded from
+// RolePresetSeeds. This file only turns a spelling into a tab key.
 
 namespace RabbitIC.Api.Rbac;
 
 /// <summary>
-/// Every tab the shell can render, and which roles get it by default.
-///
-/// TabKeys must match the ids the Vue shell uses in its tab list — that string
-/// is the contract between the two halves. Where the shell's id differs from the
-/// obvious name (its Documents tab is "docs", its JSON/table tab is "jsonto"),
-/// the shell's id is canonical here and the other spelling is accepted as an
-/// alias, so a grant written either way lands on the same tab.
+/// TabKeys must match the ids the Vue shell uses — that string is the contract
+/// between the two halves. Where the shell's id differs from the obvious name (its
+/// Documents tab is "docs", its JSON/table tab is "jsonto"), the shell's id is
+/// canonical and the other spelling is accepted as an alias, so a grant written
+/// either way lands on the same tab.
 /// </summary>
 public static class TabCatalog
 {
-    /// <summary>The RBAC admin tab itself — SystemAdmin only, never grantable below it.</summary>
+    /// <summary>The Access tab itself. Never grantable to one user: it would let them change their own access.</summary>
     public const string RbacTab = "rbac";
 
-    /// <summary>
-    /// Canonical keys, in the order the UI should list them. The shell's own tab
-    /// ids, so a granted key always matches a renderable tab.
-    /// </summary>
-    public static readonly string[] All =
-    {
-        "dashboard",
-        "chat",
-        "workspace",
-        "docs",
-        // মানব সম্পদ (HR Assistant): SystemAdmin's and HrAssistant's by role,
-        // everyone else's only through a grant (docs/HR_MODULE_PROMPT.md §3.1).
-        "hr",
-        "todo",
-        "search",
-        "jsonto",
-        "5lakhs",
-        "ielts",
-        "component-splitter",
-        "sources",
-        "settings",
-        "notes",
-        "logs",
-        "oddity",
-        RbacTab,
-    };
-
-    /// <summary>
-    /// Human labels for the admin checklist. A key with no entry falls back to
-    /// the key itself, so adding a tab to <see cref="All"/> alone still works.
-    /// </summary>
-    private static readonly Dictionary<string, string> Labels = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["dashboard"] = "Dashboard",
-        ["chat"] = "Chat",
-        ["workspace"] = "Workspace Studio",
-        ["docs"] = "Documents",
-        ["hr"] = "মানব সম্পদ",
-        ["todo"] = "To-Do",
-        ["search"] = "Search",
-        ["jsonto"] = "JSON to ...",
-        ["5lakhs"] = "5 Lakhs",
-        ["ielts"] = "IELTS",
-        ["component-splitter"] = "Component splitter",
-        ["sources"] = "Sources",
-        ["settings"] = "Settings",
-        ["notes"] = "Notes",
-        ["logs"] = "Logs",
-        ["oddity"] = "Oddity",
-        [RbacTab] = "Access control",
-    };
+    /// <summary>Canonical keys, in the catalog's display order.</summary>
+    public static readonly string[] All = PermissionCatalog.TabKeys.ToArray();
 
     /// <summary>
     /// Alternative spellings accepted on input, mapped to the canonical key.
@@ -90,6 +36,7 @@ public static class TabCatalog
         ["todos"] = "todo",
         ["to-do"] = "todo",
         ["admin"] = RbacTab,
+        ["access"] = RbacTab,
         // The 5Lakhs module is spelled "fivelakhs" in folder and storage-key
         // names; accept that spelling on input so the two can never drift into
         // a grant that silently matches nothing.
@@ -100,87 +47,6 @@ public static class TabCatalog
         ["componentsplitter"] = "component-splitter",
         ["5lakh"] = "5lakhs",
     };
-
-    // ---- Role baselines ----
-    // Additive by construction: each tier is the previous tier plus more, so a
-    // promotion can never remove a tab.
-
-    /// <summary>
-    /// What a plain account gets with no grants at all: the self-service tools
-    /// that need no model access and expose nobody else's data.
-    ///
-    /// Chat, workspace, documents, search and IELTS are deliberately NOT here —
-    /// they are the model-backed and knowledge-base modules, so they start at
-    /// System. An admin can still grant any of them to one General user without
-    /// promoting them, which is what the additive grant table is for.
-    /// </summary>
-    private static readonly string[] GeneralTabs =
-    {
-        "dashboard", "todo", "notes", "sources", "settings", "5lakhs",
-    };
-
-    /// <summary>
-    /// General plus the model-backed and knowledge tooling. Additive by
-    /// construction — System is a superset of General, so a promotion never
-    /// removes a tab.
-    /// </summary>
-    private static readonly string[] SystemExtraTabs =
-    {
-        "chat", "workspace", "docs", "search", "ielts", "component-splitter",
-    };
-
-    /// <summary>
-    /// Ground Control is System plus the Oddity gateway it operates. Additive like
-    /// the tiers below it, so moving a System user to Ground Control removes nothing.
-    /// </summary>
-    private static readonly string[] GroundControlExtraTabs =
-    {
-        "oddity",
-    };
-
-    /// <summary>
-    /// HrAssistant's tabs: the HR module and the two personal tools, nothing else.
-    /// A side branch rather than a tier — it is not a superset of General, so a
-    /// move between HrAssistant and another role can remove tabs; a grant keeps
-    /// any of them for one user.
-    /// </summary>
-    private static readonly string[] HrAssistantTabs =
-    {
-        "hr", "notes", "settings",
-    };
-
-    /// <summary>
-    /// DevOps's tabs: the HR module (where it sees only Procedures) and Settings
-    /// (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.7). A side branch, like HrAssistant.
-    /// </summary>
-    private static readonly string[] DevOpsTabs =
-    {
-        "hr", "settings",
-    };
-
-    /// <summary>
-    /// Tabs available only to SystemAdmin. Not additive from lower tiers.
-    /// </summary>
-    private static readonly string[] SystemAdminOnlyTabs =
-    {
-        "logs",
-    };
-
-    /// <summary>
-    /// Tabs a role gets without any explicit grant.
-    /// SystemAdmin gets everything in <see cref="All"/>, including the RBAC tab —
-    /// that tab is never in a lower tier, so it cannot be granted to a non-admin.
-    /// </summary>
-    public static IReadOnlyCollection<string> DefaultTabsFor(string? role) =>
-        UserRoles.Normalize(role) switch
-        {
-            UserRoles.SystemAdmin => All,
-            UserRoles.GroundControl => GeneralTabs.Concat(SystemExtraTabs).Concat(GroundControlExtraTabs).ToArray(),
-            UserRoles.System => GeneralTabs.Concat(SystemExtraTabs).ToArray(),
-            UserRoles.HrAssistant => HrAssistantTabs,
-            UserRoles.DevOps => DevOpsTabs,
-            _ => GeneralTabs,
-        };
 
     /// <summary>
     /// Canonical form of a tab key, or null when it names no known tab.
@@ -199,33 +65,14 @@ public static class TabCatalog
     }
 
     public static string LabelFor(string tabKey) =>
-        Labels.TryGetValue(tabKey, out var label) ? label : tabKey;
+        PermissionCatalog.Find(PermissionKeys.Tab(tabKey))?.DisplayLabel ?? tabKey;
 
     /// <summary>
-    /// True when a tab may be handed to a user who does not already hold it by
-    /// role. Everything is grantable except the RBAC tab: that screen changes
-    /// roles and grants, so granting it would let a non-admin promote
-    /// themselves, and the grant would be a way around the role check rather
-    /// than an addition to it.
+    /// True when a tab may be handed to one user beyond their role. Everything is
+    /// grantable except the Access tab: that screen changes roles and grants, so
+    /// granting it would let a user change their own access.
     /// </summary>
     public static bool IsGrantable(string? tabKey) =>
         Canonical(tabKey) is { } key &&
         !string.Equals(key, RbacTab, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Effective tabs = role baseline ∪ explicit grants, in catalogue order so
-    /// the UI gets a stable list. Grants that name an unknown tab are ignored.
-    /// </summary>
-    public static List<string> EffectiveTabs(string? role, IEnumerable<string> grants)
-    {
-        var set = new HashSet<string>(DefaultTabsFor(role), StringComparer.OrdinalIgnoreCase);
-
-        foreach (var grant in grants)
-        {
-            var canonical = Canonical(grant);
-            if (canonical is not null) set.Add(canonical);
-        }
-
-        return All.Where(set.Contains).ToList();
-    }
 }

@@ -1,5 +1,5 @@
 // Barrel export so callers can `import { … } from '../services'`.
-export { http, AuthError, HttpError } from './http.js'
+export { http, AuthError, HttpError, onAccessChange } from './http.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'
 export { getModels, streamChat } from './chat.service.js'
@@ -26,7 +26,7 @@ export {
   deleteContextSource, reorderContextSources,
 } from './context-source.service.js'
 export {
-  myTabs, searchUsers, getUser, setRole, setTabs, listTabs, listRoles,
+  myTabs, myAccess, getCatalog, getRolePresets, saveRolePreset, searchUsers, getUser, setRole, setTabs, listTabs, listRoles,
   listModelPolicies, setModelPolicy,
 } from './rbac.service.js'
 export {

@@ -16,8 +16,14 @@ public class AppDbContext : DbContext
     public DbSet<EmbeddingChunk> EmbeddingChunks => Set<EmbeddingChunk>();
     public DbSet<BuyerProfile> BuyerProfiles => Set<BuyerProfile>();
 
-    /// <summary>RBAC — explicit per-tab grants that add to a user's role baseline.</summary>
-    public DbSet<UserTabPermission> UserTabPermissions => Set<UserTabPermission>();
+    /// <summary>Access — what each role gets, one row per role and permission key (Rbac/AccessPolicy.cs).</summary>
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
+    /// <summary>Access — one user's Allow or Deny on one key, over their role's value.</summary>
+    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+
+    /// <summary>Access — every change, append-only (SQLite triggers in SchemaUpgrade).</summary>
+    public DbSet<AccessChangeLogEntry> AccessChangeLog => Set<AccessChangeLogEntry>();
 
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
@@ -81,18 +87,18 @@ public class AppDbContext : DbContext
         b.Entity<User>()
             .HasIndex(u => u.Token);
 
-        // RBAC — one row per granted tab. The unique index is the guarantee that a
-        // grant is a set membership, not a count: granting the same tab twice is
-        // impossible rather than merely harmless.
-        b.Entity<UserTabPermission>()
-            .HasOne(p => p.User)
-            .WithMany(u => u.TabPermissions)
-            .HasForeignKey(p => p.UserId)
+        // Access — one preset row per (role, key) and one override per (user, key):
+        // the keys are the identity, so a second row for the same pair is
+        // impossible rather than merely ignored.
+        b.Entity<RolePermission>().HasKey(p => new { p.Role, p.Key });
+        b.Entity<UserPermissionOverride>().HasKey(o => new { o.UserId, o.Key });
+        b.Entity<UserPermissionOverride>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(o => o.UserId)
             .OnDelete(DeleteBehavior.Cascade);
-
-        b.Entity<UserTabPermission>()
-            .HasIndex(p => new { p.UserId, p.TabKey })
-            .IsUnique();
+        b.Entity<AccessChangeLogEntry>().ToTable("AccessChangeLog");
+        b.Entity<AccessChangeLogEntry>().HasIndex(e => e.AtUtc);
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)

@@ -27,6 +27,7 @@ using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Observability;
+using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Services;
 
 namespace RabbitIC.Api.Oddity;
@@ -59,20 +60,20 @@ public sealed class OddityProxy
     private readonly OddityKeyService _keys;
     private readonly OdditySettingsService _settings;
     private readonly OddityRecorder _recorder;
-    private readonly RbacService _rbac;
+    private readonly AccessPolicy _access;
     private readonly RabbitIC.Api.Rbac.ModelPolicy _modelPolicy;
     private readonly IHttpClientFactory _http;
 
     public OddityProxy(
         AppDbContext db, OddityKeyService keys, OdditySettingsService settings,
-        OddityRecorder recorder, RbacService rbac, IHttpClientFactory http,
+        OddityRecorder recorder, AccessPolicy access, IHttpClientFactory http,
         RabbitIC.Api.Rbac.ModelPolicy modelPolicy)
     {
         _db = db;
         _keys = keys;
         _settings = settings;
         _recorder = recorder;
-        _rbac = rbac;
+        _access = access;
         _modelPolicy = modelPolicy;
         _http = http;
     }
@@ -133,7 +134,7 @@ public sealed class OddityProxy
 
         // 2. The owner must still hold the tab — a key outlives a role change.
         var owner = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == key.OwnerUserId, ct);
-        if (owner is null || !await _rbac.CanAccessTabAsync(owner, TabKey, ct))
+        if (owner is null || !await _access.HasAsync(owner, PermissionKeys.Tab(TabKey), ct))
         {
             await RejectAsync(ctx, row, StatusCodes.Status403Forbidden, "this key's owner no longer has the Oddity tab");
             return;
@@ -369,7 +370,7 @@ public sealed class OddityProxy
         }
 
         var owner = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == key.OwnerUserId, ct);
-        if (owner is null || !await _rbac.CanAccessTabAsync(owner, TabKey, ct))
+        if (owner is null || !await _access.HasAsync(owner, PermissionKeys.Tab(TabKey), ct))
         {
             await ErrorAsync(ctx, StatusCodes.Status403Forbidden, "this key's owner no longer has the Oddity tab");
             return null;

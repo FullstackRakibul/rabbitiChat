@@ -1,9 +1,8 @@
 <script setup>
 /**
- * Access control — the SystemAdmin tab.
- *
- * Left: search users by username, paged. Right: the selected user's role and
- * tab checklist.
+ * Access — three views: Roles (what every role gets, RolePresetMatrix), Users
+ * (search users by username, paged; the selected user's role and tab
+ * checklist) and Models (which models each role may run).
  *
  * The backend is the authority on every rule here; this component mirrors the
  * rules so the UI can explain a refusal before it happens (own row, last admin),
@@ -20,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import ModelPolicyEditor from '@/components/rbac/ModelPolicyEditor.vue'
+import RolePresetMatrix from '@/components/rbac/RolePresetMatrix.vue'
 import { cn } from '@/lib/utils'
 
 const props = defineProps({
@@ -30,6 +30,24 @@ const props = defineProps({
 const emit = defineEmits(['changed'])
 
 const PAGE_SIZE = 20
+
+// ---- Views ----
+const VIEWS = [
+  { key: 'roles', label: 'Roles' },
+  { key: 'users', label: 'Users' },
+  { key: 'models', label: 'Models' },
+]
+const view = ref('users')
+const matrix = ref(null)
+
+/** Leaving Roles with unsaved changes asks first, as leaving the page does. */
+function showView(next) {
+  if (next === view.value) return
+  if (view.value === 'roles' && matrix.value && !matrix.value.confirmLeave()) return
+  view.value = next
+  // A role preset may have changed what a user's role gives.
+  if (next === 'users' && selected.value) openUser(selected.value.id)
+}
 
 // ---- List state ----
 const search = ref('')
@@ -243,17 +261,33 @@ defineExpose({ refresh: refreshList })
         Access control
       </h2>
       <p class="mt-1 text-sm text-muted-foreground">
-        Roles set the baseline tabs; individual grants add to it. Nothing here can
-        take a tab away that the role already gives.
+        Roles set what every user of the role gets; individual grants add to it.
       </p>
     </div>
+
+    <nav class="flex w-fit gap-1 rounded-lg border bg-muted/40 p-1" aria-label="Access views">
+      <button
+        v-for="v in VIEWS"
+        :key="v.key"
+        type="button"
+        :data-access-view="v.key"
+        :aria-current="view === v.key ? 'page' : undefined"
+        :class="cn(
+          'rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          view === v.key ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground',
+        )"
+        @click="showView(v.key)"
+      >{{ v.label }}</button>
+    </nav>
+
+    <RolePresetMatrix v-if="view === 'roles'" ref="matrix" @open-models="showView('models')" />
 
     <!--
       Not flex-1: the model policy editor sits below this grid, and the page
       itself scrolls. A grid that claimed the remaining viewport height would
       paint over whatever follows it instead of making room for it.
     -->
-    <div class="grid shrink-0 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+    <div v-show="view === 'users'" class="grid shrink-0 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <!-- ── Users ── -->
       <!--
         A definite height, because this panel scrolls internally (flex-1 +
@@ -437,12 +471,10 @@ defineExpose({ refresh: refreshList })
       </section>
     </div>
 
-    <Separator />
-
     <!--
-      The model policy. Same screen, same audience: this tab is SystemAdmin-only
-      and is never grantable, which is the gate on the editor too.
+      The model policy. Same screen, same audience: the access managers, which is
+      the gate on the editor too.
     -->
-    <ModelPolicyEditor />
+    <ModelPolicyEditor v-if="view === 'models'" />
   </div>
 </template>

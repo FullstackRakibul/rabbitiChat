@@ -37,6 +37,7 @@ public static class SchemaUpgrade
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
+        EnsureAccessSchema(db);
         EnsureRoleModelPolicyTable(db);
         EnsureIeltsTables(db);
         EnsureOddityTables(db);
@@ -319,21 +320,89 @@ public static class SchemaUpgrade
                 @"ALTER TABLE ""Users"" ADD COLUMN ""Role"" TEXT NOT NULL DEFAULT 'General';");
         }
 
-        if (!TableExists(db, "UserTabPermissions"))
+        // UserTabPermissions, the tab grants from before role presets, is no longer
+        // created: EnsureAccessSchema moves its rows into UserPermissionOverrides
+        // and leaves the old table as it was.
+    }
+
+    /// <summary>
+    /// Access (docs/RBAC_ROLES_PROMPT.md §3.2): role presets, user overrides and
+    /// the change log, for a database made before them — a new file gets the same
+    /// shapes from EnsureCreated. On every database, the triggers that make the
+    /// log append-only, the Rulebook's pattern.
+    ///
+    /// The tab grants move exactly once: in the step that creates
+    /// UserPermissionOverrides, each UserTabPermissions row becomes an "allow"
+    /// override on "tab:&lt;key&gt;", logged as a change by the system. The old
+    /// table is left untouched and never read again.
+    /// </summary>
+    private static void EnsureAccessSchema(AppDbContext db)
+    {
+        if (!TableExists(db, "RolePermissions"))
         {
             db.Database.ExecuteSqlRaw(@"
-                CREATE TABLE ""UserTabPermissions"" (
-                    ""Id""        INTEGER NOT NULL CONSTRAINT ""PK_UserTabPermissions"" PRIMARY KEY AUTOINCREMENT,
-                    ""UserId""    INTEGER NOT NULL,
-                    ""TabKey""    TEXT NOT NULL,
-                    ""CreatedAt"" TEXT NOT NULL,
-                    CONSTRAINT ""FK_UserTabPermissions_Users_UserId""
+                CREATE TABLE ""RolePermissions"" (
+                    ""Role""            TEXT NOT NULL,
+                    ""Key""             TEXT NOT NULL,
+                    ""Allowed""         INTEGER NOT NULL,
+                    ""UpdatedByUserId"" INTEGER NULL,
+                    ""UpdatedAtUtc""    TEXT NOT NULL,
+                    CONSTRAINT ""PK_RolePermissions"" PRIMARY KEY (""Role"", ""Key"")
+                );");
+        }
+
+        if (!TableExists(db, "AccessChangeLog"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""AccessChangeLog"" (
+                    ""Id""       INTEGER NOT NULL CONSTRAINT ""PK_AccessChangeLog"" PRIMARY KEY AUTOINCREMENT,
+                    ""AtUtc""    TEXT NOT NULL,
+                    ""ByUserId"" INTEGER NULL,
+                    ""Scope""    TEXT NOT NULL,
+                    ""Target""   TEXT NOT NULL,
+                    ""Key""      TEXT NOT NULL,
+                    ""Before""   TEXT NULL,
+                    ""After""    TEXT NULL,
+                    ""Note""     TEXT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE INDEX ""IX_AccessChangeLog_AtUtc"" ON ""AccessChangeLog"" (""AtUtc"");");
+        }
+
+        if (!TableExists(db, "UserPermissionOverrides"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""UserPermissionOverrides"" (
+                    ""UserId""          INTEGER NOT NULL,
+                    ""Key""             TEXT NOT NULL,
+                    ""Effect""          TEXT NOT NULL,
+                    ""UpdatedByUserId"" INTEGER NULL,
+                    ""UpdatedAtUtc""    TEXT NOT NULL,
+                    ""Note""            TEXT NULL,
+                    CONSTRAINT ""PK_UserPermissionOverrides"" PRIMARY KEY (""UserId"", ""Key""),
+                    CONSTRAINT ""FK_UserPermissionOverrides_Users_UserId""
                         FOREIGN KEY (""UserId"") REFERENCES ""Users"" (""Id"") ON DELETE CASCADE
                 );");
-            db.Database.ExecuteSqlRaw(
-                @"CREATE UNIQUE INDEX ""IX_UserTabPermissions_UserId_TabKey""
-                  ON ""UserTabPermissions"" (""UserId"", ""TabKey"");");
+
+            if (TableExists(db, "UserTabPermissions"))
+            {
+                const string note = "Tab grant moved from UserTabPermissions when role presets arrived.";
+                db.Database.ExecuteSqlRaw(@"
+                    INSERT OR IGNORE INTO ""UserPermissionOverrides"" (""UserId"", ""Key"", ""Effect"", ""UpdatedByUserId"", ""UpdatedAtUtc"", ""Note"")
+                    SELECT g.""UserId"", 'tab:' || g.""TabKey"", 'allow', NULL, g.""CreatedAt"", {0}
+                    FROM ""UserTabPermissions"" g JOIN ""Users"" u ON u.""Id"" = g.""UserId"";", note);
+                db.Database.ExecuteSqlRaw(@"
+                    INSERT INTO ""AccessChangeLog"" (""AtUtc"", ""ByUserId"", ""Scope"", ""Target"", ""Key"", ""Before"", ""After"", ""Note"")
+                    SELECT strftime('%Y-%m-%d %H:%M:%S', 'now'), NULL, 'user', CAST(""UserId"" AS TEXT), ""Key"", NULL, 'allow', ""Note""
+                    FROM ""UserPermissionOverrides"";");
+            }
         }
+
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""AccessChangeLog_NoUpdate"" BEFORE UPDATE ON ""AccessChangeLog""
+            BEGIN SELECT RAISE(ABORT, 'AccessChangeLog is append-only: a logged change is never updated'); END");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""AccessChangeLog_NoDelete"" BEFORE DELETE ON ""AccessChangeLog""
+            BEGIN SELECT RAISE(ABORT, 'AccessChangeLog is append-only: a logged change is never deleted'); END");
     }
 
     /// <summary>

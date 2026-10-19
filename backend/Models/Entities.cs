@@ -18,7 +18,7 @@ public class User
 	public DateTime CreatedAt { get; set; } = DateTime.Now;
 
 	public List<Conversation> Conversations { get; set; } = new();
-	public List<UserTabPermission> TabPermissions { get; set; } = new();
+
 }
 
 public class Conversation

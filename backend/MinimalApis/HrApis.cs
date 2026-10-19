@@ -11,7 +11,7 @@
 //   POST   /api/hr/library/{id}/retry      re-queue an item whose embedding failed (editors)
 //   POST   /api/hr/library/embed           re-queue every item with un-embedded chunks (editors)
 //   (A Rulebook page's Library copy answers PUT and DELETE with 409: it is edited in the Rulebook.)
-//   GET    /api/hr/library/index-stats     chunks in memory / database / keyword index (SystemAdmin)
+//   GET    /api/hr/library/index-stats     chunks in memory / database / keyword index (action:hr.library.stats)
 // Ask
 //   GET    /api/hr/search?q=…&items=…      instant hybrid search, no model
 //   GET    /api/hr/retrieve?q=…            the excerpts a question would be sent with
@@ -23,7 +23,7 @@
 //
 // The whole of /api/hr is gated by the `hr` tab in TabAccessMiddleware, which is
 // what "anyone with the hr tab can read" means. Who may WRITE is decided once,
-// in ContextSourceService; these routes only translate its outcome.
+// in ContextSourceService (action:hr.library.edit); these routes only translate its outcome.
 
 using System.Diagnostics;
 using System.Text.Json;
@@ -32,6 +32,7 @@ using RabbitIC.Api.AuthHelper;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Hr;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Services;
 
 namespace RabbitIC.Api.MinimalApis
@@ -45,14 +46,14 @@ namespace RabbitIC.Api.MinimalApis
         {
             // ───────────────────────── library ─────────────────────────
 
-            app.MapGet("/hr/library", async (HttpContext ctx, AppDbContext db, HrLibrary library, CancellationToken ct) =>
+            app.MapGet("/hr/library", async (HttpContext ctx, AppDbContext db, HrLibrary library, IContextSourceService sources, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
                 return Results.Ok(new
                 {
                     items = await library.ListAsync(user, ct),
-                    canEdit = ContextSourceService.CanEditShared(user),
+                    canEdit = await sources.CanEditSharedAsync(user, ct),
                     alwaysTokens = await library.AlwaysTokensAsync(ct),
                     alwaysCap = HrLibrary.AlwaysCapTokens,
                     types = HrLibrary.Types,
@@ -88,11 +89,11 @@ namespace RabbitIC.Api.MinimalApis
 
             // One or many files in one request; each answered on its own, so one bad
             // file does not lose the rest. 201 when any was added, 400 when none.
-            app.MapPost("/hr/library/upload", async (HttpContext ctx, AppDbContext db, HrLibrary library, CancellationToken ct) =>
+            app.MapPost("/hr/library/upload", async (HttpContext ctx, AppDbContext db, HrLibrary library, IContextSourceService sources, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                if (!ContextSourceService.CanEditShared(user)) return Forbidden();
+                if (!await sources.CanEditSharedAsync(user, ct)) return Forbidden();
                 if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Send the files as multipart/form-data." });
 
                 var form = await ctx.Request.ReadFormAsync(ct);
@@ -161,22 +162,22 @@ namespace RabbitIC.Api.MinimalApis
                 };
             });
 
-            app.MapPost("/hr/library/embed", async (HttpContext ctx, AppDbContext db, HrLibrary library, CancellationToken ct) =>
+            app.MapPost("/hr/library/embed", async (HttpContext ctx, AppDbContext db, HrLibrary library, IContextSourceService sources, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                if (!ContextSourceService.CanEditShared(user)) return Forbidden();
+                if (!await sources.CanEditSharedAsync(user, ct)) return Forbidden();
                 var queued = 0;
                 foreach (var item in await library.ListAsync(user, ct))
                     if (item.EmbeddedCount < item.ChunkCount && await library.RetryAsync(user, item.Id, ct) == SharedOutcome.Ok) queued++;
                 return Results.Ok(new { queued });
             });
 
-            app.MapGet("/hr/library/index-stats", async (HttpContext ctx, AppDbContext db, HrLibrary library, CancellationToken ct) =>
+            app.MapGet("/hr/library/index-stats", async (HttpContext ctx, AppDbContext db, HrLibrary library, AccessPolicy access, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                if (!UserRoles.IsSystemAdmin(user)) return Results.Json(new { error = "SystemAdmin role required." }, statusCode: 403);
+                if (!await access.HasAsync(user, PermissionKeys.HrLibraryStats, ct)) return Results.Json(new { error = "SystemAdmin role required." }, statusCode: 403);
                 return Results.Ok(await library.IndexStatsAsync(ct));
             });
 

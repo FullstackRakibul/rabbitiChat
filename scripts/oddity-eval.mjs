@@ -256,6 +256,9 @@ function portAnswers(port) {
 
 // ─────────────────────────────── the API ───────────────────────────────
 
+/** Where buildApi() puts the build — rbac-eval serves the SPA from its wwwroot. */
+export const API_BIN_DIR = BIN_DIR
+
 export function buildApi() {
   const r = spawnSync('dotnet', ['build', PROJECT, '-o', BIN_DIR, '-nologo', '-v', 'q'], {
     encoding: 'utf8', shell: process.platform === 'win32',
@@ -266,9 +269,10 @@ export function buildApi() {
 /**
  * Starts the built API against the fake. `runDir` holds the throwaway database and
  * is the working directory, so uploads land there too. Reuse `runDir` to restart
- * on the same database.
+ * on the same database. `binDir` runs another build (rbac-eval starts the build from
+ * before a change on the same database); it defaults to this suite's own build.
  */
-export async function startApi({ fakeUrl, runDir, port, env: extraEnv } = {}) {
+export async function startApi({ fakeUrl, runDir, port, env: extraEnv, binDir = BIN_DIR } = {}) {
   fs.mkdirSync(runDir, { recursive: true })
   // A port someone else holds would answer the readiness check, and every call
   // after it would reach THEIR server and database. Refuse rather than guess.
@@ -299,9 +303,9 @@ export async function startApi({ fakeUrl, runDir, port, env: extraEnv } = {}) {
   }
 
   const proc = spawn('dotnet', [
-    path.join(BIN_DIR, 'RabbitIC.Api.dll'),
+    path.join(binDir, 'RabbitIC.Api.dll'),
     '--urls', `http://127.0.0.1:${port}`,
-    '--contentRoot', BIN_DIR,
+    '--contentRoot', binDir,
   ], { cwd: runDir, env })
   proc.stdout.pipe(log)
   proc.stderr.pipe(log)
@@ -596,40 +600,43 @@ function extract(rel, blockRe, itemRe, constants = {}) {
   return items
 }
 
+// Since role presets (docs/RBAC_ROLES_PROMPT.md P1) the tabs are declared once, in
+// PermissionCatalog (TabCatalog.All is derived from it), and the shell keeps only
+// an icon per module (MODULE_ICONS) — labels and groups come from the server.
 const sources = () => ({
-  catalog: extract('backend/Rbac/TabCatalog.cs',
-    /public static readonly string\[\] All =\s*\{([\s\S]*?)\};/, /"([^"]+)"|\b(RbacTab)\b/g, { RbacTab: 'rbac' }),
+  catalog: extract('backend/Rbac/PermissionCatalog.cs',
+    /public static readonly IReadOnlyList<PermissionDef> All = new\[\]\s*\{([\s\S]*?)\n    \};/, /\bTab\("([^"]+)"/g),
   routes: extract('frontend/src/app/router.js',
     /export const MODULE_ROUTES = \[([\s\S]*?)\n\]/, /key: '([^']+)'/g),
-  tabs: extract('frontend/src/App.vue', /const ALL_TABS = \[([\s\S]*?)\n\]/, /id: '([^']+)'/g),
+  tabs: extract('frontend/src/App.vue', /const MODULE_ICONS = \{([\s\S]*?)\n\}/, /^\s*'?([\w-]+)'?:/gm),
 })
 
 check('G1.5', 1, "the key 'oddity' appears in all seven places", async () => {
   const places = [
-    ['TabCatalog.All', sources().catalog.includes('oddity')],
-    ['TabCatalog.Labels', /\["oddity"\]\s*=\s*"Oddity"/.test(read('backend/Rbac/TabCatalog.cs'))],
-    ['role baseline', /GroundControl\w*Tabs\s*=\s*\{[^}]*"oddity"/.test(read('backend/Rbac/TabCatalog.cs'))],
+    ['PermissionCatalog', sources().catalog.includes('oddity')],
+    ['catalog label', /Tab\("oddity",\s*"Oddity"/.test(read('backend/Rbac/PermissionCatalog.cs'))],
+    ['role baseline', /GroundControlTabs\s*=\s*SystemTabs\.Append\("oddity"\)/.test(read('backend/Rbac/RolePresetSeeds.cs'))],
     ['TabAccessMiddleware', /\("\/api\/oddity",\s*"oddity"\)/.test(read('backend/Middleware/TabAccessMiddleware.cs'))],
     ['MODULE_ROUTES', sources().routes.includes('oddity')],
-    ['ALL_TABS', sources().tabs.includes('oddity')],
+    ['MODULE_ICONS', sources().tabs.includes('oddity')],
     ['<TabsContent>', /<TabsContent[^>]*value="oddity"/.test(read('frontend/src/App.vue'))],
   ]
   const missing = places.filter(([, found]) => !found).map(([p]) => p)
   return ok(missing.length === 0, missing.length ? `missing in ${show(missing)}` : 'all seven')
 })
 
-check('G1.8', 1, 'ALL_TABS ⊆ MODULE_ROUTES ⊆ TabCatalog.All, with oddity', async () => {
+check('G1.8', 1, 'MODULE_ICONS ⊆ MODULE_ROUTES ⊆ PermissionCatalog tabs, with oddity', async () => {
   const { catalog, routes, tabs } = sources()
   const a = tabs.filter((t) => !routes.includes(t))
   const b = routes.filter((r) => !catalog.includes(r))
   const has = tabs.includes('oddity') && routes.includes('oddity') && catalog.includes('oddity')
   return ok(a.length === 0 && b.length === 0 && has,
-    `ALL_TABS ${tabs.length} · MODULE_ROUTES ${routes.length} · TabCatalog.All ${catalog.length}`
+    `MODULE_ICONS ${tabs.length} · MODULE_ROUTES ${routes.length} · PermissionCatalog tabs ${catalog.length}`
     + (a.length ? ` · not routed ${show(a)}` : '') + (b.length ? ` · not in catalog ${show(b)}` : '')
     + (has ? '' : ' · oddity missing'))
 })
 
-check('G1.8', 1, 'TabCatalog.All in source equals the server tab list', async () => {
+check('G1.8', 1, 'the PermissionCatalog tabs in source equal the server tab list', async () => {
   const r = await call(ctx.api.url, 'GET', '/api/admin/rbac/tabs', { token: ctx.admin.token })
   const server = (r.json ?? []).map?.((t) => t.key) ?? []
   return ok(server.join(',') === sources().catalog.join(','), `server ${show(server)}`)

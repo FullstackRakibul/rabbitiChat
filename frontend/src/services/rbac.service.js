@@ -18,7 +18,42 @@ export function myTabs() {
   return http.get('/me/tabs')
 }
 
-// ---- Admin surface (SystemAdmin only) ----
+/**
+ * Everything the shell draws from, in one call:
+ *   { id, username, role, roleLabel, isSystemAdmin, tabs, sections, actions,
+ *     modules: [{ key, label, en, bn, group }], models: { allowed, default, locked }, revision }
+ * `tabs` is the list /me/tabs returns; `modules` adds each one's label and menu group.
+ */
+export function myAccess() {
+  return http.get('/me/access')
+}
+
+// ---- Access: the catalog and role presets (access managers only) ----
+
+/**
+ * Every tab, section and action:
+ *   { groups: ['Work', 'Tools', 'System'],
+ *     permissions: [{ key, kind, en, bn, label, group, parent, alwaysOn }] }
+ * The only list of what can be allowed — the Access screen draws from this.
+ */
+export function getCatalog() {
+  return http.get('/access/catalog')
+}
+
+/** { roles: [{ role, label, locked, userCount, values: { 'tab:chat': true, … } }] } */
+export function getRolePresets() {
+  return http.get('/access/roles')
+}
+
+/**
+ * Saves one role's changed keys. Returns { role, changed: [{ key, before, after }],
+ * affectedUsers, values }. A 400 names the invariant it would break.
+ */
+export function saveRolePreset(role, values, note) {
+  return http.put(`/access/roles/${encodeURIComponent(role)}`, { values, note })
+}
+
+// ---- Admin surface (access managers only) ----
 
 /**
  * One page of users matching a username substring.

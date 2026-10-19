@@ -152,5 +152,38 @@ public static class RbacSeeder
             string.Join(", ", added), generalDefault);
     }
 
+    /// <summary>
+    /// One RolePermissions row per role and catalog key (docs/RBAC_ROLES_PROMPT.md
+    /// §3.2), each starting on today's value (RolePresetSeeds). Only rows that are
+    /// missing are written — a key added to the catalog later gets its rows on the
+    /// next start, and an administrator's edit is never overwritten.
+    /// </summary>
+    public static void SeedRolePermissions(AppDbContext db, ILogger logger)
+    {
+        var existing = db.RolePermissions.Select(r => new { r.Role, r.Key }).AsEnumerable()
+            .Select(r => (UserRoles.Normalize(r.Role), r.Key.ToLowerInvariant()))
+            .ToHashSet();
+
+        var added = 0;
+        foreach (var role in UserRoles.All)
+        foreach (var p in PermissionCatalog.All)
+        {
+            if (existing.Contains((role, p.Key.ToLowerInvariant()))) continue;
+            db.RolePermissions.Add(new RolePermission
+            {
+                Role = role,
+                Key = p.Key,
+                Allowed = RolePresetSeeds.InitialValue(role, p),
+                UpdatedAtUtc = DateTime.UtcNow,
+            });
+            added++;
+        }
+
+        if (added == 0) return;
+        db.SaveChanges();
+        AccessPolicy.Invalidate();
+        logger.LogInformation("Access: seeded {Count} role permission row(s) from today's baselines.", added);
+    }
+
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 }

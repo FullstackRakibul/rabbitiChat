@@ -21,14 +21,18 @@ public interface IRbacRepository
 
     Task<User?> GetUserByUsernameAsync(string username, CancellationToken ct = default);
 
-    /// <summary>Granted tab keys for one user.</summary>
+    /// <summary>Granted tab keys for one user, without the "tab:" prefix.</summary>
     Task<List<string>> GetGrantsAsync(int userId, CancellationToken ct = default);
 
     /// <summary>Grant counts for a set of users, keyed by user id — avoids an N+1 over the list.</summary>
     Task<Dictionary<int, int>> GetGrantCountsAsync(List<int> userIds, CancellationToken ct = default);
 
-    /// <summary>Replaces a user's explicit grants with exactly <paramref name="tabKeys"/>.</summary>
-    Task ReplaceGrantsAsync(int userId, IReadOnlyCollection<string> tabKeys, CancellationToken ct = default);
+    /// <summary>
+    /// Replaces a user's tab grants (allow overrides on tab keys) with exactly
+    /// <paramref name="tabKeys"/>; returns the keys added and removed, for the change log.
+    /// </summary>
+    Task<(List<string> Added, List<string> Removed)> ReplaceGrantsAsync(
+        int userId, IReadOnlyCollection<string> tabKeys, int byUserId, CancellationToken ct = default);
 
     /// <summary>
     /// How many users currently hold SystemAdmin. The last-admin guardrail is a

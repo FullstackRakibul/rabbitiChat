@@ -45,10 +45,13 @@ public class RbacRepository : IRbacRepository
     public Task<User?> GetUserByUsernameAsync(string username, CancellationToken ct = default) =>
         _db.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
 
+    // Tab grants are "allow" overrides on "tab:<key>" (UserPermissionOverrides);
+    // these three read and write only those rows, so the grant API keeps its shape.
+
     public Task<List<string>> GetGrantsAsync(int userId, CancellationToken ct = default) =>
-        _db.UserTabPermissions
-            .Where(p => p.UserId == userId)
-            .Select(p => p.TabKey)
+        _db.UserPermissionOverrides
+            .Where(o => o.UserId == userId && o.Effect == UserPermissionOverride.Allow && o.Key.StartsWith(TabPrefix))
+            .Select(o => o.Key.Substring(TabPrefix.Length))
             .ToListAsync(ct);
 
     public async Task<Dictionary<int, int>> GetGrantCountsAsync(
@@ -56,35 +59,41 @@ public class RbacRepository : IRbacRepository
     {
         if (userIds.Count == 0) return new Dictionary<int, int>();
 
-        var counts = await _db.UserTabPermissions
-            .Where(p => userIds.Contains(p.UserId))
-            .GroupBy(p => p.UserId)
+        var counts = await _db.UserPermissionOverrides
+            .Where(o => userIds.Contains(o.UserId) && o.Effect == UserPermissionOverride.Allow && o.Key.StartsWith(TabPrefix))
+            .GroupBy(o => o.UserId)
             .Select(g => new { UserId = g.Key, Count = g.Count() })
             .ToListAsync(ct);
 
         return counts.ToDictionary(c => c.UserId, c => c.Count);
     }
 
-    public async Task ReplaceGrantsAsync(
-        int userId, IReadOnlyCollection<string> tabKeys, CancellationToken ct = default)
+    public async Task<(List<string> Added, List<string> Removed)> ReplaceGrantsAsync(
+        int userId, IReadOnlyCollection<string> tabKeys, int byUserId, CancellationToken ct = default)
     {
-        var existing = await _db.UserTabPermissions
-            .Where(p => p.UserId == userId)
+        var existing = await _db.UserPermissionOverrides
+            .Where(o => o.UserId == userId && o.Effect == UserPermissionOverride.Allow && o.Key.StartsWith(TabPrefix))
             .ToListAsync(ct);
 
-        // Diff rather than delete-all-then-insert, so CreatedAt survives on grants
-        // that were already there and the unique index is never transiently violated.
-        var wanted = new HashSet<string>(tabKeys, StringComparer.OrdinalIgnoreCase);
+        // Diff rather than delete-all-then-insert, so the time of a grant that was
+        // already there survives and the key is never transiently missing.
+        var wanted = new HashSet<string>(tabKeys.Select(k => TabPrefix + k), StringComparer.OrdinalIgnoreCase);
+        var removed = existing.Where(r => !wanted.Contains(r.Key)).ToList();
+        foreach (var row in removed) _db.UserPermissionOverrides.Remove(row);
 
-        foreach (var row in existing.Where(r => !wanted.Contains(r.TabKey)))
-            _db.UserTabPermissions.Remove(row);
+        var present = new HashSet<string>(existing.Select(r => r.Key), StringComparer.OrdinalIgnoreCase);
+        var added = wanted.Where(k => !present.Contains(k)).ToList();
+        foreach (var key in added)
+            _db.UserPermissionOverrides.Add(new UserPermissionOverride
+            {
+                UserId = userId, Key = key, Effect = UserPermissionOverride.Allow,
+                UpdatedByUserId = byUserId, UpdatedAtUtc = DateTime.UtcNow,
+            });
 
-        var present = new HashSet<string>(
-            existing.Select(r => r.TabKey), StringComparer.OrdinalIgnoreCase);
-
-        foreach (var key in wanted.Where(k => !present.Contains(k)))
-            _db.UserTabPermissions.Add(new UserTabPermission { UserId = userId, TabKey = key });
+        return (added, removed.Select(r => r.Key).ToList());
     }
+
+    private const string TabPrefix = "tab:";
 
     /// <summary>
     /// Case-insensitive on purpose: authorisation normalises the role before

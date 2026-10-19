@@ -54,9 +54,12 @@ public interface IContextSourceService
     // ---- shared kinds: the one exception to owner scoping ----
     // A shared kind (the HR library, Kind = "hr") is company knowledge: every row
     // is readable by whoever the calling route lets in (tab `hr`), whoever wrote
-    // it, and only HrAssistant and SystemAdmin may change it. Shared rows never
+    // it, and only holders of action:hr.library.edit may change it. Shared rows never
     // appear through the owner-scoped methods above, so /api/context-sources can
     // neither read nor create one (docs/HR_MODULE_PROMPT.md §3.2).
+
+    /// <summary>Whether this user may change shared rows — the one check every shared write makes.</summary>
+    Task<bool> CanEditSharedAsync(User user, CancellationToken ct = default);
 
     /// <summary>Every row of a shared kind, in SortOrder then Id.</summary>
     Task<IReadOnlyList<ContextSource>> ListSharedAsync(string kind, CancellationToken ct = default);

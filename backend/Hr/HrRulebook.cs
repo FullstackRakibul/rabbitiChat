@@ -13,8 +13,9 @@
 // the copy, and so Ask, keep the confirmed text until the next confirmation.
 // Retiring switches the copy off; the page and its history stay.
 //
-// Who may do what (§3.2): editors (HrAssistant, SystemAdmin — the Library's
-// editors) do everything; anyone else with the `hr` tab reads pages that have
+// Who may do what (§3.2): editors (action:hr.rulebook.edit, seeded for
+// HrAssistant; SystemAdmin always) write, and holders of action:hr.rulebook.confirm
+// confirm; anyone else with the `hr` tab reads pages that have
 // been confirmed — confirmed or retired — and only their confirmed and retired
 // versions. Drafts answer 403 to them. Every rule is checked here, on the server.
 
@@ -22,6 +23,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Models;
+using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Services;
 
 namespace RabbitIC.Api.Hr;
@@ -88,7 +90,7 @@ public sealed record HrRuleResult(HrRuleOutcome Outcome, HrRulePageDto? Page = n
     public static HrRuleResult Conflict(string error) => new(HrRuleOutcome.Conflict, Error: error);
 }
 
-public sealed class HrRulebook(AppDbContext db, HrLibrary library)
+public sealed class HrRulebook(AppDbContext db, HrLibrary library, AccessPolicy access)
 {
     /// <summary>§1's six categories, fixed (open question 2's default), in display order.</summary>
     public static readonly IReadOnlyList<HrRuleCategory> Categories = new[]
@@ -109,7 +111,11 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     public const string EditorsOnly = "Only hr-assistant and SystemAdmin users can change the Rulebook.";
     public const string DraftsHidden = "Drafts are visible to Rulebook editors only.";
 
-    public static bool CanEdit(User user) => ContextSourceService.CanEditShared(user);
+    public Task<bool> CanEditAsync(User user, CancellationToken ct = default) =>
+        access.HasAsync(user, PermissionKeys.HrRulebookEdit, ct);
+
+    public Task<bool> CanConfirmAsync(User user, CancellationToken ct = default) =>
+        access.HasAsync(user, PermissionKeys.HrRulebookConfirm, ct);
 
     // ───────────────────────── reads ─────────────────────────
 
@@ -120,7 +126,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<IReadOnlyList<HrRulePageDto>> ListAsync(User caller, string? q, string? category, string? status, CancellationToken ct = default)
     {
-        var editor = CanEdit(caller);
+        var editor = await CanEditAsync(caller, ct);
         var pages = (await db.HrRulePages.AsNoTracking().ToListAsync(ct))
             .Where(p => editor || ReaderSees(p))
             .Where(p => string.IsNullOrWhiteSpace(category) || p.Category == category.Trim())
@@ -151,7 +157,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     {
         var page = await db.HrRulePages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return HrRuleResult.NotFound;
-        var editor = CanEdit(caller);
+        var editor = await CanEditAsync(caller, ct);
         if (!editor && !ReaderSees(page)) return HrRuleResult.Forbidden(DraftsHidden);
 
         var number = version ?? ShownVersion(page, editor);
@@ -167,7 +173,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     {
         var page = await db.HrRulePages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return (HrRuleOutcome.NotFound, null);
-        var editor = CanEdit(caller);
+        var editor = await CanEditAsync(caller, ct);
         if (!editor && !ReaderSees(page)) return (HrRuleOutcome.Forbidden, null);
 
         var rows = await db.HrRulePageVersions.AsNoTracking().Where(v => v.PageId == id).OrderBy(v => v.Version)
@@ -225,7 +231,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
 
     public async Task<HrRuleResult> CreateAsync(User editor, HrRulePageInput input, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        if (!await CanEditAsync(editor, ct)) return HrRuleResult.Forbidden(EditorsOnly);
         var title = (input.Title ?? "").Trim();
         if (TitleError(title) is { } titleError) return HrRuleResult.Invalid(titleError);
         var category = (input.Category ?? "").Trim().ToLowerInvariant();
@@ -259,7 +265,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<HrRuleResult> SaveAsync(User editor, int id, HrRulePageInput input, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        if (!await CanEditAsync(editor, ct)) return HrRuleResult.Forbidden(EditorsOnly);
         var page = await db.HrRulePages.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return HrRuleResult.NotFound;
         if (page.Status == HrRulePage.StatusRetired)
@@ -299,7 +305,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<HrRuleResult> ConfirmAsync(User editor, int id, string? note, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        if (!await CanConfirmAsync(editor, ct)) return HrRuleResult.Forbidden(EditorsOnly);
         var page = await db.HrRulePages.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return HrRuleResult.NotFound;
         if (Required(note) is not { } why) return HrRuleResult.Invalid("A confirmation needs a note saying why.");
@@ -330,7 +336,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// <summary>Retires a page with a required note: a `retired` version, and the Library copy switched off.</summary>
     public async Task<HrRuleResult> RetireAsync(User editor, int id, string? note, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        if (!await CanEditAsync(editor, ct)) return HrRuleResult.Forbidden(EditorsOnly);
         var page = await db.HrRulePages.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return HrRuleResult.NotFound;
         if (Required(note) is not { } why) return HrRuleResult.Invalid("Retiring a page needs a note saying why.");
@@ -354,7 +360,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<HrRuleResult> RestoreAsync(User editor, int id, int? version, string? note, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        if (!await CanEditAsync(editor, ct)) return HrRuleResult.Forbidden(EditorsOnly);
         var page = await db.HrRulePages.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return HrRuleResult.NotFound;
         if (Required(note) is not { } why) return HrRuleResult.Invalid("Restoring a version needs a note saying why.");
@@ -379,7 +385,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<(HrRuleResult? Refusal, HrRuleDraftTarget? Target)> ValidateDraftAsync(User editor, HrRuleGenerateRequest input, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return (HrRuleResult.Forbidden(EditorsOnly), null);
+        if (!await CanEditAsync(editor, ct)) return (HrRuleResult.Forbidden(EditorsOnly), null);
         if (input.PageId is int id)
         {
             var page = await db.HrRulePages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -406,7 +412,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<HrRuleResult> SaveGeneratedAsync(User editor, HrRuleDraftTarget target, string body, string sourcesJson, string modelJson, string note, CancellationToken ct = default)
     {
-        if (!CanEdit(editor)) return HrRuleResult.Forbidden(EditorsOnly);
+        if (!await CanEditAsync(editor, ct)) return HrRuleResult.Forbidden(EditorsOnly);
         body = HrLibrary.Normalize(body);
         HrRulePage? page;
         if (target.PageId is int id)
@@ -444,7 +450,7 @@ public sealed class HrRulebook(AppDbContext db, HrLibrary library)
     /// </summary>
     public async Task<(HrRuleOutcome Outcome, HrRuleCheckDto? Check)> CheckAsync(User caller, int id, int? version, CancellationToken ct = default)
     {
-        if (!CanEdit(caller)) return (HrRuleOutcome.Forbidden, null);
+        if (!await CanEditAsync(caller, ct)) return (HrRuleOutcome.Forbidden, null);
         var page = await db.HrRulePages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
         if (page is null) return (HrRuleOutcome.NotFound, null);
         var number = version ?? page.CurrentVersion;

@@ -13,7 +13,7 @@
 //
 // The SQL is text: nothing here connects to a database server or runs it. There
 // is no route that changes or removes a version or a log row. /api/hr is gated
-// by the `hr` tab; who may write is decided in HrProcedures.
+// by the `hr` tab; who may write is decided in HrProcedures, through AccessPolicy.
 
 using System.Text;
 using RabbitIC.Api.AuthHelper;
@@ -33,9 +33,9 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(new
                 {
                     procedures = await procedures.ListAsync(ct),
-                    canUpload = HrProcedures.CanUpload(user),
-                    canAnswer = HrProcedures.CanAnswer(user),
-                    canEditRegistry = HrProcedures.CanEditRegistry(user),
+                    canUpload = await procedures.CanUploadAsync(user, ct),
+                    canAnswer = await procedures.CanAnswerAsync(user, ct),
+                    canEditRegistry = await procedures.CanEditRegistryAsync(user, ct),
                     maxUploadBytes = HrProcedures.MaxUploadBytes,
                 });
             });
@@ -44,7 +44,7 @@ namespace RabbitIC.Api.MinimalApis
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                if (!HrProcedures.CanUpload(user)) return Error(HrProcOutcome.Forbidden, "Only DevOps and SystemAdmin users can upload procedures.");
+                if (!await procedures.CanUploadAsync(user, ct)) return Error(HrProcOutcome.Forbidden, "Only DevOps and SystemAdmin users can upload procedures.");
                 if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Send the file as multipart/form-data." });
                 var form = await ctx.Request.ReadFormAsync(ct);
                 if (form.Files.Count != 1) return Results.BadRequest(new { error = "Send one .sql file." });
@@ -89,7 +89,7 @@ namespace RabbitIC.Api.MinimalApis
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
-                return Results.Ok(new { questions = await procedures.QuestionsAsync(status, procedureId, ct), canAnswer = HrProcedures.CanAnswer(user) });
+                return Results.Ok(new { questions = await procedures.QuestionsAsync(status, procedureId, ct), canAnswer = await procedures.CanAnswerAsync(user, ct) });
             });
 
             app.MapPost("/hr/questions/{id:int}/answer", async (int id, HrAnswerInput input, HttpContext ctx, AppDbContext db, HrProcedures procedures, CancellationToken ct) =>
@@ -108,7 +108,7 @@ namespace RabbitIC.Api.MinimalApis
                 {
                     lookups = await procedures.LookupsAsync(q, column, ct),
                     columns = await procedures.ColumnsAsync(ct),
-                    canEdit = HrProcedures.CanEditRegistry(user),
+                    canEdit = await procedures.CanEditRegistryAsync(user, ct),
                 });
             });
 

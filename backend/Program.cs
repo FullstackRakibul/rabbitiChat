@@ -173,6 +173,7 @@ builder.Services.AddScoped<RabbitIC.Api.Extraction.ExtractionDispatcher>();
 // cache behind it is the shared singleton memory cache.
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
+builder.Services.AddScoped<RabbitIC.Api.Rbac.AccessPolicy>();
 
 // ---- মানব সম্পদ (HR Assistant): the HR library (docs/HR_MODULE_PROMPT.md) ----
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
@@ -315,7 +316,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 					"http://localhost:4200")
 	 .AllowAnyHeader()
 	 .AllowAnyMethod()
-	 .WithExposedHeaders("X-Conversation-Id")));
+	 .WithExposedHeaders("X-Conversation-Id", "X-Access-Rev")));
 
 
 
@@ -412,6 +413,8 @@ using (var scope = app.Services.CreateScope())
 	// Which models each role may run. After the roles exist, and idempotent: a
 	// row an administrator edited is never overwritten by a restart.
 	RbacSeeder.SeedModelPolicies(db, app.Configuration, app.Logger);
+	// What each role gets: one row per role and permission key, missing rows only.
+	RbacSeeder.SeedRolePermissions(db, app.Logger);
 
 	// মানব সম্পদ. The hr-assistant account, only when it does not exist and only
 	// from HR_ASSISTANT_SECRET; then the HR library from docs/hr/, only files not

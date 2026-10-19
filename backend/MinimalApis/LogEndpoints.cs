@@ -121,17 +121,17 @@ public static class LogEndpoints
             return entry is null ? Results.NotFound() : Results.Ok(entry);
         });
 
-        // ---- Audit log (SystemAdmin only) ----
+        // ---- Audit log (action:logs.audit — SystemAdmin's by default) ----
 
         app.MapGet("/api/logs/audit", async (
             string? entity, string? key, string? action, string? userId,
             DateTime? from, DateTime? to, long? cursor, int? pageSize,
-            HttpContext ctx, AppDbContext db,
+            HttpContext ctx, AppDbContext db, RabbitIC.Api.Rbac.AccessPolicy access,
             ActivityLogQueryService svc, CancellationToken ct) =>
         {
             var user = await Authorization.ResolveUser(ctx, db);
             if (user is null) return Results.Unauthorized();
-            if (!RabbitIC.Api.Models.UserRoles.IsSystemAdmin(user))
+            if (!await access.HasAsync(user, RabbitIC.Api.Rbac.PermissionKeys.LogsAudit, ct))
                 // Not Results.Forbid(): it challenges an authentication scheme, and
                 // none is registered here, so it throws a 500 instead of refusing.
                 // Same shape the RBAC routes return.

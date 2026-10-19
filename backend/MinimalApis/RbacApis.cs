@@ -22,6 +22,7 @@ namespace RabbitIC.Api.MinimalApis
         public static IEndpointRouteBuilder MapRbacApis(this IEndpointRouteBuilder app)
         {
             MapMyTabs(app);
+            MapAccess(app);
             MapAdmin(app);
             return app;
         }
@@ -41,6 +42,57 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(await svc.GetMyTabsAsync(user, ct));
             })
             .WithSummary("The caller's own role and effective tabs.");
+
+            app.MapGet("/me/access", async (
+                HttpContext ctx, AppDbContext db, RbacService svc, CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                return Results.Ok(await svc.GetMyAccessAsync(user, ct));
+            })
+            .WithSummary("The caller's tabs (with labels and menu groups), sections, actions and model policy.");
+        }
+
+        /// <summary>
+        /// Access (docs/RBAC_ROLES_PROMPT.md §3.4): the catalog and the role presets.
+        /// Access managers only — SystemAdmin, or a role given action:access.manage.
+        /// </summary>
+        private static void MapAccess(IEndpointRouteBuilder app)
+        {
+            var group = app.MapGroup("/access");
+
+            group.MapGet("/catalog", async (
+                HttpContext ctx, AppDbContext db, RbacService svc, CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+                if (!await svc.CanManageAsync(user, ct)) return Forbid(ManagersOnly);
+
+                return Results.Ok(RbacService.Catalog());
+            })
+            .WithSummary("Every tab, section and action: labels (English, Bengali), group and parent.");
+
+            group.MapGet("/roles", async (
+                HttpContext ctx, AppDbContext db, RbacService svc, CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                return Map(await svc.GetRolePresetsAsync(user, ct));
+            })
+            .WithSummary("Every role with its value for every key, and how many users hold it.");
+
+            group.MapPut("/roles/{role}", async (
+                string role, SaveRolePresetInput input, HttpContext ctx, AppDbContext db,
+                RbacService svc, CancellationToken ct) =>
+            {
+                var user = await Authorization.ResolveUser(ctx, db);
+                if (user is null) return Results.Unauthorized();
+
+                return Map(await svc.SaveRolePresetAsync(user, role, input, ct));
+            })
+            .WithSummary("Save a role's keys (changed keys only), with an optional note. 400 names a broken invariant.");
         }
 
         private static void MapAdmin(IEndpointRouteBuilder app)
@@ -50,28 +102,28 @@ namespace RabbitIC.Api.MinimalApis
             // The tab catalogue for the admin checklist. Admin-only like the rest of
             // the group — the shape of the permission system is not public.
             group.MapGet("/tabs", async (
-                HttpContext ctx, AppDbContext db, RbacService svc) =>
+                HttpContext ctx, AppDbContext db, RbacService svc, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
 
-                if (!Models.UserRoles.IsSystemAdmin(user))
-                    return Forbid("SystemAdmin role required.");
+                if (!await svc.CanManageAsync(user, ct))
+                    return Forbid(ManagersOnly);
 
                 return Results.Ok(svc.ListTabs());
             })
             .WithSummary("Known tab keys, for the permission checklist.");
 
             group.MapGet("/roles", async (
-                HttpContext ctx, AppDbContext db, RbacService svc) =>
+                HttpContext ctx, AppDbContext db, RbacService svc, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
 
-                if (!Models.UserRoles.IsSystemAdmin(user))
-                    return Forbid("SystemAdmin role required.");
+                if (!await svc.CanManageAsync(user, ct))
+                    return Forbid(ManagersOnly);
 
-                return Results.Ok(svc.ListRoles());
+                return Results.Ok(await svc.ListRolesAsync(ct));
             })
             .WithSummary("Every role with its label and default tabs, for the role picker.");
 
@@ -80,14 +132,14 @@ namespace RabbitIC.Api.MinimalApis
             // SystemAdmin only; the rule itself lives in Rbac/ModelPolicy.cs and
             // is never restated here.
             group.MapGet("/model-policies", async (
-                HttpContext ctx, AppDbContext db, ChatService chat,
+                HttpContext ctx, AppDbContext db, ChatService chat, RbacService svc,
                 Rbac.ModelPolicy modelPolicy, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
 
-                if (!Models.UserRoles.IsSystemAdmin(user))
-                    return Forbid("SystemAdmin role required.");
+                if (!await svc.CanManageAsync(user, ct))
+                    return Forbid(ManagersOnly);
 
                 var rows = await modelPolicy.RowsAsync(ct);
 
@@ -121,7 +173,7 @@ namespace RabbitIC.Api.MinimalApis
                         // SystemAdmin can never be restricted, so the editor shows
                         // its row read-only with the reason rather than a control
                         // that would always be refused.
-                        CanRestrict: role != Models.UserRoles.SystemAdmin,
+                        CanRestrict: !Rbac.AccessPolicy.IsSuperUserRole(role),
                         UpdatedAtUtc: row?.UpdatedAtUtc,
                         Stale: stale);
                 }).ToList();
@@ -132,13 +184,13 @@ namespace RabbitIC.Api.MinimalApis
 
             group.MapPut("/model-policies/{role}", async (
                 string role, RoleModelPolicyInput input, HttpContext ctx, AppDbContext db,
-                ChatService chat, Rbac.ModelPolicy modelPolicy, CancellationToken ct) =>
+                ChatService chat, RbacService svc, Rbac.ModelPolicy modelPolicy, CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
                 if (user is null) return Results.Unauthorized();
 
-                if (!Models.UserRoles.IsSystemAdmin(user))
-                    return Forbid("SystemAdmin role required.");
+                if (!await svc.CanManageAsync(user, ct))
+                    return Forbid(ManagersOnly);
 
                 // An unknown role would otherwise create a row nothing reads.
                 if (!Models.UserRoles.IsKnown(role))
@@ -154,7 +206,7 @@ namespace RabbitIC.Api.MinimalApis
 
                 // An admin who locked their own role out of every model could not
                 // undo it through a UI that needs a model to work.
-                if (canonical == Models.UserRoles.SystemAdmin && allowed.Count > 0)
+                if (Rbac.AccessPolicy.IsSuperUserRole(canonical) && allowed.Count > 0)
                     return Results.BadRequest(new
                     {
                         error = "SystemAdmin cannot be restricted — an administrator must always be able to "
@@ -216,7 +268,7 @@ namespace RabbitIC.Api.MinimalApis
                 return Results.Ok(new RoleModelPolicyDto(
                     canonical, Models.UserRoles.LabelFor(canonical),
                     allowed, defaultModel,
-                    canonical != Models.UserRoles.SystemAdmin, row.UpdatedAtUtc,
+                    !Rbac.AccessPolicy.IsSuperUserRole(canonical), row.UpdatedAtUtc,
                     new List<string>()));
             })
             .WithSummary("Save one role's allowed models. SystemAdmin cannot be restricted.");
@@ -276,7 +328,7 @@ namespace RabbitIC.Api.MinimalApis
             RbacOutcome.NotFound => Results.NotFound(new { error = result.Error }),
             RbacOutcome.Forbidden => Forbid(result.Error),
             RbacOutcome.Conflict => Results.Conflict(new { error = result.Error }),
-            RbacOutcome.Invalid => Results.BadRequest(new { error = result.Error }),
+            RbacOutcome.Invalid => Results.BadRequest(new { error = result.Error, invariant = result.Invariant }),
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
 
@@ -284,6 +336,8 @@ namespace RabbitIC.Api.MinimalApis
         /// 403 with a body. Results.Forbid() authenticates against a scheme this
         /// app has none of, so the status is written directly.
         /// </summary>
+        private const string ManagersOnly = "Managing access requires SystemAdmin or the Manage access permission.";
+
         private static IResult Forbid(string? error) =>
             Results.Json(new { error = error ?? "Forbidden." }, statusCode: StatusCodes.Status403Forbidden);
     }

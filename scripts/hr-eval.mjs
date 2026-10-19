@@ -223,14 +223,16 @@ check('G1.2', 1, 'any', `the label is "${HR_LABEL}" in the Access screen, tab ba
   const tabs = await asAdmin('GET', '/api/admin/rbac/tabs')
   const access = (tabs.json ?? []).find?.((t) => t.key === 'hr')?.label
   const app = read('frontend/src/App.vue')
-  // The tab bar and the command palette both render ALL_TABS (the palette maps the
-  // permission-filtered `tabs` computed over it), so one entry labels both.
-  const tabBar = new RegExp(`id: 'hr', label: '${HR_LABEL}'`).test(app)
+  // The tab bar and the command palette both render the modules /api/me/access
+  // returns (labels from the permission catalog; the palette maps the `tabs`
+  // computed over them), so the server's label labels both — and App.vue has the icon.
+  const mine = (await asAdmin('GET', '/api/me/access')).json?.modules ?? []
+  const tabBar = mine.find((m) => m.key === 'hr')?.label === HR_LABEL && /^\s*hr: Users,/m.test(app)
   const palette = /const commands = computed\(\(\) => \[\s*\.\.\.tabs\.value\.map/.test(app)
   const route = /key: 'hr', path: '\/hr'/.test(read('frontend/src/app/router.js'))
   const docs = read('frontend/src/components/mostisko-docs/sections-data.js').includes(HR_LABEL)
   return ok(access === HR_LABEL && tabBar && palette && route && docs,
-    `Access "${access}"; ALL_TABS entry ${tabBar}; palette built from tabs ${palette}; route /hr ${route}; docs page ${docs}`)
+    `Access "${access}"; module from /api/me/access ${tabBar}; palette built from tabs ${palette}; route /hr ${route}; docs page ${docs}`)
 })
 
 // ─────────────────────────── G1.3 — a shared library ───────────────────────────

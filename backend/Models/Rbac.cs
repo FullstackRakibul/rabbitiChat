@@ -65,9 +65,6 @@ public static class UserRoles
     public static bool IsKnown(string? role) =>
         All.Any(r => Matches(r, role));
 
-    public static bool IsSystemAdmin(User user) =>
-        Normalize(user.Role) == SystemAdmin;
-
     /// <summary>Display name, e.g. "Ground Control". Unknown input labels as General.</summary>
     public static string LabelFor(string? role) => Normalize(role) switch
     {
@@ -91,21 +88,77 @@ public static class UserRoles
 }
 
 /// <summary>
-/// One granted tab for one user. A row means "this user may additionally see
-/// this tab"; absence means only that the role baseline decides. There is no
-/// deny row in v1 — permissions are purely additive, so a grant can never take
-/// something away that the role already gives.
+/// What one role gets for one permission key (Rbac/PermissionCatalog.cs). One row
+/// per role and key, seeded from today's baselines for missing rows only, so an
+/// administrator's edit survives every restart.
 /// </summary>
-public class UserTabPermission
+public class RolePermission
 {
-    public int Id { get; set; }
+    /// <summary>A canonical role name (<see cref="UserRoles.All"/>).</summary>
+    public string Role { get; set; } = "";
+
+    /// <summary>A catalog key, e.g. "tab:chat" or "action:hr.rulebook.confirm".</summary>
+    public string Key { get; set; } = "";
+
+    public bool Allowed { get; set; }
+
+    /// <summary>Null for a seeded row.</summary>
+    public int? UpdatedByUserId { get; set; }
+
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// One user's Allow or Deny on one key, over their role's value. A tab grant
+/// from before role presets is an "allow" row here.
+/// </summary>
+public class UserPermissionOverride
+{
+    public const string Allow = "allow";
+    public const string Deny = "deny";
 
     public int UserId { get; set; }
 
-    /// <summary>A stable tab id from <see cref="RabbitIC.Api.Rbac.TabCatalog"/> — e.g. "workspace".</summary>
-    public string TabKey { get; set; } = "";
+    public string Key { get; set; } = "";
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    /// <summary><see cref="Allow"/> or <see cref="Deny"/>.</summary>
+    public string Effect { get; set; } = Allow;
 
-    public User? User { get; set; }
+    public int? UpdatedByUserId { get; set; }
+
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public string? Note { get; set; }
+}
+
+/// <summary>
+/// One change to access: who, what, before → after, when, and why. Append-only —
+/// SQLite triggers refuse UPDATE and DELETE (SchemaUpgrade.EnsureAccessSchema).
+/// </summary>
+public class AccessChangeLogEntry
+{
+    public const string ScopeRole = "role";
+    public const string ScopeUser = "user";
+
+    public long Id { get; set; }
+
+    public DateTime AtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Null when the system made the change (the grant migration).</summary>
+    public int? ByUserId { get; set; }
+
+    /// <summary><see cref="ScopeRole"/> or <see cref="ScopeUser"/>.</summary>
+    public string Scope { get; set; } = ScopeRole;
+
+    /// <summary>The role name, or the user's id.</summary>
+    public string Target { get; set; } = "";
+
+    /// <summary>A catalog key, or "role" for a user's role change.</summary>
+    public string Key { get; set; } = "";
+
+    public string? Before { get; set; }
+
+    public string? After { get; set; }
+
+    public string? Note { get; set; }
 }

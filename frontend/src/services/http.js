@@ -20,6 +20,28 @@ export class HttpError extends Error {
   }
 }
 
+// ---- Access revision ----
+// Every API response carries X-Access-Rev, the server's access-policy revision.
+// When it moves, someone's role preset, overrides or role changed: the shell
+// re-reads /api/me/access so its menus match what the server will now allow,
+// on the user's next call rather than their next sign-in.
+let accessRev = null
+const accessListeners = new Set()
+
+/** Calls fn() whenever a response shows the access revision has moved. Returns an unsubscribe. */
+export function onAccessChange(fn) {
+  accessListeners.add(fn)
+  return () => accessListeners.delete(fn)
+}
+
+function noteAccessRev(res) {
+  const rev = res.headers?.get?.('X-Access-Rev')
+  if (!rev) return
+  const moved = accessRev !== null && rev !== accessRev
+  accessRev = rev
+  if (moved) for (const fn of accessListeners) fn(rev)
+}
+
 function buildUrl(path) {
   return `${environment.apiBaseUrl}${path}`
 }
@@ -54,6 +76,7 @@ async function request(path, { method = 'GET', body, signal, authError = true } 
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   })
+  noteAccessRev(res)
 
   if (res.status === 401 && authError) throw new AuthError()
   if (!res.ok) throw new HttpError((await errorMessage(res)) || `Request failed (${res.status})`, res.status)
@@ -89,6 +112,7 @@ export const http = {
       body: formData,
       signal,
     })
+    noteAccessRev(res)
     if (res.status === 401) throw new AuthError()
     if (!res.ok) throw new HttpError((await errorMessage(res)) || `Upload failed (${res.status})`, res.status)
     return res.json()
