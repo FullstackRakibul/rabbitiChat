@@ -21,24 +21,33 @@ public static class HrAssistantSeeder
     public const string Username = "hr-assistant";
     public const string SecretVariable = "HR_ASSISTANT_SECRET";
 
-    public static async Task RunAsync(IServiceProvider services, IConfiguration config, ILogger logger)
+    /// <summary>The Procedure Analyzer's DevOps account (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.7), seeded the same way.</summary>
+    public const string DevOpsUsername = "devops";
+    public const string DevOpsSecretVariable = "DEVOPS_SECRET";
+
+    public static Task RunAsync(IServiceProvider services, IConfiguration config, ILogger logger) =>
+        RunAsync(services, config, logger, Username, SecretVariable, UserRoles.HrAssistant);
+
+    /// <summary>One account with one role, made once, only from its secret variable.</summary>
+    public static async Task RunAsync(IServiceProvider services, IConfiguration config, ILogger logger,
+        string username, string secretVariable, string role)
     {
-        var secret = config[SecretVariable];
+        var secret = config[secretVariable];
         if (string.IsNullOrWhiteSpace(secret))
         {
-            logger.LogWarning("HR: {Variable} is not set, so the {Username} account was not created.", SecretVariable, Username);
+            logger.LogWarning("HR: {Variable} is not set, so the {Username} account was not created.", secretVariable, username);
             return;
         }
 
         var db = services.GetRequiredService<AppDbContext>();
-        if (await db.Users.AnyAsync(u => u.Username == Username)) return;
+        if (await db.Users.AnyAsync(u => u.Username == username)) return;
 
         // The account itself is made exactly as /auth/login makes one, so the
         // secret verifies through the same code path as every other login.
         var (hash, salt) = Authorization.HashSecret(secret);
         var user = new User
         {
-            Username = Username,
+            Username = username,
             SecretHash = hash,
             SecretSalt = salt,
             Token = Authorization.NewToken(),
@@ -52,16 +61,16 @@ public static class HrAssistantSeeder
         var rbac = services.GetRequiredService<RbacService>();
         var result = admin is null
             ? null
-            : await rbac.SetRoleAsync(admin, user.Id, new SetRoleInput(UserRoles.HrAssistant));
+            : await rbac.SetRoleAsync(admin, user.Id, new SetRoleInput(role));
 
         if (result?.Outcome != RbacOutcome.Ok)
         {
             logger.LogWarning("HR: created {Username} but could not make it {Role}: {Error}",
-                Username, UserRoles.HrAssistant, result?.Error ?? "no SystemAdmin to act as.");
+                username, role, result?.Error ?? "no SystemAdmin to act as.");
             return;
         }
 
         // The username and role only — never the secret.
-        logger.LogInformation("HR: created {Username} as {Role}.", Username, UserRoles.HrAssistant);
+        logger.LogInformation("HR: created {Username} as {Role}.", username, role);
     }
 }

@@ -2,28 +2,42 @@
 /**
  * মানব সম্পদ (HR Assistant) — the tab (docs/HR_MODULE_PROMPT.md §3.4).
  *
- * Three sections: প্রশ্ন (Ask), the HR chat with instant search and its own
- * conversation list; লাইব্রেরি (Library), HR's context; and নিয়মাবলি (Rulebook),
- * HR's own rule pages with their paper trail (docs/HR_RULEBOOK_PROMPT.md). Ask is
- * what HR opens the tab for, so it comes first.
+ * Four sections: প্রশ্ন (Ask), the HR chat with instant search and its own
+ * conversation list; লাইব্রেরি (Library), HR's context; নিয়মাবলি (Rulebook),
+ * HR's own rule pages with their paper trail (docs/HR_RULEBOOK_PROMPT.md); and
+ * প্রসিডিউর (Procedures), the Procedure Analyzer
+ * (docs/HR_PROCEDURE_ANALYZER_PROMPT.md). Ask is what HR opens the tab for, so it
+ * comes first. A DevOps user sees only Procedures (§3.7).
  *
  * Bengali labels with English in smaller text, theme tokens only.
  */
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import HrAsk from '@/components/hr/HrAsk.vue'
 import HrLibrary from '@/components/hr/HrLibrary.vue'
 import HrRulebook from '@/components/hr/HrRulebook.vue'
+import HrProcedures from '@/components/hr/HrProcedures.vue'
 
-const SECTIONS = [
+const props = defineProps({
+  /** The signed-in user's role; DevOps gets the Procedures section only. */
+  role: { type: String, default: '' },
+})
+
+const ALL_SECTIONS = [
   { key: 'ask', bn: 'প্রশ্ন', en: 'Ask' },
   { key: 'library', bn: 'লাইব্রেরি', en: 'Library' },
   { key: 'rulebook', bn: 'নিয়মাবলি', en: 'Rulebook' },
+  { key: 'procedures', bn: 'প্রসিডিউর', en: 'Procedures' },
 ]
 
-const section = ref('ask')
+const devOps = computed(() => props.role === 'DevOps')
+const SECTIONS = computed(() => (devOps.value ? ALL_SECTIONS.filter((s) => s.key === 'procedures') : ALL_SECTIONS))
+
+const section = ref(props.role === 'DevOps' ? 'procedures' : 'ask')
+// The role arrives after sign-in: a DevOps user is moved to Procedures.
+watch(devOps, (d) => { if (d) section.value = 'procedures' }, { immediate: true })
 
 /** Sections opened at least once; the Rulebook loads on its first visit and then stays. */
-const visited = ref({ ask: true })
+const visited = ref({ [section.value]: true })
 watch(section, (s) => { visited.value[s] = true })
 
 /** A Rulebook citation in Ask opens the page, at the cited version, in the Rulebook. */
@@ -59,7 +73,7 @@ async function openRule(target) {
     </nav>
 
     <!-- Ask keeps its own scrolling (the conversation, the list and the search each scroll). -->
-    <div v-show="section === 'ask'" class="min-h-0 flex-1">
+    <div v-if="!devOps" v-show="section === 'ask'" class="min-h-0 flex-1">
       <HrAsk @open-rule="openRule" />
     </div>
 
@@ -72,6 +86,10 @@ async function openRule(target) {
     <!-- Kept mounted once opened, so a page being edited survives a look at Ask or the Library. -->
     <div v-if="visited.rulebook" v-show="section === 'rulebook'" class="min-h-0 flex-1 overflow-y-auto">
       <HrRulebook ref="rulebook" />
+    </div>
+
+    <div v-if="visited.procedures" v-show="section === 'procedures'" class="min-h-0 flex-1 overflow-y-auto">
+      <HrProcedures />
     </div>
   </div>
 </template>

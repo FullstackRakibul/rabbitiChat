@@ -44,7 +44,7 @@ const GENERAL_TABS = ['dashboard', 'todo', '5lakhs', 'notes', 'sources', 'settin
 const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter']
 // HrAssistant joined with the মানব সম্পদ module (docs/HR_MODULE_PROMPT.md §3.1),
 // listed next to General as the server orders them.
-const ROLE_KEYS = ['General', 'HrAssistant', 'System', 'GroundControl', 'SystemAdmin']
+const ROLE_KEYS = ['General', 'HrAssistant', 'DevOps', 'System', 'GroundControl', 'SystemAdmin']
 
 // ─────────────────────────────── fake Ollama ───────────────────────────────
 

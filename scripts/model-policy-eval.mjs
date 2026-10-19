@@ -45,7 +45,7 @@ const LOCAL_MODELS = [ALLOWED, FORBIDDEN, THIRD, EMBED]
 const CLOUD_MODELS = [ALLOWED, 'cloud-only-model']
 
 // HrAssistant joined with the মানব সম্পদ module (docs/HR_MODULE_PROMPT.md §3.1).
-const ROLES = ['General', 'HrAssistant', 'System', 'GroundControl', 'SystemAdmin']
+const ROLES = ['General', 'HrAssistant', 'DevOps', 'System', 'GroundControl', 'SystemAdmin']
 
 // ─────────────────────────── the fake Ollama ───────────────────────────
 

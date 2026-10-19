@@ -8,6 +8,7 @@
 //   node scripts/hr-eval.mjs --no-suites          skip re-running the other suites in G1.9
 //   node scripts/hr-eval.mjs --phase R1           the Rulebook's Phase R1 (docs/HR_RULEBOOK_PROMPT.md §4)
 //   node scripts/hr-eval.mjs --phase R1 --live    GR1.9 against the real Ollama
+//   node scripts/hr-eval.mjs --phase A1           the Procedure Analyzer's Phase A1 (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §4)
 //
 // Without --phase, or with a number, only the module's own phases (1, 2) run; the
 // Rulebook's R phases run only when named, so the module's counts stay comparable.
@@ -2054,6 +2055,309 @@ check('GR2.18', 'R2', 'fake', 'an existing hr-glossary item of another type is m
   } finally { await api.stop() }
 })
 
+// ═══════════════════════════ Procedure Analyzer A1 — upload, facts, registry, questions, setup list ═══════════════════════════
+// docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.1–§3.4, gates GA1.1–GA1.11. Run with --phase A1.
+// Content checks, not fixed line numbers: the procedure files may be the 14 Oct or
+// the 17 Oct version, so every expected line is found by reading the file itself.
+
+const PROCS = path.join(LIBRARY, 'procedures')
+const PFS = 'ProcessFinalSettelment.sql', SUPP = 'ProcessSupplementaryFinalSetelment.sql', GSD = 'GetSalaryDetails.sql'
+const procText = (f) => fs.readFileSync(path.join(PROCS, f), 'utf8').replace(/\r\n?/g, '\n')
+
+/** The file's lines with comments taken out ("" where a line is all comment), 1-based through index + 1. */
+function codeLines(text) {
+  let inBlock = false
+  return text.split('\n').map((line) => {
+    let out = '', i = 0, inString = false
+    while (i < line.length) {
+      if (inBlock) { const c = line.indexOf('*/', i); if (c < 0) { i = line.length; break } inBlock = false; i = c + 2; continue }
+      const ch = line[i]
+      if (inString) { out += ch; if (ch === "'") inString = false; i++; continue }
+      if (ch === "'") { inString = true; out += ch; i++; continue }
+      if (line.startsWith('--', i)) break
+      if (line.startsWith('/*', i)) { inBlock = true; i += 2; continue }
+      out += ch; i++
+    }
+    return out
+  })
+}
+
+/** 1-based numbers of the code lines (comments out) matching a pattern. */
+const linesOf = (text, re) => codeLines(text).map((l, i) => (re.test(l) ? i + 1 : 0)).filter(Boolean)
+
+async function uploadProc(user, name, sql, note) {
+  const form = new FormData()
+  form.append('file', new Blob([sql]), name)
+  if (note) form.append('note', note)
+  const res = await fetch(`${ctx.api.url}/api/hr/procedures`, { method: 'POST', headers: { Authorization: `Bearer ${user.token}` }, body: form })
+  return { status: res.status, json: await res.json().catch(() => null) }
+}
+
+async function procByName(name) {
+  const list = (await asAdmin('GET', '/api/hr/procedures')).json?.procedures ?? []
+  return list.find((p) => p.objectName === name)
+}
+
+/** The facts of a procedure's latest version (uploaded once per run). */
+async function factsOf(file) {
+  ctx.a1 ??= {}
+  if (!ctx.a1[file]) {
+    let p = await procByName(file.replace(/\.sql$/, ''))
+    if (!p) { await uploadProc(ctx.admin, file, procText(file)); p = await procByName(file.replace(/\.sql$/, '')) }
+    ctx.a1[file] = (await asAdmin('GET', `/api/hr/procedures/${p.id}`)).json
+  }
+  return ctx.a1[file]
+}
+
+async function questions(params = '') {
+  return (await asAdmin('GET', `/api/hr/questions${params ? `?${params}` : ''}`)).json?.questions ?? []
+}
+
+const sameNumbers = (a, b) => JSON.stringify([...a].map(String).sort()) === JSON.stringify([...b].map(String).sort())
+
+// ─────────────────────────── GA1.1 — upload and versions ───────────────────────────
+
+check('GA1.1', 'A1', 'fake', 'upload → v1; the same file → "no change"; an edited copy → v2; versions append-only; a file without CREATE/ALTER is refused', async () => {
+  const k = stamp()
+  // A copy under its own name, so the real procedures' versions stay as the other gates expect.
+  // The ALTER line's name, not the "Object:" comment above it.
+  const sql = procText(PFS).replace(/((?:CREATE|ALTER)\s+PROC(?:EDURE)?\s+)\[dbo\]\.\[ProcessFinalSettelment\]/i, `$1[dbo].[EvalCopy${k}]`)
+  const v1 = await uploadProc(ctx.admin, `EvalCopy${k}.sql`, sql)
+  const same = await uploadProc(ctx.admin, `EvalCopy${k}.sql`, sql)
+  const v2 = await uploadProc(ctx.admin, `EvalCopy${k}.sql`, `${sql}\n-- an edit\nSELECT 1\n`)
+  const none = await uploadProc(ctx.admin, `notes-${k}.sql`, 'SELECT * FROM HumanResource_EmployeeBasic\n')
+  const big = await uploadProc(ctx.admin, `big-${k}.sql`, `ALTER PROCEDURE [dbo].[Big${k}] AS\nBEGIN\n${'-- padding padding padding padding\n'.repeat(70000)}END\n`)
+  const id = v1.json?.procedure?.id
+  const rows = id ? await sqlite(`SELECT Version, Sha256 FROM HrProcedureVersions WHERE ProcedureId = ${Number(id)} ORDER BY Version`) : []
+  const upd = id ? await rbExec(`UPDATE HrProcedureVersions SET Sql = 'x' WHERE ProcedureId = ${Number(id)}`) : ''
+  const del = id ? await rbExec(`DELETE FROM HrProcedureVersions WHERE ProcedureId = ${Number(id)}`) : ''
+  const library = (await library_()).find((i) => i.name === `EvalCopy${k}.sql`)
+  return ok(v1.status === 201 && v1.json?.version?.version === 1 && v1.json?.procedure?.kind === 'procedure'
+      && same.status === 409 && /no change/i.test(same.json?.error ?? '') && v2.status === 201 && v2.json?.version?.version === 2
+      && none.status === 400 && /CREATE|ALTER/.test(none.json?.error ?? '') && big.status === 400 && /2 MB/.test(big.json?.error ?? '')
+      && rows.length === 2 && /append-only/i.test(upd) && /append-only/i.test(del) && library?.hrType === 'procedure' && library?.mode === 'search' && library?.version === 2,
+    `v1 ${v1.status} (v${v1.json?.version?.version}, ${v1.json?.procedure?.kind}); same file ${same.status} "${same.json?.error}"; edited ${v2.status} → v${v2.json?.version?.version}; `
+    + `no CREATE/ALTER ${none.status} "${none.json?.error}"; over 2 MB ${big.status} "${big.json?.error}"; rows [${rows.map((r) => `v${r.Version}`)}]; `
+    + `UPDATE → "${upd}"; DELETE → "${del}"; Library copy ${library?.name} ${library?.hrType}/${library?.mode} v${library?.version}`)
+})
+async function library_() { return library() }
+
+// ─────────────────────────── GA1.2 — ignored code ───────────────────────────
+
+check('GA1.2', 'A1', 'fake', 'the facts hold nothing from the commented "Ager Formula" block or the commented UnitId IN (81) notice block; both are under Ignored code', async () => {
+  const text = procText(PFS), all = text.split('\n')
+  const agerFrom = all.findIndex((l) => /--\s*Ager Formula/i.test(l)) + 1
+  let agerTo = agerFrom
+  while (agerTo < all.length && /^\s*--/.test(all[agerTo])) agerTo++   // the commented lines that follow
+  const unit81 = all.findIndex((l) => /--.*@UnitId\s+IN\s*\(\s*81\s*\)/i.test(l)) + 1
+  const f = (await factsOf(PFS)).facts
+  const factLines = [
+    ...(f.conditions ?? []).flatMap((c) => c.lines), ...(f.thresholds ?? []).flatMap((t) => t.lines), ...(f.dates ?? []).flatMap((d) => d.lines),
+    ...(f.tablesRead ?? []).flatMap((t) => t.lines), ...(f.calls ?? []).flatMap((c) => c.lines), ...(f.employees ?? []).flatMap((e) => e.lines),
+  ]
+  const inAger = factLines.filter((l) => l >= agerFrom && l <= agerTo)
+  const has81 = (f.conditions ?? []).some((c) => c.column === 'UnitId' && c.values.map(String).includes('81'))
+  const covered = (from, to) => (f.ignored ?? []).some((r) => r.lineFrom <= from && r.lineTo >= to)
+  return ok(agerFrom > 0 && unit81 > 0 && inAger.length === 0 && !has81 && covered(agerFrom + 1, agerTo) && covered(unit81, unit81)
+      && !(f.thresholds ?? []).some((t) => t.variable === '@FractionWorkingDay' && t.value === '181'),
+    `Ager block L${agerFrom}-${agerTo}: facts there ${inAger.length}; UnitId 81 in conditions ${has81}; ignored ranges cover Ager ${covered(agerFrom + 1, agerTo)} and L${unit81} ${covered(unit81, unit81)}; `
+    + `${(f.ignored ?? []).length} ignored ranges`)
+})
+
+// ─────────────────────────── GA1.3 — tables and calls ───────────────────────────
+
+check('GA1.3', 'A1', 'fake', 'writes FinalSattlementPayable (DELETE ×2, INSERT ×1); the five calls; the reads include the listed tables', async () => {
+  const f = (await factsOf(PFS)).facts
+  const writes = (f.tablesWritten ?? []).map((w) => `${w.table} ${w.operation} ×${w.lines.length}`)
+  const calls = (f.calls ?? []).map((c) => c.name)
+  const reads = (f.tablesRead ?? []).map((t) => t.table)
+  const wantCalls = ['ProcessSupplementaryFinalSetelment', 'GetSalaryDetails', 'GetDateDurationYear', 'GetDateDurationMonth', 'GetDateDurationDay']
+  const wantReads = ['HumanResource_EmployeeBasic', 'HumanResource_EmployeeSeparation', 'LeaveAllocation', 'LeaveAllocationMaster', 'Attendance_DailyAttendance',
+    'Employee_ContractInfo', 'Payroll_AnnualLeave_Payment_JoinYear_Fraction', 'Payroll_AnnualLeave_Payment_JoinDate', 'Payroll_AnnualLeave_Payment_Monthly']
+  return ok(sameNumbers(writes, ['FinalSattlementPayable DELETE ×2', 'FinalSattlementPayable INSERT ×1']) && wantCalls.every((c) => calls.includes(c))
+      && wantReads.every((t) => reads.includes(t)) && !reads.includes('GetSalaryDetails') && !reads.some((t) => t.startsWith('@')),
+    `writes [${writes.join(' | ')}]; calls [${calls.join(', ')}]; reads (${reads.length}) [${reads.join(', ')}]`)
+})
+
+// ─────────────────────────── GA1.4 — conditions ───────────────────────────
+
+const GA14 = [
+  ['UnitId', 'IN', [1, 27, 45, 111], /@UnitId\s+IN\s*\(\s*1\s*,\s*27\s*,\s*45\s*,\s*111\s*\)/i],
+  ['UnitId', 'IN', [1, 27, 45], /@UnitId\s+in\s*\(\s*1\s*,\s*27\s*,\s*45\s*\)/i],
+  ['UnitId', 'IN', [54, 55, 61, 90, 46, 47, 48, 91], /@UnitId\s+IN\s*\(\s*54\s*,\s*55\s*,\s*61\s*,\s*90\s*,\s*46\s*,\s*47\s*,\s*48\s*,\s*91\s*\)/i],
+  ['UnitId', 'IN', [36], /@UnitId\s+IN\s*\(\s*36\s*\)/i],
+  ['UnitId', 'IN', [66], /@UnitId\s+IN\s*\(\s*66\s*\)/i],
+  ['EmpStatusID', '=', [5], /@EmpStatusID\s*=\s*5\b/i],
+  ['EmpStatusID', '=', [8], /@EmpStatusID\s*=\s*8\b/i],
+  ['EmpStatusID', 'NOT IN', [2, 4, 11, 13], /@EmpStatusID\s+NOT\s+IN\s*\(\s*2\s*,\s*4\s*,\s*11\s*,\s*13\s*\)/i],
+  ['EmpTypeID', 'IN', [2, 3, 4], /@EmpTypeID\s+IN\s*\(\s*2\s*,\s*3\s*,\s*4\s*\)/i],
+  ['EmpTypeID', '=', [1], /@EmpTypeID\s*=\s*1\b/i],
+  ['EmpCategoryID', '=', [1], /@EmpCategoryID\s*=\s*1\b/i],
+  ['PaymentModeId', '=', [2], /@PaymentModeId\s*=\s*2\b/i],
+  ['LeaveId', '=', [3], /\bLeaveId\s*=\s*3\b/i],
+  ['AttStatus', 'IN', ['P', 'LT', 'LTP', 'SD', 'TL', 'EE', 'NOP', 'EXL'], /AttStatus\s+IN\s*\(\s*'P'\s*,\s*'LT'\s*,\s*'LTP'\s*,\s*'SD'\s*,\s*'TL'\s*,\s*'EE'\s*,\s*'NOP'\s*,\s*'EXL'\s*\)/i],
+]
+
+check('GA1.4', 'A1', 'fake', 'the fourteen conditions are found, each with exactly the code lines it is on', async () => {
+  const text = procText(PFS)
+  const f = (await factsOf(PFS)).facts
+  const results = GA14.map(([column, op, values, re]) => {
+    const want = linesOf(text, re)
+    const got = (f.conditions ?? []).filter((c) => c.column === column && c.operator === op && sameNumbers(c.values, values)).flatMap((c) => c.lines)
+    return { name: `${column} ${op} (${values.join(',')})`, want, got, pass: want.length > 0 && sameNumbers(got, want) }
+  })
+  return ok(results.every((r) => r.pass), results.map((r) => `${r.pass ? '✓' : '✗'} ${r.name} L[${r.got.join(',')}]${r.pass ? '' : ` expected L[${r.want.join(',')}]`}`).join('; '))
+})
+
+// ─────────────────────────── GA1.5 — dates, run date, employees, thresholds ───────────────────────────
+
+check('GA1.5', 'A1', 'fake', 'dates, GETDATE() in the Left-28-days and death rules, employees 015405 and 041870, and the thresholds', async () => {
+  const text = procText(PFS)
+  const f = (await factsOf(PFS)).facts
+  const dates = (f.dates ?? []).map((d) => d.date)
+  const wantDates = ['2026-03-01', '2026-06-28', '2025-04-01', '2025-01-01', '2024-11-30', '2022-07-01']
+  const left = linesOf(text, /GETDATE\(\)\s*as\s+date\)\s*<=\s*DATEADD\(DAY,\s*28/i), death = linesOf(text, /IIF\(GETDATE\(\)\s*>=/i)
+  const run = (f.runDate ?? []).filter((r) => r.business).map((r) => r.line)
+  const emps = (f.employees ?? []).map((e) => e.value)
+  const th = (f.thresholds ?? []).map((t) => `${t.variable} ${t.operator} ${t.value}`)
+  const wantTh = ['@FractionWorkingDay >= 240', '@ELBalance > 60', '@ELBalance > 40', '@NoticePeriodDeductionDay > 60', '@NetPayableAmount > 50000']
+  return ok(wantDates.every((d) => dates.includes(d)) && left.length === 1 && death.length === 1 && run.includes(left[0]) && run.includes(death[0])
+      && ['015405', '041870'].every((e) => emps.includes(e)) && wantTh.every((t) => th.includes(t)),
+    `dates [${[...new Set(dates)].join(', ')}]; GETDATE business lines [${run}] (Left rule L${left}, death rule L${death}); employees [${emps}]; thresholds include ${wantTh.filter((t) => th.includes(t)).length}/5 of ${th.length}`)
+})
+
+// ─────────────────────────── GA1.6 — registry and questions ───────────────────────────
+
+check('GA1.6', 'A1', 'fake', 'the registry seeds 227 rows; questions open for LeaveId 3, ModeId 1, each unlabelled AttStatus code, each hard-coded employee, each GETDATE() business use', async () => {
+  const seeded = (await sqlite('SELECT COUNT(*) AS n FROM HrLookups'))[0]?.n
+  await factsOf(PFS)
+  const qs = await questions('status=open')
+  const has = (pred) => qs.filter(pred)
+  const att = ['P', 'LT', 'LTP', 'SD', 'TL', 'EE', 'NOP', 'EXL', 'SL', 'AL']
+  const missingAtt = att.filter((v) => has((q) => q.kind === 'lookup' && q.column === 'AttStatus' && q.value === v).length !== 1)
+  const pfsRun = has((q) => q.kind === 'rundate' && q.occurrences.some((o) => o.objectName === 'ProcessFinalSettelment'))
+  return ok(seeded === 227 && has((q) => q.kind === 'lookup' && q.column === 'LeaveId' && q.value === '3').length === 1
+      && has((q) => q.kind === 'lookup' && q.column === 'ModeId' && q.value === '1').length === 1 && !missingAtt.length
+      && ['015405', '041870'].every((e) => has((q) => q.kind === 'employee' && q.value === e).length === 1) && pfsRun.length === 2
+      && !has((q) => q.kind === 'lookup' && q.column === 'UnitId').length,
+    `HrLookups ${seeded}; LeaveId 3 ${has((q) => q.column === 'LeaveId').length}, ModeId 1 ${has((q) => q.column === 'ModeId').length}; AttStatus missing [${missingAtt}]; `
+    + `employees [${has((q) => q.kind === 'employee').map((q) => q.value)}]; run-date questions for ProcessFinalSettelment ${pfsRun.length}; ${qs.length} open in all`)
+})
+
+check('GA1.6', 'A1', 'fake', 'uploading the other two procedures adds their occurrences to the same questions; no question is asked twice', async () => {
+  await factsOf(PFS)
+  await factsOf(SUPP)
+  await factsOf(GSD)
+  const qs = await questions('status=all')
+  const keys = qs.map((q) => `${q.kind}:${q.column ?? ''}:${q.value ?? ''}:${q.kind === 'rundate' ? q.id : ''}`)
+  const dupes = keys.filter((k, i) => keys.indexOf(k) !== i)
+  const exl = qs.find((q) => q.kind === 'lookup' && q.column === 'AttStatus' && q.value === 'EXL')
+  const procs = [...new Set((exl?.occurrences ?? []).map((o) => o.objectName))]
+  const empGsd = qs.filter((q) => q.kind === 'employee' && q.occurrences.some((o) => o.objectName === 'GetSalaryDetails')).map((q) => q.value)
+  return ok(!dupes.length && procs.includes('ProcessFinalSettelment') && procs.includes('ProcessSupplementaryFinalSetelment') && ['1371', '79117', '333127'].every((e) => empGsd.includes(e)),
+    `${qs.length} questions, duplicates [${dupes}]; EXL occurs in [${procs}] (${exl?.occurrences?.length} places); GetSalaryDetails employees [${empGsd}]`)
+})
+
+// ─────────────────────────── GA1.7 — answering ───────────────────────────
+
+check('GA1.7', 'A1', 'fake', 'answering LeaveId 3 = "Earned leave" writes the registry and the log, closes the question, and the setup list shows it', async () => {
+  const pfs = await factsOf(PFS)
+  const q = (await questions('status=open')).find((x) => x.kind === 'lookup' && x.column === 'LeaveId' && x.value === '3')
+  const a = q ? await asAdmin('POST', `/api/hr/questions/${q.id}/answer`, { label: 'Earned leave' }) : null
+  const row = await sqlite(`SELECT Label FROM HrLookups WHERE "Column" = 'LeaveId' AND Value = '3'`)
+  const log = await sqlite(`SELECT NewLabel FROM HrLookupLog WHERE "Column" = 'LeaveId' AND Value = '3'`)
+  const after = (await questions('status=all')).find((x) => x.id === q?.id)
+  const setup = (await asAdmin('GET', `/api/hr/procedures/${pfs.id}/setup`)).json?.items ?? []
+  const shown = setup.some((i) => /LeaveId 3 \(Earned leave\)/i.test(i.text))
+  return ok(a?.status === 200 && row[0]?.Label === 'Earned leave' && log.some((l) => l.NewLabel === 'Earned leave') && after?.status === 'answered' && shown,
+    `answer ${a?.status}; registry "${row[0]?.Label}"; log rows ${log.length}; question ${after?.status}; setup list shows "LeaveId 3 (Earned leave)" ${shown}`)
+})
+
+check('GA1.7', 'A1', 'fake', '"not a business value" closes a question, and re-uploading does not reopen it', async () => {
+  const k = stamp()
+  const sql = (extra) => `CREATE PROCEDURE [dbo].[EvalLoop${k}] @EmpId int AS\nBEGIN\n  SELECT @N = COUNT(*) FROM Attendance_DailyAttendance WHERE EmpID = @EmpId AND ModeId = 9${k.length}\n${extra}END\n`
+  const v1 = await uploadProc(ctx.admin, `EvalLoop${k}.sql`, sql(''))
+  const value = `9${k.length}`
+  const q = (await questions('status=open')).find((x) => x.kind === 'lookup' && x.column === 'ModeId' && x.value === value)
+  const nb = q ? await asAdmin('POST', `/api/hr/questions/${q.id}/answer`, { notBusiness: true }) : null
+  const v2 = await uploadProc(ctx.admin, `EvalLoop${k}.sql`, sql('  -- a second version\n  SELECT 1\n'))
+  const all = (await questions('status=all')).filter((x) => x.kind === 'lookup' && x.column === 'ModeId' && x.value === value)
+  return ok(v1.status === 201 && nb?.status === 200 && v2.status === 201 && all.length === 1 && all[0].status === 'not-business' && all[0].occurrences.some((o) => o.version === 2),
+    `v1 ${v1.status}; marked ${nb?.status} → ${nb?.json?.status}; v2 ${v2.status}; questions for ModeId ${value}: ${all.length}, status ${all[0]?.status}, occurrences in v2 ${all[0]?.occurrences.some((o) => o.version === 2)}`)
+})
+
+// ─────────────────────────── GA1.8 — setup list ───────────────────────────
+
+check('GA1.8', 'A1', 'fake', 'the setup list: LeaveAllocationMaster by EmpCategoryID × EmpTypeID with LeaveID 3, unit names, sorted dates, risks, the supplementary procedure uploaded or not; the Markdown matches', async () => {
+  const pfs = await factsOf(PFS)
+  const get = async () => (await asAdmin('GET', `/api/hr/procedures/${pfs.id}/setup`)).json?.items ?? []
+  const supp = await procByName('ProcessSupplementaryFinalSetelment')
+  const items = await get()
+  const text = (g) => items.filter((i) => i.group === g).map((i) => i.text)
+  const lam = items.find((i) => /LeaveAllocationMaster/.test(i.text) && /EmpCategoryID\s*×\s*EmpTypeID/.test(i.text) && /LeaveId 3/i.test(i.text))
+  const units = items.find((i) => i.group === 'units' && ['1 Corporate Office', '27 Textile Head Office', '45 Corporate Office Tongi Zone', '111 Corporate Office Tongi-Merchant'].every((u) => i.text.includes(u)))
+  const dates = items.filter((i) => i.group === 'dates').map((i) => i.text.match(/\d{4}-\d{2}-\d{2}/)?.[0])
+  const sorted = dates.length >= 6 && dates.every((d, i) => i === 0 || dates[i - 1] <= d)
+  const risks = text('risks')
+  const riskOk = ['015405', '041870'].every((e) => risks.some((r) => r.includes(e))) && risks.some((r) => /GETDATE/.test(r))
+  const call = risks.find((r) => /ProcessSupplementaryFinalSetelment/.test(r)) ?? ''
+  const callOk = supp ? new RegExp(`uploaded v${supp.currentVersion}`).test(call) : /not uploaded/.test(call)
+  const md = await fetch(`${ctx.api.url}/api/hr/procedures/${pfs.id}/setup.md`, { headers: { Authorization: `Bearer ${ctx.admin.token}` } })
+  const mdText = await md.text()
+  const mdItems = mdText.split('\n').filter((l) => /^- /.test(l)).length
+  const mdOk = md.status === 200 && items.every((i) => mdText.includes(i.text)) && mdItems === items.length
+  return ok(!!lam && !!units && sorted && riskOk && callOk && mdOk && items.every((i) => (i.evidence ?? []).length > 0),
+    `LeaveAllocationMaster "${lam?.text}"; units "${units?.text}"; dates [${dates}] sorted ${sorted}; risks ${risks.length} (employees, GETDATE ${riskOk}); call "${call}" (${supp ? `uploaded v${supp.currentVersion}` : 'not uploaded'}); `
+    + `Markdown ${md.status}, ${mdItems} items vs ${items.length} on screen, all texts in it ${items.every((i) => mdText.includes(i.text))}; every line has evidence ${items.every((i) => (i.evidence ?? []).length > 0)}`)
+})
+
+// ─────────────────────────── GA1.9 — roles ───────────────────────────
+
+check('GA1.9', 'A1', 'fake', 'DevOps sees only Procedures and can upload and answer; HrAssistant answers but cannot upload (403); no hr tab → 403', async () => {
+  const k = stamp()
+  const dev = await generalUser(`devops-${k}`)
+  const role = await asAdmin('PUT', `/api/admin/rbac/users/${dev.id}/role`, { role: 'DevOps' })
+  const devops = await login(dev.username, dev.secret)
+  const hra = await rbEditor()
+  const plain = await generalUser(`nohr-${k}`)
+  const sql = `CREATE PROCEDURE [dbo].[EvalRole${k}] AS\nBEGIN\n  SELECT * FROM Attendance_DailyAttendance WHERE ModeId = 7${k.length}\nEND\n`
+  const devUp = await uploadProc(devops, `EvalRole${k}.sql`, sql)
+  const hraUp = await uploadProc(hra, `EvalRole2${k}.sql`, sql.replace(`EvalRole${k}`, `EvalRole2${k}`))
+  const q = (await questions('status=open')).find((x) => x.kind === 'lookup' && x.column === 'ModeId' && x.value === `7${k.length}`)
+  const devAnswer = q ? await as(devops, 'POST', `/api/hr/questions/${q.id}/answer`, { label: 'eval: DevOps answers' }) : null
+  const others = (await questions('status=open')).filter((x) => x.kind === 'employee')
+  const hraAnswer = others[0] ? await as(hra, 'POST', `/api/hr/questions/${others[0].id}/answer`, { note: 'eval: HR answers' }) : null
+  const noHr = await as(plain, 'GET', '/api/hr/procedures')
+  const policy = await sqlite(`SELECT AllowedModels FROM RoleModelPolicies WHERE Role = 'DevOps'`)
+  const tab = read('frontend/src/components/tabs/HrTab.vue')
+  return ok(role.status === 200 && sameSet(devops.tabs, ['hr', 'settings']) && devUp.status === 201 && devAnswer?.status === 200 && hraUp.status === 403 && hraAnswer?.status === 200
+      && noHr.status === 403 && policy[0]?.AllowedModels === HR_ASSISTANT_MODEL && /DevOps/.test(tab) && /procedures/.test(tab),
+    `DevOps role ${role.status}, tabs [${devops.tabs}], model policy "${policy[0]?.AllowedModels}"; DevOps upload ${devUp.status}, answer ${devAnswer?.status}; `
+    + `hr-assistant upload ${hraUp.status}, answer ${hraAnswer?.status}; no hr tab ${noHr.status}; HrTab shows DevOps only Procedures ${/DevOps/.test(tab)}`)
+})
+
+// ─────────────────────────── GA1.10 — no SQL runs ───────────────────────────
+
+check('GA1.10', 'A1', 'any', 'git grep: no SqlConnection, SqlCommand or SQL package; the eval runs with no database server', async () => {
+  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', 'SqlConnection|SqlCommand\\b|Microsoft\\.Data\\.SqlClient|System\\.Data\\.SqlClient|ScriptDom', '--', 'backend', 'frontend/src', '*.csproj'], { cwd: REPO, encoding: 'utf8' })
+  const hits = grep.stdout.split('\n').filter(Boolean)
+  const csproj = read('backend/RabbitIC.Api.csproj')
+  return ok(hits.length === 0 && !/SqlClient|ScriptDom/.test(csproj), `git grep hits ${hits.length}${hits.length ? `: ${hits.slice(0, 3).join(' | ')}` : ''}; csproj packages clean ${!/SqlClient|ScriptDom/.test(csproj)}`)
+})
+
+// ─────────────────────────── GA1.11 — builds ───────────────────────────
+
+check('GA1.11', 'A1', 'any', 'dotnet build: 0 warnings, 0 errors; npm run build clean', async () => {
+  const d = spawnSync('dotnet', ['build', path.join(REPO, 'backend', 'RabbitIC.Api.csproj'), '-v', 'q', '--nologo', '--no-incremental',
+    '-o', path.join(EVAL_ROOT, 'build-check-a1')], { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' })
+  const dout = (d.stdout ?? '') + (d.stderr ?? '')
+  const warnings = dout.match(/(\d+) Warning\(s\)/)?.[1], errors = dout.match(/(\d+) Error\(s\)/)?.[1]
+  const n = spawnSync('npm', ['run', 'build'], { cwd: path.join(REPO, 'frontend'), encoding: 'utf8', shell: process.platform === 'win32' })
+  const nout = (n.stdout ?? '') + (n.stderr ?? '')
+  return ok(d.status === 0 && warnings === '0' && errors === '0' && n.status === 0 && /built in/.test(nout),
+    `dotnet exit ${d.status}, ${warnings} warning(s), ${errors} error(s); npm exit ${n.status}, ${(nout.match(/built in [\d.]+m?s/) ?? ['no build line'])[0]}`)
+})
+
 // ─────────────────────────── runner ───────────────────────────
 
 /** Forwards everything to the real Ollama, recording requests and each chat's final frame. */
@@ -2112,11 +2416,12 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv)
   ctx.args = args
-  // "R1": the Rulebook's phases up to R1. A number: the module's phases up to it.
-  const rulebook = /^R\d+$/i.test(String(args.phase))
-  const upTo = Number(String(args.phase).replace(/^R/i, ''))
-  const selected = checks.filter((c) => (rulebook
-      ? typeof c.phase === 'string' && Number(c.phase.slice(1)) <= upTo
+  // "R1" or "A1": that build's phases up to it (Rulebook R, Procedure Analyzer A).
+  // A number: the module's own phases up to it.
+  const lettered = /^([A-Z])(\d+)$/i.exec(String(args.phase))
+  const upTo = Number(lettered ? lettered[2] : args.phase)
+  const selected = checks.filter((c) => (lettered
+      ? typeof c.phase === 'string' && c.phase[0].toUpperCase() === lettered[1].toUpperCase() && Number(c.phase.slice(1)) <= upTo
       : typeof c.phase === 'number' && c.phase <= upTo)
     && (!args.only || c.id === args.only))
     .filter((c) => c.mode === 'any' || c.mode === (args.live ? 'live' : 'fake'))

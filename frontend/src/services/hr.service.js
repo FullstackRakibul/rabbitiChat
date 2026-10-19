@@ -250,3 +250,69 @@ export async function streamRulebookDraft({ pageId, title, category, language, i
   }, signal)
   consume(buffer)
 }
+
+// ───────────────────────── প্রসিডিউর (Procedures) — docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.1–§3.4 ─────────────────────────
+// The uploaded SQL is text: the server reads and scans it, never runs it. Who may
+// upload, answer and edit the registry is the server's decision, reported back
+// as canUpload, canAnswer and canEditRegistry.
+
+/** { procedures: [{ id, objectName, kind, currentVersion, uploadedBy, uploadedAtUtc, analysis, openQuestions }], canUpload, canAnswer, canEditRegistry, maxUploadBytes }. */
+export function listProcedures() {
+  return http.get('/hr/procedures')
+}
+
+/** Upload one .sql file (≤ 2 MB) as the object's next version: { procedure, version }. "No change" is a 409. */
+export function uploadProcedure(file, note) {
+  const form = new FormData()
+  form.append('file', file)
+  if (note) form.append('note', note)
+  return http.postForm('/hr/procedures', form)
+}
+
+/** A procedure at a version (default: current): { id, objectName, kind, currentVersion, openQuestions, version, versions, facts, sql }. */
+export function getProcedure(id, version) {
+  return http.get(`/hr/procedures/${id}${version ? `?version=${version}` : ''}`)
+}
+
+/** The setup list: { objectName, version, uploadedBy, uploadedAtUtc, groups: [{ key, bn, en }], items: [{ group, text, evidence, questionIds }] }. */
+export function getProcedureSetup(id) {
+  return http.get(`/hr/procedures/${id}/setup`)
+}
+
+/** The setup list as Markdown, under the Rulebook's header and footer. */
+export function downloadProcedureSetup(id) {
+  return saveDownload(`/hr/procedures/${id}/setup.md`, `procedure-${id}-setup-list.md`)
+}
+
+/** Review questions, open first: { questions: [{ id, kind, column, value, text, status, answerLabel, answerNote, answeredBy, occurrences }], canAnswer }. */
+export function listProcedureQuestions({ status = 'open', procedureId } = {}) {
+  const qs = new URLSearchParams({ status })
+  if (procedureId) qs.set('procedureId', String(procedureId))
+  return http.get(`/hr/questions?${qs}`)
+}
+
+/** Answer: { label } for a code value, { note } for the why questions, or { notBusiness: true }. */
+export function answerProcedureQuestion(id, answer) {
+  return http.post(`/hr/questions/${id}/answer`, answer)
+}
+
+/** The registry: { lookups: [{ column, value, label, note, source, updatedBy, updatedAtUtc }], columns, canEdit }. */
+export function listLookups({ q = '', column = '' } = {}) {
+  const qs = new URLSearchParams()
+  if (q) qs.set('q', q)
+  if (column) qs.set('column', column)
+  return http.get(`/hr/lookups${qs.size ? `?${qs}` : ''}`)
+}
+
+/** Add or change one registry row; logged. */
+export function saveLookup({ column, value, label, note }) {
+  return http.put('/hr/lookups', { column, value, label, note })
+}
+
+/** The registry's change log, newest first: { log: [{ id, column, value, oldLabel, newLabel, oldNote, newNote, reason, changedBy, atUtc }] }. */
+export function listLookupLog({ column = '', value = '' } = {}) {
+  const qs = new URLSearchParams()
+  if (column) qs.set('column', column)
+  if (value) qs.set('value', value)
+  return http.get(`/hr/lookups/log${qs.size ? `?${qs}` : ''}`)
+}

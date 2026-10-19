@@ -118,6 +118,7 @@ namespace RabbitIC.Api.Middleware
 
             hrApi.MapHrApis();
             hrApi.MapHrRulebookApis();
+            hrApi.MapHrProcedureApis();
             return app;
         }
 

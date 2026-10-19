@@ -178,6 +178,8 @@ builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
 // মানব সম্পদ · নিয়মাবলি: HR's rule pages, their append-only history and their Library copies.
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrRulebook>();
+// মানব সম্পদ · প্রসিডিউর: uploaded procedures (text only, never run), their facts, the lookup registry and review questions.
+builder.Services.AddScoped<RabbitIC.Api.Hr.HrProcedures>();
 // Embeddings for the HR library are made in the background, one item at a time;
 // a save or a 200-file upload never waits on Ollama.
 builder.Services.AddSingleton<RabbitIC.Api.Hr.HrIndexer>();
@@ -417,12 +419,24 @@ using (var scope = app.Services.CreateScope())
 	// RBAC: the account's role is set through the admin service, and seeded items
 	// are owned by the administrator.
 	RabbitIC.Api.Hr.HrAssistantSeeder.RunAsync(scope.ServiceProvider, app.Configuration, app.Logger).GetAwaiter().GetResult();
+	// The Procedure Analyzer's DevOps account, the same way, only from DEVOPS_SECRET.
+	if (!string.IsNullOrWhiteSpace(app.Configuration[RabbitIC.Api.Hr.HrAssistantSeeder.DevOpsSecretVariable]))
+		RabbitIC.Api.Hr.HrAssistantSeeder.RunAsync(scope.ServiceProvider, app.Configuration, app.Logger,
+			RabbitIC.Api.Hr.HrAssistantSeeder.DevOpsUsername, RabbitIC.Api.Hr.HrAssistantSeeder.DevOpsSecretVariable,
+			RabbitIC.Api.Models.UserRoles.DevOps).GetAwaiter().GetResult();
 	if (RabbitIC.Api.Hr.HrLibrary.FindSeedDir(app.Configuration, app.Environment) is { } hrSeedDir
 		&& db.Users.FirstOrDefault(u => u.Role == RabbitIC.Api.Models.UserRoles.SystemAdmin) is { } hrSeedOwner)
 	{
 		var added = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>()
 			.SeedAsync(hrSeedDir, hrSeedOwner).GetAwaiter().GetResult();
 		if (added > 0) app.Logger.LogInformation("HR library: seeded {Count} item(s) from {Dir}.", added, hrSeedDir);
+	}
+	// The Procedure Analyzer's lookup registry: rows of docs/hr/hr-lookups.csv not there yet, once each.
+	if (RabbitIC.Api.Hr.HrLibrary.FindSeedDir(app.Configuration, app.Environment) is { } hrLookupDir)
+	{
+		var lookups = scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrProcedures>()
+			.SeedLookupsAsync(hrLookupDir).GetAwaiter().GetResult();
+		if (lookups > 0) app.Logger.LogInformation("HR procedures: seeded {Count} lookup row(s) from {Dir}.", lookups, hrLookupDir);
 	}
 	// A Library from before the glossary type: its "hr-glossary" item becomes the glossary, once.
 	if (scope.ServiceProvider.GetRequiredService<RabbitIC.Api.Hr.HrLibrary>().MigrateGlossaryTypeAsync().GetAwaiter().GetResult())

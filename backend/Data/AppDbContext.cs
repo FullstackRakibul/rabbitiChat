@@ -31,6 +31,14 @@ public class AppDbContext : DbContext
     public DbSet<HrRulePage> HrRulePages => Set<HrRulePage>();
     public DbSet<HrRulePageVersion> HrRulePageVersions => Set<HrRulePageVersion>();
 
+    /// <summary>মানব সম্পদ · প্রসিডিউর: uploaded procedures, their append-only versions, the lookup registry and review questions.</summary>
+    public DbSet<HrProcedure> HrProcedures => Set<HrProcedure>();
+    public DbSet<HrProcedureVersion> HrProcedureVersions => Set<HrProcedureVersion>();
+    public DbSet<HrLookup> HrLookups => Set<HrLookup>();
+    public DbSet<HrLookupLog> HrLookupLog => Set<HrLookupLog>();
+    public DbSet<HrReviewQuestion> HrReviewQuestions => Set<HrReviewQuestion>();
+    public DbSet<HrQuestionOccurrence> HrQuestionOccurrences => Set<HrQuestionOccurrence>();
+
     /// <summary>Queries the user has run. Never holds result payloads.</summary>
     public DbSet<SearchHistory> SearchHistories => Set<SearchHistory>();
 
@@ -153,6 +161,19 @@ public class AppDbContext : DbContext
         b.Entity<HrRulePage>().HasIndex(p => p.Title).IsUnique().HasFilter("\"Status\" <> 'retired'");
         b.Entity<HrRulePage>().HasIndex(p => p.LibraryItemId);
         b.Entity<HrRulePageVersion>().HasKey(v => new { v.PageId, v.Version });
+
+        // The Procedure Analyzer (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.1, §3.3).
+        // Versions and the registry log are append-only (triggers in SchemaUpgrade);
+        // the registry is one row per (Column, Value), compared ignoring case.
+        b.Entity<HrProcedure>().Property(p => p.ObjectName).UseCollation("NOCASE");
+        b.Entity<HrProcedure>().HasIndex(p => p.ObjectName).IsUnique();
+        b.Entity<HrProcedureVersion>().HasKey(v => new { v.ProcedureId, v.Version });
+        b.Entity<HrProcedureVersion>().HasOne<HrProcedure>().WithMany().HasForeignKey(v => v.ProcedureId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<HrLookup>().HasKey(l => new { l.Column, l.Value });
+        b.Entity<HrLookup>().Property(l => l.Column).UseCollation("NOCASE");
+        b.Entity<HrLookup>().Property(l => l.Value).UseCollation("NOCASE");
+        b.Entity<HrReviewQuestion>().HasIndex(q => q.Key).IsUnique();
+        b.Entity<HrQuestionOccurrence>().HasIndex(o => new { o.QuestionId, o.ProcedureId, o.Version, o.Line }).IsUnique();
         b.Entity<HrRulePageVersion>()
             .HasOne<HrRulePage>()
             .WithMany()

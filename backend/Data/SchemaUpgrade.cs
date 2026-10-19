@@ -33,6 +33,7 @@ public static class SchemaUpgrade
         EnsureContextSourceTable(db);
         EnsureHrLibrarySchema(db);
         EnsureHrRulebookSchema(db);
+        EnsureHrProcedureSchema(db);
         EnsureSearchHistoryTable(db);
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
@@ -533,6 +534,124 @@ public static class SchemaUpgrade
         db.Database.ExecuteSqlRaw(@"
             CREATE TRIGGER IF NOT EXISTS ""HrRulePageVersions_NoDelete"" BEFORE DELETE ON ""HrRulePageVersions""
             BEGIN SELECT RAISE(ABORT, 'HrRulePageVersions is append-only: a saved version is never deleted'); END");
+    }
+
+    /// <summary>
+    /// মানব সম্পদ · প্রসিডিউর (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.1, §3.3): the
+    /// tables for a database made before the Procedure Analyzer, the same shape
+    /// EnsureCreated gives a new file, and on every database the triggers that make
+    /// HrProcedureVersions and HrLookupLog append-only, the Rulebook's pattern.
+    /// </summary>
+    public static void EnsureHrProcedureSchema(AppDbContext db)
+    {
+        if (!TableExists(db, "HrProcedures"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrProcedures"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_HrProcedures"" PRIMARY KEY AUTOINCREMENT,
+                    ""ObjectName"" TEXT COLLATE NOCASE NOT NULL,
+                    ""Kind"" TEXT NOT NULL,
+                    ""CurrentVersion"" INTEGER NOT NULL,
+                    ""CreatedAtUtc"" TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_HrProcedures_ObjectName"" ON ""HrProcedures"" (""ObjectName"");");
+        }
+        if (!TableExists(db, "HrProcedureVersions"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrProcedureVersions"" (
+                    ""ProcedureId"" INTEGER NOT NULL,
+                    ""Version"" INTEGER NOT NULL,
+                    ""Sql"" TEXT NOT NULL,
+                    ""Sha256"" TEXT NOT NULL,
+                    ""UploadedByUserId"" INTEGER NOT NULL,
+                    ""AtUtc"" TEXT NOT NULL,
+                    ""Note"" TEXT NULL,
+                    ""FactsJson"" TEXT NOT NULL,
+                    CONSTRAINT ""PK_HrProcedureVersions"" PRIMARY KEY (""ProcedureId"", ""Version""),
+                    CONSTRAINT ""FK_HrProcedureVersions_HrProcedures_ProcedureId"" FOREIGN KEY (""ProcedureId"")
+                        REFERENCES ""HrProcedures"" (""Id"") ON DELETE RESTRICT
+                );");
+        }
+        if (!TableExists(db, "HrLookups"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrLookups"" (
+                    ""Column"" TEXT COLLATE NOCASE NOT NULL,
+                    ""Value"" TEXT COLLATE NOCASE NOT NULL,
+                    ""Label"" TEXT NULL,
+                    ""Note"" TEXT NULL,
+                    ""Source"" TEXT NULL,
+                    ""UpdatedByUserId"" INTEGER NULL,
+                    ""UpdatedAtUtc"" TEXT NOT NULL,
+                    CONSTRAINT ""PK_HrLookups"" PRIMARY KEY (""Column"", ""Value"")
+                );");
+        }
+        if (!TableExists(db, "HrLookupLog"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrLookupLog"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_HrLookupLog"" PRIMARY KEY AUTOINCREMENT,
+                    ""Column"" TEXT NOT NULL,
+                    ""Value"" TEXT NOT NULL,
+                    ""OldLabel"" TEXT NULL,
+                    ""NewLabel"" TEXT NULL,
+                    ""OldNote"" TEXT NULL,
+                    ""NewNote"" TEXT NULL,
+                    ""Reason"" TEXT NOT NULL,
+                    ""ChangedByUserId"" INTEGER NOT NULL,
+                    ""AtUtc"" TEXT NOT NULL
+                );");
+        }
+        if (!TableExists(db, "HrReviewQuestions"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrReviewQuestions"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_HrReviewQuestions"" PRIMARY KEY AUTOINCREMENT,
+                    ""Kind"" TEXT NOT NULL,
+                    ""Key"" TEXT NOT NULL,
+                    ""Column"" TEXT NULL,
+                    ""Value"" TEXT NULL,
+                    ""Text"" TEXT NOT NULL,
+                    ""Status"" TEXT NOT NULL,
+                    ""AnswerLabel"" TEXT NULL,
+                    ""AnswerNote"" TEXT NULL,
+                    ""AnsweredByUserId"" INTEGER NULL,
+                    ""AnsweredAtUtc"" TEXT NULL,
+                    ""CreatedAtUtc"" TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_HrReviewQuestions_Key"" ON ""HrReviewQuestions"" (""Key"");");
+        }
+        if (!TableExists(db, "HrQuestionOccurrences"))
+        {
+            db.Database.ExecuteSqlRaw(@"
+                CREATE TABLE ""HrQuestionOccurrences"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_HrQuestionOccurrences"" PRIMARY KEY AUTOINCREMENT,
+                    ""QuestionId"" INTEGER NOT NULL,
+                    ""ProcedureId"" INTEGER NOT NULL,
+                    ""Version"" INTEGER NOT NULL,
+                    ""ObjectName"" TEXT NOT NULL,
+                    ""Section"" TEXT NULL,
+                    ""Line"" INTEGER NOT NULL,
+                    ""Snippet"" TEXT NOT NULL
+                );");
+            db.Database.ExecuteSqlRaw(@"CREATE UNIQUE INDEX ""IX_HrQuestionOccurrences_QuestionId_ProcedureId_Version_Line""
+                ON ""HrQuestionOccurrences"" (""QuestionId"", ""ProcedureId"", ""Version"", ""Line"");");
+        }
+
+        // Literal statements, one per trigger: no SQL is ever built from a value.
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""HrProcedureVersions_NoUpdate"" BEFORE UPDATE ON ""HrProcedureVersions""
+            BEGIN SELECT RAISE(ABORT, 'HrProcedureVersions is append-only: a saved version is never updated'); END");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""HrProcedureVersions_NoDelete"" BEFORE DELETE ON ""HrProcedureVersions""
+            BEGIN SELECT RAISE(ABORT, 'HrProcedureVersions is append-only: a saved version is never deleted'); END");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""HrLookupLog_NoUpdate"" BEFORE UPDATE ON ""HrLookupLog""
+            BEGIN SELECT RAISE(ABORT, 'HrLookupLog is append-only: a logged change is never updated'); END");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TRIGGER IF NOT EXISTS ""HrLookupLog_NoDelete"" BEFORE DELETE ON ""HrLookupLog""
+            BEGIN SELECT RAISE(ABORT, 'HrLookupLog is append-only: a logged change is never deleted'); END");
     }
 
     private static void AddColumnIfMissing(AppDbContext db, string table, string column, string ddl)

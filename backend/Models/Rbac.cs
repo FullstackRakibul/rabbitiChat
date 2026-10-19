@@ -28,8 +28,15 @@ public static class UserRoles
     /// </summary>
     public const string HrAssistant = "HrAssistant";
 
+    /// <summary>
+    /// The people who upload stored procedures to the মানব সম্পদ Procedures section
+    /// and answer what their code values mean (docs/HR_PROCEDURE_ANALYZER_PROMPT.md
+    /// §3.7): the HR tab (Procedures only) and Settings. Narrow, like HrAssistant.
+    /// </summary>
+    public const string DevOps = "DevOps";
+
     /// <summary>Least to most privileged — the order the admin picker lists them in.</summary>
-    public static readonly string[] All = { General, HrAssistant, System, GroundControl, SystemAdmin };
+    public static readonly string[] All = { General, HrAssistant, DevOps, System, GroundControl, SystemAdmin };
 
     /// <summary>
     /// Maps arbitrary input to a known role. Anything unrecognised — including a

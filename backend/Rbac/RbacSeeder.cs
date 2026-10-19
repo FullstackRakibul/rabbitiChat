@@ -130,9 +130,10 @@ public static class RbacSeeder
         {
             if (existing.Any(r => UserRoles.Normalize(r) == role)) continue;
 
-            // General and HrAssistant start on the one default model
-            // (docs/HR_MODULE_PROMPT.md §3.1); every other role unrestricted.
-            var restricted = role is UserRoles.General or UserRoles.HrAssistant;
+            // General, HrAssistant and DevOps start on the one default model
+            // (docs/HR_MODULE_PROMPT.md §3.1, docs/HR_PROCEDURE_ANALYZER_PROMPT.md
+            // §3.7); every other role unrestricted.
+            var restricted = role is UserRoles.General or UserRoles.HrAssistant or UserRoles.DevOps;
             db.RoleModelPolicies.Add(new RoleModelPolicy
             {
                 Role = role,
@@ -147,7 +148,7 @@ public static class RbacSeeder
 
         db.SaveChanges();
         logger.LogInformation(
-            "RBAC: seeded model policies for {Roles} (General and HrAssistant limited to {Model}).",
+            "RBAC: seeded model policies for {Roles} (General, HrAssistant and DevOps limited to {Model}).",
             string.Join(", ", added), generalDefault);
     }
 

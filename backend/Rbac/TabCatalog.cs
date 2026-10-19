@@ -150,6 +150,15 @@ public static class TabCatalog
     };
 
     /// <summary>
+    /// DevOps's tabs: the HR module (where it sees only Procedures) and Settings
+    /// (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.7). A side branch, like HrAssistant.
+    /// </summary>
+    private static readonly string[] DevOpsTabs =
+    {
+        "hr", "settings",
+    };
+
+    /// <summary>
     /// Tabs available only to SystemAdmin. Not additive from lower tiers.
     /// </summary>
     private static readonly string[] SystemAdminOnlyTabs =
@@ -169,6 +178,7 @@ public static class TabCatalog
             UserRoles.GroundControl => GeneralTabs.Concat(SystemExtraTabs).Concat(GroundControlExtraTabs).ToArray(),
             UserRoles.System => GeneralTabs.Concat(SystemExtraTabs).ToArray(),
             UserRoles.HrAssistant => HrAssistantTabs,
+            UserRoles.DevOps => DevOpsTabs,
             _ => GeneralTabs,
         };
 

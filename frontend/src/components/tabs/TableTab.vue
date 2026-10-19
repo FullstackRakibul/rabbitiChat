@@ -28,10 +28,10 @@ import { Badge } from '@/components/ui/badge'
 import JsonTableGrid from '@/components/jsontable/JsonTableGrid.vue'
 
 /** Refuse files big enough to lock the tab up while parsing. */
-const MAX_BYTES = 12 * 1024 * 1024
+const MAX_BYTES = 50 * 1024 * 1024
 
 /** Above this many rendered rows the table pages instead of emitting everything. */
-const PAGE_THRESHOLD = 1000
+const PAGE_THRESHOLD = 2000
 const PAGE_SIZE = 200
 
 const raw = ref('')

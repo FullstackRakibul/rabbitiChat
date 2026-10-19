@@ -645,6 +645,47 @@ public sealed class HrLibrary(
     public Task DeactivateRulebookCopyAsync(User editor, int itemId, CancellationToken ct = default) =>
         sources.UpdateSharedAsync(editor, Kind, itemId, i => i.IsActive = false, ct);
 
+    /// <summary>
+    /// The Library copy of an uploaded procedure (docs/HR_PROCEDURE_ANALYZER_PROMPT.md
+    /// §3.1): a `procedure` item in `search` mode named "&lt;Object&gt;.sql", the
+    /// newest version's text, so Ask cites the latest code. The upload's own
+    /// permission (DevOps, SystemAdmin) already decided who may write it, so it is
+    /// written here directly, not through the Library editors' check. An unchanged
+    /// text leaves the item and its chunks as they are.
+    /// </summary>
+    public async Task<int> WriteProcedureCopyAsync(User uploader, string objectName, string sql, CancellationToken ct = default)
+    {
+        var name = objectName + ".sql";
+        var lower = name.ToLowerInvariant();
+        var content = Normalize(sql);
+        var item = await db.ContextSources.FirstOrDefaultAsync(s => s.Kind == Kind && s.Name.ToLower() == lower, ct);
+        var now = DateTime.Now;
+        if (item is null)
+        {
+            var max = await db.ContextSources.Where(s => s.Kind == Kind).Select(s => (int?)s.SortOrder).MaxAsync(ct);
+            item = new ContextSource
+            {
+                Kind = Kind, Name = name, HrType = "procedure", Mode = "search", Content = content, IsActive = true,
+                OwnerUserId = uploader.Id, SortOrder = (max ?? -1) + 1, Version = 1, CreatedAt = now, UpdatedAt = now,
+            };
+            db.ContextSources.Add(item);
+        }
+        else
+        {
+            var same = string.Equals(item.Content, content, StringComparison.Ordinal);
+            if (same && item.HrType == "procedure" && item.Mode == "search" && item.IsActive) return item.Id;
+            if (!same) item.Version++;
+            item.Content = content;
+            item.HrType = "procedure";
+            item.Mode = "search";
+            item.IsActive = true;
+            item.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+        await RechunkAsync(item, ct);
+        return item.Id;
+    }
+
     // ───────────────────────── uploads ─────────────────────────
 
     /// <summary>

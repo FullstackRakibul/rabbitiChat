@@ -1151,7 +1151,7 @@ const notesTabRef = ref(null)
       </TabsContent>
 
       <TabsContent value="hr" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-        <HrTab />
+        <HrTab :role="myRole" />
       </TabsContent>
       
       <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

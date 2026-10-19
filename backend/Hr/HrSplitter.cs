@@ -361,9 +361,66 @@ public static class HrSplitter
         return chunks;
     }
 
-    /// <summary>Which lines survive step 1. Removed lines keep their numbers; they are simply not used.</summary>
-    private static bool[] RemoveCommentedCode(string[] lines)
+    /// <summary>
+    /// The line ranges (1-based) step 1 drops as commented-out code: whole "--"
+    /// lines holding SQL, the comment that only labels them, and block comments
+    /// holding SQL. The Procedure Analyzer reports them as "Ignored code"; its own
+    /// scan never sees comments at all.
+    /// </summary>
+    public static IReadOnlyList<(int From, int To)> IgnoredCode(string text)
     {
+        var lines = (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        RemoveCommentedCode(lines, out var dead);
+        var ranges = new List<(int From, int To)>();
+        for (var i = 0; i < dead.Length; i++)
+        {
+            if (!dead[i]) continue;
+            var from = i;
+            while (i + 1 < dead.Length && dead[i + 1]) i++;
+            ranges.Add((from + 1, i + 1));
+        }
+        return ranges;
+    }
+
+    /// <summary>
+    /// A procedure's sections as the splitter reads them: from a "--//… Start"
+    /// comment to its "--//… End" (or to the next Start), 1-based lines. Empty when
+    /// the file has no section comments.
+    /// </summary>
+    public static IReadOnlyList<(string Name, int From, int To)> SqlSections(string text)
+    {
+        var lines = (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var kept = RemoveCommentedCode(lines, out _);
+        var sections = new List<(string Name, int From, int To)>();
+        string? open = null;
+        var start = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!kept[i]) continue;
+            var (marker, name) = Classify(lines[i]);
+            if (marker == Marker.Start)
+            {
+                if (open is not null) sections.Add((open, start + 1, i));
+                open = name ?? $"Section at line {i + 1}";
+                start = i;
+            }
+            else if (marker == Marker.End && open is not null)
+            {
+                sections.Add((open, start + 1, i + 1));
+                open = null;
+            }
+        }
+        if (open is not null) sections.Add((open, start + 1, lines.Length));
+        return sections;
+    }
+
+    /// <summary>Which lines survive step 1. Removed lines keep their numbers; they are simply not used.</summary>
+    private static bool[] RemoveCommentedCode(string[] lines) => RemoveCommentedCode(lines, out _);
+
+    /// <param name="dead">The lines removed as commented-out code (not every removed comment).</param>
+    private static bool[] RemoveCommentedCode(string[] lines, out bool[] dead)
+    {
+        dead = new bool[lines.Length];
         var kept = new bool[lines.Length];
         var codeComment = new bool[lines.Length];
         var inBlock = false;
@@ -400,7 +457,11 @@ public static class HrSplitter
 
             var rest = visible.ToString();
             var hadText = !string.IsNullOrWhiteSpace(line);
-            if (hadText && string.IsNullOrWhiteSpace(rest)) continue;          // the line was all block comment
+            if (hadText && string.IsNullOrWhiteSpace(rest))
+            {
+                dead[i] = SqlKeyword.IsMatch(line);                            // a block comment: code only if it holds SQL
+                continue;                                                      // the line was all block comment
+            }
 
             var trimmed = rest.TrimStart();
             if (trimmed.StartsWith("--", StringComparison.Ordinal)
@@ -408,6 +469,7 @@ public static class HrSplitter
                 && SqlKeyword.IsMatch(trimmed[2..]))
             {
                 codeComment[i] = true;                                         // commented-out code
+                dead[i] = true;
                 continue;
             }
 
@@ -420,7 +482,7 @@ public static class HrSplitter
         {
             if (!kept[i] || !codeComment[i + 1]) continue;
             var t = lines[i].TrimStart();
-            if (t.StartsWith("--", StringComparison.Ordinal) && !SectionComment.IsMatch(t)) kept[i] = false;
+            if (t.StartsWith("--", StringComparison.Ordinal) && !SectionComment.IsMatch(t)) { kept[i] = false; dead[i] = true; }
         }
 
         return kept;
