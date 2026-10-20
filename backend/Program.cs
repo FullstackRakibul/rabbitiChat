@@ -175,6 +175,11 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<RabbitIC.Api.Rbac.ModelPolicy>();
 builder.Services.AddScoped<RabbitIC.Api.Rbac.AccessPolicy>();
 
+// ম্যাট্রিক্স · Matrix (docs/MATRIX_PROMPT.md): repository → matcher → service, one scope per request.
+builder.Services.AddScoped<RabbitIC.Api.Repositories.IMatrixRepository, RabbitIC.Api.Repositories.MatrixRepository>();
+builder.Services.AddScoped<RabbitIC.Api.Matrix.TemplateMatcher>();
+builder.Services.AddScoped<RabbitIC.Api.Services.IMatrixService, RabbitIC.Api.Services.MatrixService>();
+
 // ---- মানব সম্পদ (HR Assistant): the HR library (docs/HR_MODULE_PROMPT.md) ----
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
 // মানব সম্পদ · নিয়মাবলি: HR's rule pages, their append-only history and their Library copies.
@@ -361,6 +366,7 @@ app.ApplicationComponentSplitterApis();
 app.ApplicationNoteApis();
 app.ApplicationOddityApis();
 app.ApplicationHrApis();
+app.ApplicationMatrixApis();
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);

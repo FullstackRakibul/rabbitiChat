@@ -41,7 +41,8 @@ const BIN_DIR = path.join(EVAL_ROOT, 'api-bin')
 // which are General's baseline plus their own extras, so the change belongs here
 // rather than in each check.
 const GENERAL_TABS = ['dashboard', 'todo', '5lakhs', 'notes', 'sources', 'settings']
-const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter']
+// 'matrix' since docs/MATRIX_PROMPT.md §3.10 seeds Matrix for System (and so Ground Control).
+const SYSTEM_EXTRA = ['chat', 'workspace', 'docs', 'search', 'ielts', 'component-splitter', 'matrix']
 // HrAssistant joined with the মানব সম্পদ module (docs/HR_MODULE_PROMPT.md §3.1),
 // listed next to General as the server orders them.
 const ROLE_KEYS = ['General', 'HrAssistant', 'DevOps', 'System', 'GroundControl', 'SystemAdmin']

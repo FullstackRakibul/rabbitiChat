@@ -36,6 +36,7 @@ export const MODULE_ROUTES = [
   { key: 'workspace', path: '/workspace' },
   // মানব সম্পদ (HR Assistant).
   { key: 'hr', path: '/hr' },
+  { key: 'matrix', path: '/matrix' },
   { key: 'todo', path: '/todo' },
   { key: 'search', path: '/search' },
   { key: 'jsonto', path: '/json-converter' },

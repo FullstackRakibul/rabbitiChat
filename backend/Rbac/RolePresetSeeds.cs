@@ -36,6 +36,17 @@ public static class RolePresetSeeds
     /// <summary>The HR module, where it sees only Procedures, and Settings (docs/HR_PROCEDURE_ANALYZER_PROMPT.md §3.7).</summary>
     private static readonly string[] DevOpsTabs = { "hr", "settings" };
 
+    /// <summary>
+    /// Matrix (docs/MATRIX_PROMPT.md §3.10): System and hr-assistant get the tab,
+    /// every section, upload, dashboard editing and names — not salary. Templates,
+    /// fixes and KPI definitions stay SystemAdmin's. Ground Control is System plus
+    /// the Oddity gateway by construction, so it gets what System gets (a move from
+    /// System to Ground Control removes nothing). Other roles: none.
+    /// </summary>
+    private static readonly string[] MatrixRoles = { UserRoles.System, UserRoles.GroundControl, UserRoles.HrAssistant };
+    private static readonly string[] MatrixActions =
+        { PermissionKeys.MatrixUpload, PermissionKeys.MatrixDashboardsEdit, PermissionKeys.MatrixViewPersonal };
+
     private static IReadOnlyCollection<string> TabsFor(string role) => role switch
     {
         UserRoles.GroundControl => GroundControlTabs,
@@ -75,6 +86,11 @@ public static class RolePresetSeeds
     public static bool InitialValue(string role, PermissionDef p)
     {
         if (role == UserRoles.SystemAdmin) return true;
+
+        if (p.Key == PermissionKeys.TabMatrix || p.Key.StartsWith("section:matrix.", StringComparison.Ordinal))
+            return MatrixRoles.Contains(role);
+        if (p.Key.StartsWith("action:matrix.", StringComparison.Ordinal))
+            return MatrixRoles.Contains(role) && MatrixActions.Contains(p.Key);
 
         return p.Kind switch
         {

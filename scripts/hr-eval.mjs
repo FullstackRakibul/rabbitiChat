@@ -45,7 +45,8 @@ const FIXTURES = path.join(REPO, 'scripts', 'hr', 'fixtures')
 
 const HR_LABEL = 'মানব সম্পদ'
 const HR_ASSISTANT = 'hr-assistant'
-const HR_ASSISTANT_TABS = ['hr', 'notes', 'settings']
+// Matrix (docs/MATRIX_PROMPT.md §3.10) seeds its tab for hr-assistant too.
+const HR_ASSISTANT_TABS = ['hr', 'matrix', 'notes', 'settings']
 const HR_ASSISTANT_MODEL = 'gemma4:12b'
 const MAX_CHUNK_CHARS = 1500
 const SECRET = 'eval-hr-assistant-secret'   // the throwaway API's only; never a real one
@@ -138,7 +139,7 @@ function expectedSeed() {
 
 // ─────────────────────────── G1.1 — user type ───────────────────────────
 
-check('G1.1', 1, 'fake', 'with HR_ASSISTANT_SECRET: hr-assistant exists as HrAssistant with exactly hr, notes, settings', async () => {
+check('G1.1', 1, 'fake', 'with HR_ASSISTANT_SECRET: hr-assistant exists as HrAssistant with exactly hr, matrix, notes, settings', async () => {
   const rows = await sqlite(`SELECT Id, Role FROM Users WHERE Username = '${HR_ASSISTANT}'`)
   const u = await login(HR_ASSISTANT, SECRET)
   return ok(rows.length === 1 && rows[0].Role === 'HrAssistant' && u.role === 'HrAssistant' && sameSet(u.tabs, HR_ASSISTANT_TABS),

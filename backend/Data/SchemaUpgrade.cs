@@ -38,6 +38,7 @@ public static class SchemaUpgrade
         EnsureConversationActiveSourcesColumn(db);
         EnsureRbacSchema(db);
         EnsureAccessSchema(db);
+        EnsureTablesFromModel(db, "Mx");
         EnsureRoleModelPolicyTable(db);
         EnsureIeltsTables(db);
         EnsureOddityTables(db);
@@ -721,6 +722,35 @@ public static class SchemaUpgrade
         db.Database.ExecuteSqlRaw(@"
             CREATE TRIGGER IF NOT EXISTS ""HrLookupLog_NoDelete"" BEFORE DELETE ON ""HrLookupLog""
             BEGIN SELECT RAISE(ABORT, 'HrLookupLog is append-only: a logged change is never deleted'); END");
+    }
+
+    /// <summary>
+    /// Creates every table of the EF model whose name starts with
+    /// <paramref name="prefix"/> and is missing, with its indexes, using the
+    /// statements EF's own create script has for it — so a database made before a
+    /// module gets exactly the shapes EnsureCreated gives a new file, with no
+    /// second copy of the DDL to drift. Used for Matrix's Mx* tables.
+    /// </summary>
+    private static void EnsureTablesFromModel(AppDbContext db, string prefix)
+    {
+        var script = db.Database.GenerateCreateScript();
+        var statements = script.Split(";", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var create = new System.Text.RegularExpressions.Regex(@"^CREATE TABLE ""(?<t>[^""]+)""");
+        var index = new System.Text.RegularExpressions.Regex(@"^CREATE (UNIQUE )?INDEX ""[^""]+"" ON ""(?<t>[^""]+)""");
+
+        var missing = statements
+            .Select(s => create.Match(s))
+            .Where(m => m.Success && m.Groups["t"].Value.StartsWith(prefix, StringComparison.Ordinal) && !TableExists(db, m.Groups["t"].Value))
+            .Select(m => m.Groups["t"].Value)
+            .ToHashSet();
+        if (missing.Count == 0) return;
+
+        foreach (var s in statements)
+        {
+            var t = create.Match(s) is { Success: true } c ? c.Groups["t"].Value
+                  : index.Match(s) is { Success: true } i ? i.Groups["t"].Value : null;
+            if (t is not null && missing.Contains(t)) db.Database.ExecuteSqlRaw(s + ";");
+        }
     }
 
     private static void AddColumnIfMissing(AppDbContext db, string table, string column, string ddl)

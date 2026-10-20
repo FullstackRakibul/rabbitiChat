@@ -122,6 +122,15 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        /// <summary>ম্যাট্রিক্স: /api/matrix/*, gated by the `matrix` tab.</summary>
+        public static WebApplication ApplicationMatrixApis(this WebApplication app)
+        {
+            var matrixApi = app.MapGroup("/api").WithTags("Matrix");
+
+            matrixApi.MapMatrixApis();
+            return app;
+        }
+
         public static WebApplication ApplicationOddityApis(this WebApplication app)
         {
             var adminApi = app.MapGroup("/api").WithTags("Oddity");

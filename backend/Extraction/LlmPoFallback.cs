@@ -17,6 +17,7 @@
 
 using System.Text;
 using System.Text.Json;
+using RabbitIC.Api.ModelSources;
 
 namespace RabbitIC.Api.Extraction;
 
@@ -144,81 +145,14 @@ public sealed class LlmPoFallback(IHttpClientFactory http, IConfiguration config
                                  (int)sw.ElapsedMilliseconds, error);
     }
 
-    private sealed record ModelAnswer(string? Content, int PromptTokens, int OutputTokens, string? Error);
-
     /// <summary>
-    /// One /api/chat call: the schema as `format`, thinking off, temperature 0,
-    /// streamed on a client with no fixed timeout so a slow local model is not cut
-    /// off at ten minutes, and the caller's token cancels it.
+    /// One /api/chat call with the PO schema as `format` — through the shared
+    /// SchemaJsonChat, which Matrix's mapping suggestions use too.
     /// </summary>
-    private async Task<ModelAnswer> CallAsync(
-        string model, IReadOnlyList<PoPromptMessage> messages, CancellationToken ct)
-    {
-        var payload = new
-        {
-            model,
-            stream = true,
-            format = PoPromptBuilder.OutputSchema,
-            think = false,
-            options = new { temperature = 0, num_ctx = NumCtx },
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToArray(),
-        };
-
-        try
-        {
-            // "ollama-extract" has no fixed timeout — see Program.cs. The old path
-            // used "ollama" (10 minutes), which a 27B model on a cold load can hit.
-            var client = http.CreateClient("ollama-extract");
-            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
-            {
-                Content = JsonContent.Create(payload),
-            };
-            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!resp.IsSuccessStatusCode)
-                return new(null, 0, 0, $"Ollama answered {(int)resp.StatusCode} for model '{model}'.");
-
-            var content = new StringBuilder();
-            int promptTokens = 0, outputTokens = 0;
-            string? streamError = null;
-
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var reader = new StreamReader(stream);
-            while (await reader.ReadLineAsync(ct) is { } line)
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                JsonDocument frame;
-                try { frame = JsonDocument.Parse(line); } catch { continue; }
-                using (frame)
-                {
-                    var root = frame.RootElement;
-                    if (root.TryGetProperty("error", out var err))
-                    {
-                        streamError = err.GetString();
-                        break;
-                    }
-                    if (root.TryGetProperty("message", out var msg)
-                        && msg.TryGetProperty("content", out var c)
-                        && c.ValueKind == JsonValueKind.String)
-                        content.Append(c.GetString());
-                    if (root.TryGetProperty("prompt_eval_count", out var pe) && pe.TryGetInt32(out var p))
-                        promptTokens = p;
-                    if (root.TryGetProperty("eval_count", out var ec) && ec.TryGetInt32(out var o))
-                        outputTokens = o;
-                }
-            }
-
-            if (streamError is not null) return new(null, promptTokens, outputTokens, streamError);
-            var text = content.ToString();
-            return string.IsNullOrWhiteSpace(text)
-                ? new(null, promptTokens, outputTokens, "The model returned an empty answer.")
-                : new(text, promptTokens, outputTokens, null);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            return new(null, 0, 0, $"Could not reach the model: {ex.Message}");
-        }
-    }
+    private Task<SchemaJsonAnswer> CallAsync(
+        string model, IReadOnlyList<PoPromptMessage> messages, CancellationToken ct) =>
+        SchemaJsonChat.CallAsync(http, model, PoPromptBuilder.OutputSchema,
+            messages.Select(m => new SchemaJsonMessage(m.Role, m.Content)), NumCtx, ct);
 
     private static ExtractionResult? Map(string json)
     {

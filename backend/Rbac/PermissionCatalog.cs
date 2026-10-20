@@ -44,6 +44,19 @@ public static class PermissionKeys
     public const string LogsAudit = "action:logs.audit";
     public const string AccessManage = "action:access.manage";
 
+    // ম্যাট্রিক্স · Matrix (docs/MATRIX_PROMPT.md §3.10)
+    public const string TabMatrix = "tab:matrix";
+    public const string MatrixData = "section:matrix.data";
+    public const string MatrixDashboards = "section:matrix.dashboards";
+    public const string MatrixAsk = "section:matrix.ask";
+    public const string MatrixUpload = "action:matrix.upload";
+    public const string MatrixTemplates = "action:matrix.templates";
+    public const string MatrixFix = "action:matrix.fix";
+    public const string MatrixDashboardsEdit = "action:matrix.dashboards.edit";
+    public const string MatrixKpisEdit = "action:matrix.kpis.edit";
+    public const string MatrixViewPersonal = "action:matrix.view-personal";
+    public const string MatrixViewSalary = "action:matrix.view-salary";
+
     public static string Tab(string tabKey) => "tab:" + tabKey;
 }
 
@@ -91,6 +104,17 @@ public static class PermissionCatalog
         Action(PermissionKeys.HrProceduresUpload, "Upload a procedure", "প্রসিডিউর আপলোড", "Work", PermissionKeys.HrProcedures),
         Action(PermissionKeys.HrProceduresAnswer, "Answer a procedure question", "প্রশ্নের উত্তর দেওয়া", "Work", PermissionKeys.HrProcedures),
         Action(PermissionKeys.HrLookupsEdit, "Edit the code registry", "কোড রেজিস্ট্রি সম্পাদনা", "Work", PermissionKeys.HrProcedures),
+        Tab("matrix", "Matrix", "ম্যাট্রিক্স", "Work", label: "ম্যাট্রিক্স · Matrix"),
+        Section(PermissionKeys.MatrixData, "Data", "ডেটা", "Work", PermissionKeys.TabMatrix),
+        Action(PermissionKeys.MatrixUpload, "Upload and import files", "ফাইল আপলোড ও ইমপোর্ট", "Work", PermissionKeys.MatrixData),
+        Action(PermissionKeys.MatrixTemplates, "Edit templates and keep a sensitive column", "টেমপ্লেট সম্পাদনা", "Work", PermissionKeys.MatrixData),
+        Action(PermissionKeys.MatrixFix, "Fix quality issues", "ডেটার ত্রুটি সংশোধন", "Work", PermissionKeys.MatrixData),
+        Section(PermissionKeys.MatrixDashboards, "Dashboards", "ড্যাশবোর্ড", "Work", PermissionKeys.TabMatrix),
+        Action(PermissionKeys.MatrixDashboardsEdit, "Edit dashboards", "ড্যাশবোর্ড সম্পাদনা", "Work", PermissionKeys.MatrixDashboards),
+        Action(PermissionKeys.MatrixKpisEdit, "Edit KPI definitions and thresholds", "কেপিআই সম্পাদনা", "Work", PermissionKeys.MatrixDashboards),
+        Section(PermissionKeys.MatrixAsk, "Ask", "প্রশ্ন", "Work", PermissionKeys.TabMatrix),
+        Action(PermissionKeys.MatrixViewPersonal, "See names", "নাম দেখা", "Work", PermissionKeys.TabMatrix),
+        Action(PermissionKeys.MatrixViewSalary, "See salary figures", "বেতনের অঙ্ক দেখা", "Work", PermissionKeys.TabMatrix),
         Tab("todo", "To-Do", "করণীয়", "Work"),
         Tab("search", "Search", "অনুসন্ধান", "Work"),
         Tab("notes", "Notes", "নোট", "Work"),

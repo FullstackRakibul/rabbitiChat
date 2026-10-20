@@ -56,6 +56,7 @@ public class TabAccessMiddleware
         ("/api/stream/logs", "logs"),
         ("/api/oddity", "oddity"),
         ("/api/hr", "hr"),
+        ("/api/matrix", "matrix"),
     };
 
     /// <summary>

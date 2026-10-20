@@ -1,0 +1,56 @@
+// ম্যাট্রিক্স — data access (docs/MATRIX_PROMPT.md §3.1, §3.2). The repository knows
+// nothing about who may do what: permissions and masking are MatrixService's.
+
+using RabbitIC.Api.Matrix;
+using RabbitIC.Api.Models;
+
+namespace RabbitIC.Api.Repositories;
+
+/// <summary>A filter on a dataset column: op is "=", "contains" or "in".</summary>
+public sealed record MxRowFilter(string Key, string Op, IReadOnlyList<string> Values);
+
+public interface IMatrixRepository
+{
+    Task<MxUpload> AddUploadAsync(MxUpload upload, CancellationToken ct = default);
+    Task<MxUpload?> GetUploadAsync(int id, CancellationToken ct = default);
+    Task<List<MxUpload>> ListUploadsAsync(int take, CancellationToken ct = default);
+
+    Task<List<MxTemplate>> ListTemplatesAsync(CancellationToken ct = default);
+    Task<MxTemplate?> GetTemplateAsync(int id, CancellationToken ct = default);
+    Task<MxTemplate> AddTemplateAsync(MxTemplate template, CancellationToken ct = default);
+
+    Task<List<MxDataset>> ListDatasetsAsync(CancellationToken ct = default);
+    Task<MxDataset?> GetDatasetAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds the dataset row, then creates mx_ds_&lt;id&gt; with one typed column per
+    /// <paramref name="columns"/> entry plus _row and _sheet, fills it, and indexes
+    /// its dimension and date columns — in one transaction.
+    /// </summary>
+    Task<MxDataset> CreateDatasetAsync(MxDataset dataset, IReadOnlyList<MxDsColumn> columns,
+        IReadOnlyList<object?[]> rows, IReadOnlyList<int> sourceRows, CancellationToken ct = default);
+
+    /// <summary>Marks this dataset the current snapshot of its kind and template, and every older one not.</summary>
+    Task SetCurrentAsync(MxDataset dataset, CancellationToken ct = default);
+
+    /// <summary>Rows of a dataset, paged; columns from <paramref name="keys"/> (already validated) plus _row.</summary>
+    Task<(int Total, List<Dictionary<string, object?>> Rows)> RowsAsync(MxDataset dataset, IReadOnlyList<string> keys,
+        IReadOnlyList<MxRowFilter> filters, IReadOnlyList<int>? onlyRows, int offset, int limit, CancellationToken ct = default);
+
+    /// <summary>Distinct trimmed, lower-cased values of a column (the designation lookup).</summary>
+    Task<HashSet<string>> DistinctAsync(MxDataset dataset, string key, CancellationToken ct = default);
+
+    Task AddIssuesAsync(IEnumerable<MxQualityIssue> issues, CancellationToken ct = default);
+    Task<List<MxQualityIssue>> ListIssuesAsync(int datasetId, CancellationToken ct = default);
+    Task<MxQualityIssue?> GetIssueAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Applies a fix to one column: copies the raw values into _raw_&lt;key&gt; first
+    /// (once), then corrects the column. Returns how many rows changed.
+    /// </summary>
+    Task<int> ApplyFixAsync(MxDataset dataset, string key, string kind, CancellationToken ct = default);
+
+    Task AddFixLogAsync(MxFixLog log, CancellationToken ct = default);
+
+    Task SaveChangesAsync(CancellationToken ct = default);
+}

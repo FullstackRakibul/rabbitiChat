@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote, Activity, Satellite, Grip, Users
+  Scissors, StickyNote, Activity, Satellite, Grip, Users, Grid3x3
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -42,6 +42,7 @@ import ComponentSplitterTab from '@/components/tabs/ComponentSplitterTab.vue'
 import RbacTab from '@/components/tabs/RbacTab.vue'
 import NotesTab from '@/components/tabs/NotesTab.vue'
 import HrTab from '@/components/tabs/HrTab.vue'
+import MatrixTab from '@/components/tabs/MatrixTab.vue'
 import PublicNote from '@/components/notes/PublicNote.vue'
 import LogsTab from '@/components/tabs/LogsTab.vue'
 import OddityTab from '@/components/tabs/OddityTab.vue'
@@ -439,6 +440,7 @@ const MODULE_ICONS = {
   chat: MessageSquare,
   workspace: Brain,
   hr: Users,
+  matrix: Grid3x3,
   todo: ListTodo,
   search: Globe,
   notes: StickyNote,
@@ -458,6 +460,8 @@ const MODULE_ICONS = {
 // stays empty for that moment rather than flashing modules the user may not have.
 const allowedTabs = ref(null)
 const myModules = ref([])        // [{ key, label, group }] in the catalog's order
+const mySections = ref([])       // section keys, e.g. section:matrix.data
+const myActions = ref([])        // action keys, e.g. action:matrix.upload
 const myRole = ref('')
 const myRoleLabel = ref('')
 const myUserId = ref(0)
@@ -489,6 +493,8 @@ async function refreshPermissions() {
     const me = await myAccess()
     allowedTabs.value = me.tabs
     myModules.value = me.modules
+    mySections.value = me.sections ?? []
+    myActions.value = me.actions ?? []
     myRole.value = me.role
     myRoleLabel.value = me.roleLabel ?? me.role
     myUserId.value = me.id
@@ -1167,6 +1173,11 @@ const notesTabRef = ref(null)
 
       <TabsContent value="hr" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <HrTab :role="myRole" />
+      </TabsContent>
+
+      <!-- ম্যাট্রিক্স · Matrix: what the user may see inside it is the server's (sections, actions). -->
+      <TabsContent v-if="allowedTabs?.includes('matrix')" value="matrix" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <MatrixTab :sections="mySections" :actions="myActions" />
       </TabsContent>
       
       <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

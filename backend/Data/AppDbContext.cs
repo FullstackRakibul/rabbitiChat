@@ -25,6 +25,18 @@ public class AppDbContext : DbContext
     /// <summary>Access — every change, append-only (SQLite triggers in SchemaUpgrade).</summary>
     public DbSet<AccessChangeLogEntry> AccessChangeLog => Set<AccessChangeLogEntry>();
 
+    // ম্যাট্রিক্স · Matrix (docs/MATRIX_PROMPT.md §3.2). Dataset rows live in mx_ds_<id> tables of their own (MatrixRepository).
+    public DbSet<MxUpload> MxUploads => Set<MxUpload>();
+    public DbSet<MxTemplate> MxTemplates => Set<MxTemplate>();
+    public DbSet<MxDataset> MxDatasets => Set<MxDataset>();
+    public DbSet<MxQualityIssue> MxQualityIssues => Set<MxQualityIssue>();
+    public DbSet<MxFixLog> MxFixLogs => Set<MxFixLog>();
+    public DbSet<MxRelation> MxRelations => Set<MxRelation>();
+    public DbSet<MxDashboard> MxDashboards => Set<MxDashboard>();
+    public DbSet<MxReportCard> MxReportCards => Set<MxReportCard>();
+    public DbSet<MxSummary> MxSummaries => Set<MxSummary>();
+    public DbSet<MxKpiDefinition> MxKpiDefinitions => Set<MxKpiDefinition>();
+
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
     /// <summary>Which models each role may run — see Rbac/ModelPolicy.cs.</summary>
@@ -99,6 +111,13 @@ public class AppDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
         b.Entity<AccessChangeLogEntry>().ToTable("AccessChangeLog");
         b.Entity<AccessChangeLogEntry>().HasIndex(e => e.AtUtc);
+
+        b.Entity<MxUpload>().HasIndex(u => u.Sha256);
+        b.Entity<MxTemplate>().HasIndex(t => t.Fingerprint);
+        b.Entity<MxDataset>().HasIndex(d => new { d.ReportKind, d.IsCurrent });
+        b.Entity<MxQualityIssue>().HasIndex(i => i.DatasetId);
+        b.Entity<MxFixLog>().HasIndex(f => f.DatasetId);
+        b.Entity<MxKpiDefinition>().HasKey(k => k.Key);
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)
