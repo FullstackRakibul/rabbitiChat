@@ -41,3 +41,6 @@ pnpm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Matrix: real workbooks with personal data — never commit (docs/MATRIX_PROMPT.md)
+matrix-samples/
