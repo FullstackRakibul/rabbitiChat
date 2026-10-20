@@ -470,6 +470,7 @@ check('G-M1.8', 'M1', 'each quality check fires on its planted fixture with the 
     ['master', 'empty_required', 'status', P.empty_required.status],
     ['master', 'empty_required', 'emp_id', P.empty_required.emp_id],
     ['master', 'designation_not_in_lookup', 'designation', P.designation_not_in_lookup],
+    ['master', 'worker_designation_no_grade', 'designation', P.worker_designation_no_grade],
     ['s1', 'formula_mismatch', 'basic', P.formula_mismatch, ctx.M.master.refs.formula_mismatch],
     ['hr', 'null_text', null, ctx.M.hrBasic.null_text],
     ['hr', 'separation_before_joining', null, ctx.M.hrBasic.separation_before_joining],
@@ -501,6 +502,20 @@ check('G-M1.8', 'M1', 'a fix makes the corrected column, keeps _raw_, and is log
       && log.some((l) => l.Field === 'designation' && l.RowsChanged === ctx.M.master.plants.trailing_spaces && l.Note === 'eval: trim designations')
       && state === 'fixed' && denied === 403,
     `fix ${r.status} · _raw_designation ${cols.includes('_raw_designation')} keeps ${raw[0].n} raw values · trailing left ${left[0].n} · log ${show(log)} · issue ${state} · System without action:matrix.fix ${denied}`)
+})
+
+check('G-M1.8', 'M1', 'the lookup check counts Management and Non-Management only; importing a newer lookup re-checks existing datasets', async () => {
+  const master = datasetOf(await fixtureImport('fx-master.xlsx', ['HRM', 'unit ', 'Sheet1']), 'HRM')
+  const before = (await issuesOf(master.id)).find((i) => i.check === 'designation_not_in_lookup')
+  const worker = (await issuesOf(master.id)).find((i) => i.check === 'worker_designation_no_grade')
+  // The worker designation "Thread Cutter" is not in the lookup either, but workers are out of its scope.
+  const workerOutOfScope = !before?.detail?.includes('Thread Cutter') && worker?.detail?.includes('Thread Cutter') && worker?.severity === 'info'
+  const up = await fixtureUpload('fx-designation-2.xlsx')
+  const r = await asAdmin('POST', `/api/matrix/uploads/${up.id}/import`, { tables: [{ table: tableOf(up, 'Sheet1').id, confirm: 'suggestions' }] })
+  const after = (await issuesOf(master.id)).find((i) => i.check === 'designation_not_in_lookup')
+  return ok(before?.count === ctx.M.master.plants.designation_not_in_lookup && workerOutOfScope && r.status === 200
+      && after?.count === ctx.M.master.plants.designation_after_recheck && !after.detail.includes('Mechanic Asst'),
+    `before ${before?.count} · worker designations without a grade ${worker?.count} (${worker?.severity}), out of the lookup's scope ${workerOutOfScope} · newer lookup imported ${r.status} → master now ${after?.count}: ${after?.detail}`)
 })
 
 // ---- G-M1.9 Viewer and highlight ----

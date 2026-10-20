@@ -213,6 +213,10 @@ public class MatrixService : IMatrixService
 
             datasets.Add(ToDto(dataset, upload, issues.Count));
             usedTemplates.Add(ToDto(template));
+
+            // A newer designation lookup: the datasets already imported are checked against it again.
+            if (kind == MxReportKind.DesignationLookup && (await _repo.GetDatasetAsync(dataset.Id, ct))?.IsCurrent == true)
+                await RecheckDesignationsAsync(dataset.Id, ct);
         }
 
         upload.Status = MxUpload.StatusImported;
@@ -280,6 +284,32 @@ public class MatrixService : IMatrixService
         var lookup = (await _repo.ListDatasetsAsync(ct)).FirstOrDefault(d => d.ReportKind == MxReportKind.DesignationLookup && d.IsCurrent);
         if (lookup is null || !Columns(lookup).Any(c => c.Key == "designation")) return null;
         return await _repo.DistinctAsync(lookup, "designation", ct);
+    }
+
+    /// <summary>
+    /// Re-runs "designation not in lookup" on every current dataset that has a designation
+    /// and an employee type, against the lookup just imported — the same check the import
+    /// runs (QualityChecks.DesignationLookupIssue), over the rows already stored.
+    /// </summary>
+    private async Task RecheckDesignationsAsync(int lookupId, CancellationToken ct)
+    {
+        var lookup = await LookupAsync(ct);
+        if (lookup is null) return;
+        foreach (var d in (await _repo.ListDatasetsAsync(ct)).Where(d => d.IsCurrent && d.Id != lookupId && d.ReportKind != MxReportKind.DesignationLookup))
+        {
+            var cols = Columns(d);
+            var des = cols.FirstOrDefault(c => c.Key == "designation");
+            if (des?.SourceIndex is null || !cols.Any(c => c.Key == "emp_type")) continue;
+            var keys = new List<string> { "designation", "emp_type" };
+            if (cols.Any(c => c.Key == "grade_id")) keys.Add("grade_id");
+            var (_, rows) = await _repo.RowsAsync(d, keys, Array.Empty<MxRowFilter>(), null, 0, Math.Max(1, d.RowCount), ct);
+            var people = rows.Select(r => new MxDesignationRow(
+                Convert.ToInt32(r["_row"]), r["designation"] as string, r["emp_type"] as string,
+                r.TryGetValue("grade_id", out var g) ? g?.ToString() : null)).ToList();
+            var firstCol = ClosedXML.Excel.XLHelper.GetColumnNumberFromLetter(new string(d.TableRange.TakeWhile(char.IsAsciiLetter).ToArray()));
+            string RefOf(int row) => $"{d.Sheet}!{MxCells.Letter(firstCol + des.SourceIndex.Value)}{row}";
+            await _repo.ReplaceIssuesAsync(d.Id, MxCheck.DesignationNotInLookup, QualityChecks.DesignationLookupIssue(people, lookup, RefOf, des), ct);
+        }
     }
 
     // ───────────────────────── templates ─────────────────────────

@@ -206,6 +206,17 @@ public class MatrixRepository : IMatrixRepository
     public Task<MxQualityIssue?> GetIssueAsync(int id, CancellationToken ct = default) =>
         _db.MxQualityIssues.FirstOrDefaultAsync(i => i.Id == id, ct);
 
+    public async Task ReplaceIssuesAsync(int datasetId, string check, MxQualityIssue? issue, CancellationToken ct = default)
+    {
+        _db.MxQualityIssues.RemoveRange(await _db.MxQualityIssues.Where(i => i.DatasetId == datasetId && i.Check == check).ToListAsync(ct));
+        if (issue is not null)
+        {
+            issue.DatasetId = datasetId;
+            _db.MxQualityIssues.Add(issue);
+        }
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<int> ApplyFixAsync(MxDataset dataset, string key, string kind, CancellationToken ct = default)
     {
         var conn = await OpenAsync(ct);

@@ -26,11 +26,15 @@ public static class MxCheck
     public const string NumbersAsDates = "numbers_as_dates";
     public const string EmptyRequired = "empty_required";
     public const string FormulaMismatch = "formula_mismatch";
+    public const string WorkerDesignationNoGrade = "worker_designation_no_grade";
 
     public const string FixTrim = "trim";
     public const string FixUnify = "unify";
     public const string FixPadIds = "pad-ids";
 }
+
+/// <summary>One person's designation, employee type and grade, by the sheet row they are on.</summary>
+public sealed record MxDesignationRow(int SourceRow, string? Designation, string? EmpType, string? Grade);
 
 /// <summary>What the checks need beyond the rows: the other tables of the upload, and the designation lookup.</summary>
 public sealed record MxCheckContext(
@@ -164,14 +168,17 @@ public static class QualityChecks
                 $"{bad.Count} row(s) have a {sep.Header} earlier than the joining date.", "Correct the dates in the source system.");
         }
 
-        // ---- the designation lookup ----
-        if (context.LookupDesignations is { Count: > 0 } lookup && Col("designation") is { } des)
+        // ---- the designation lookup (staff and management only) and workers' grades ----
+        if (Col("designation") is { } des && Col("emp_type") is { } type)
         {
-            var missing = Raw(des).Select((v, i) => (Name: v.Text?.Trim(), i)).Where(x => !string.IsNullOrEmpty(x.Name) && !lookup.Contains(x.Name!.ToLowerInvariant()))
-                .GroupBy(x => x.Name!, StringComparer.OrdinalIgnoreCase).ToList();
-            Add(MxCheck.DesignationNotInLookup, "warning", missing.Count, des, missing.Select(gr => gr.First().i),
-                $"{missing.Count} designation(s) are not in the equivalency lookup: {string.Join(", ", missing.Take(10).Select(gr => $"\"{gr.Key}\" ×{gr.Count()}"))}.",
-                "Add them to the designation equivalency list, or correct their spelling.");
+            var people = Enumerable.Range(0, rows.Count)
+                .Select(i => new MxDesignationRow(rows[i], Raw(des)[i].Text, Raw(type)[i].Text, Col("grade_id") is { } g ? KeyOf(Raw(g)[i]) : null))
+                .ToList();
+            string RefOf(int sourceRow) => $"{sheet}!{MxCells.Letter(scan.FirstCol + des.SourceIndex!.Value)}{sourceRow}";
+            if (context.LookupDesignations is { Count: > 0 } lookup && DesignationLookupIssue(people, lookup, RefOf, des) is { } issue)
+                issues.Add(issue);
+            if (Col("grade_id") is not null && WorkerGradeIssue(people, RefOf, des) is { } grade)
+                issues.Add(grade);
         }
 
         // ---- formulas whose cached result disagrees with their inputs ----
@@ -195,6 +202,56 @@ public static class QualityChecks
         }
 
         return issues;
+    }
+
+    /// <summary>
+    /// The employee types the designation equivalency list covers: staff and management.
+    /// Workers (Schedule-A, Schedule-B, …) are graded by GradeId instead.
+    /// </summary>
+    public static readonly string[] LookupEmpTypes = { "Management", "Non-Management" };
+
+    private static bool InLookupScope(string? empType) =>
+        empType is not null && LookupEmpTypes.Contains(empType.Trim(), StringComparer.OrdinalIgnoreCase);
+
+    private static string? KeyOf(MxValue v) => WorkbookProfiler.KeyText(v);
+
+    /// <summary>
+    /// Management and Non-Management designations missing from the equivalency lookup.
+    /// Shared by the import and by the re-check a newer lookup triggers, so both count alike.
+    /// </summary>
+    public static MxQualityIssue? DesignationLookupIssue(
+        IReadOnlyList<MxDesignationRow> people, IReadOnlySet<string> lookup, Func<int, string> refOf, MxDsColumn des)
+    {
+        var missing = people.Where(p => InLookupScope(p.EmpType) && p.Designation?.Trim() is { Length: > 0 } d && !lookup.Contains(d.ToLowerInvariant()))
+            .GroupBy(p => p.Designation!.Trim(), StringComparer.OrdinalIgnoreCase).ToList();
+        if (missing.Count == 0) return null;
+        var samples = missing.Select(gr => gr.First().SourceRow).Take(MaxSamples).ToList();
+        return new MxQualityIssue
+        {
+            Check = MxCheck.DesignationNotInLookup, Severity = "warning", Count = missing.Count, Field = des.Key,
+            Detail = $"{missing.Count} Management or Non-Management designation(s) are not in the equivalency lookup: "
+                   + $"{string.Join(", ", missing.Take(10).Select(gr => $"\"{gr.Key}\" ×{gr.Count()}"))}.",
+            SuggestedFix = "Add them to the designation equivalency list, or correct their spelling.",
+            SampleRefsJson = Json(samples.Select(refOf).ToList()), SampleRowsJson = Json(samples),
+        };
+    }
+
+    /// <summary>Worker designations (outside the lookup's scope) on rows with no GradeId: lower severity.</summary>
+    public static MxQualityIssue? WorkerGradeIssue(IReadOnlyList<MxDesignationRow> people, Func<int, string> refOf, MxDsColumn des)
+    {
+        var ungraded = people.Where(p => !string.IsNullOrWhiteSpace(p.EmpType) && !InLookupScope(p.EmpType) && string.IsNullOrWhiteSpace(p.Grade)
+                && p.Designation?.Trim() is { Length: > 0 })
+            .GroupBy(p => p.Designation!.Trim(), StringComparer.OrdinalIgnoreCase).ToList();
+        if (ungraded.Count == 0) return null;
+        var samples = ungraded.SelectMany(gr => gr.Select(p => p.SourceRow)).Take(MaxSamples).ToList();
+        return new MxQualityIssue
+        {
+            Check = MxCheck.WorkerDesignationNoGrade, Severity = "info", Count = ungraded.Count, Field = des.Key,
+            Detail = $"{ungraded.Count} worker designation(s) have rows with no GradeId "
+                   + $"({ungraded.Sum(gr => gr.Count())} rows): {string.Join(", ", ungraded.Take(10).Select(gr => $"\"{gr.Key}\" ×{gr.Count()}"))}.",
+            SuggestedFix = "Give these workers their grade in the source system.",
+            SampleRefsJson = Json(samples.Select(refOf).ToList()), SampleRowsJson = Json(samples),
+        };
     }
 
     private static readonly Regex CellRef = new(@"\$?([A-Z]{1,3})\$?(\d+)");

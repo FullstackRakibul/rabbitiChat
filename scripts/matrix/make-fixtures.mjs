@@ -83,6 +83,8 @@ const OTHER_SECTIONS = {
 }
 // Two designations no lookup row covers (the "missing from the equivalency lookup" plant).
 const MISSING_FROM_LOOKUP = ['Mechanic Asst', 'Line Iron Man']
+// The employee types of the real files: the equivalency lookup covers the first two (staff and management).
+const EMP_TYPES = ['Management', 'Non-Management', 'Schedule-A', 'Schedule-B']
 
 // ─────────────────────────────── master file ───────────────────────────────
 
@@ -116,7 +118,7 @@ function masterPerson(i) {
     EmpID: id, PunchNo: Number(id), Name: fakeName(), NameBan: fakeNameBn(), CompanyName: 'FX Apparels Ltd.',
     UnitId: UNITS.indexOf(pick(UNITS)) + 1, UnitName: null, DepartmentName: sewing ? 'Production' : pick(['Production', 'Admin', 'Maintenance']),
     SectionName: section, WingName: wing, TeamName: pick(['A', 'B', 'C']), DesignationName: designation,
-    DesignationNameBan: `${pick(BN1)}${pick(BN2)}`, GradeId: int(1, 9), EmpTypeName: pick(['Worker', 'Staff']),
+    DesignationNameBan: `${pick(BN1)}${pick(BN2)}`, GradeId: int(1, 9), EmpTypeName: sewing ? (i % 20 === 0 ? 'Schedule-B' : 'Schedule-A') : pick(EMP_TYPES),
     EmpCategoryName: pick(['Permanent', 'Probation']), EmpStatusName: 'Active', Gender: chance(0.62) ? 'Female' : 'Male',
     JoiningDate: ddMMMyyyy(joining), ConfirmStatus: pick(['Confirmed', 'Pending']),
     ProbationDate: ddMMMyyyy(new Date(joining.getTime() + 180 * 86400000)), DateOfBirth: ddMMMyyyy(randDate(1970, 2005)),
@@ -156,8 +158,12 @@ function makeMaster(dir, M) {
   people.slice(410, 412).forEach((p) => { p.EmpStatusName = null })
   people[420].EmpID = null
   // Designations missing from the lookup: two titles, 6 rows.
-  people.slice(500, 503).forEach((p) => { p.DesignationName = MISSING_FROM_LOOKUP[0] })
-  people.slice(503, 506).forEach((p) => { p.DesignationName = MISSING_FROM_LOOKUP[1] })
+  // On Management rows: the lookup check covers Management and Non-Management only.
+  people.slice(500, 503).forEach((p) => { p.DesignationName = MISSING_FROM_LOOKUP[0]; p.EmpTypeName = 'Management' })
+  people.slice(503, 506).forEach((p) => { p.DesignationName = MISSING_FROM_LOOKUP[1]; p.EmpTypeName = 'Non-Management' })
+  // A worker designation missing from the lookup AND without a GradeId: the lookup check
+  // ignores it (workers are out of its scope); the worker-grade check counts it, once.
+  people.slice(600, 603).forEach((p) => { p.DesignationName = 'Thread Cutter'; p.EmpTypeName = 'Schedule-A'; p.GradeId = null })
 
   const row = (p) => MASTER_HEADERS.map((h) => p[h] ?? null)
   const hrm = [MASTER_HEADERS, ...people.map(row)]
@@ -211,7 +217,9 @@ function makeMaster(dir, M) {
     unknownHeaders: ['MachineCode', 'LineChiefRemarks'],
     plants: {
       dup_emp_id: 4, id_leading_zeros: 2, mixed_date_formats: 5, near_duplicate_values: 1, trailing_spaces: 7,
-      empty_required: { unit: 3, status: 2, emp_id: 1 }, designation_not_in_lookup: 2, formula_mismatch: 3,
+      empty_required: { unit: 3, status: 2, emp_id: 1 }, designation_not_in_lookup: 2, worker_designation_no_grade: 1, formula_mismatch: 3,
+      // After the newer lookup (fx-designation-2.xlsx) adds one of the two: the re-check leaves 1.
+      designation_after_recheck: 1,
       cross_sheet_person: (() => {
         const a = new Set(people.map((p) => p.EmpID).filter(Boolean))
         const b = new Set(people.slice(0, N - 29).map((p) => p.EmpID).filter(Boolean))
@@ -282,6 +290,7 @@ function makeDesignation(dir, M) {
     rows.push([withSpace ? n + ' ' : n, `Equivalent ${grade}`, grade])
   })
   writeWorkbook(path.join(dir, 'fx-designation.xlsx'), [{ name: 'Sheet1', rows }])
+  M.designationRows = rows
   M.designation = { file: 'fx-designation.xlsx', rows: names.length, cols: 3, trailing_spaces: trailing, grades: 14 }
 }
 
@@ -303,7 +312,7 @@ function makeHrBasic(dir, M) {
     const payer = i >= 342 ? 'NULL' : 'FX Apparels Ltd.'
     for (const v of [effect, section, gross, payer]) if (v === 'NULL') nullText++
     rows.push([fakeName() + ' ', 1000 + i, pick(UNITS), 'Production', pick(SEWING_DESIGNATIONS), section,
-      pick(['Worker', 'Staff']), { date: joining }, status, effect, gross, payer])
+      pick(EMP_TYPES), { date: joining }, status, effect, gross, payer])
   }
   writeWorkbook(path.join(dir, 'fx-hr-basic.xlsx'), [{ name: 'Sheet1', rows }])
   M.hrBasic = { file: 'fx-hr-basic.xlsx', rows: 345, cols: H.length, null_text: nullText, separation_before_joining: sepBefore, statuses: STATUS.length }
@@ -340,7 +349,7 @@ function makeManpower(dir, M, file, reportDate, count = 1173) {
       JoiningDate: { date: joining }, ProbationDate: { date: new Date(joining.getTime() + 180 * 86400000) }, DateOfBirth: { date: dob },
       WorkDurationYears: years, WorkDurationDetails: `${years} Year(s)-${int(0, 11)} Month(s)-${int(0, 29)} Day(s)`,
       AgeYears: Math.floor((reportDate - dob) / (365.25 * 86400000)), AgeDetails: `${int(18, 60)} Year(s)`, Gender: pick(['Male', 'Female']),
-      EmpTypeName: pick(['Staff', 'Worker']), EmpCategoryName: pick(['Permanent', 'Probation', 'Contractual']), EmpStatusName: 'Active',
+      EmpTypeName: pick(EMP_TYPES), EmpCategoryName: pick(['Permanent', 'Probation', 'Contractual']), EmpStatusName: 'Active',
       SeparationEffectDate: null, IsApproved: 'Yes', BGMEAID: chance(0.3) ? 'FXB' + digits(6) : null,
       BirthCertificateNo: chance(0.1) ? '0' + digits(16) : null, NIDNo: digits(10), DegreeName: chance(0.5) ? 'B.A.' : null,
       Institute: chance(0.5) ? 'FX College' : null, BloodGroupName: pick(['A+', 'B+', 'O+']), ReligionName: pick(['Religion A', 'Religion B']),
@@ -381,6 +390,10 @@ export function makeFixtures(dir) {
   makeHrBasic(dir, M)
   M.manpower = makeManpower(dir, M, 'fx-manpower.xlsx', day(2026, 4, 1))
   makeMultiHeader(dir, M)
+  // A newer designation lookup of the same layout that adds one missing designation (no random draws: the others stay as they were).
+  writeWorkbook(path.join(dir, 'fx-designation-2.xlsx'), [{ name: 'Sheet1', rows: [...M.designationRows, [MISSING_FROM_LOOKUP[0], 'Equivalent M3', 'M3']] }])
+  M.designation2 = { file: 'fx-designation-2.xlsx', rows: M.designationRows.length }
+  delete M.designationRows
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(M, null, 2))
   return M
 }

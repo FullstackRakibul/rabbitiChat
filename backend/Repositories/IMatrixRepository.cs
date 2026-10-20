@@ -44,6 +44,9 @@ public interface IMatrixRepository
     Task<List<MxQualityIssue>> ListIssuesAsync(int datasetId, CancellationToken ct = default);
     Task<MxQualityIssue?> GetIssueAsync(int id, CancellationToken ct = default);
 
+    /// <summary>Replaces a dataset's issues of one check with <paramref name="issue"/> (none when null) — a re-check's result.</summary>
+    Task ReplaceIssuesAsync(int datasetId, string check, MxQualityIssue? issue, CancellationToken ct = default);
+
     /// <summary>
     /// Applies a fix to one column: copies the raw values into _raw_&lt;key&gt; first
     /// (once), then corrects the column. Returns how many rows changed.

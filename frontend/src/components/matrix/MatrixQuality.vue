@@ -42,6 +42,7 @@ const LABELS = {
   numbers_as_dates: ['তারিখ বিন্যাসে সংখ্যা', 'Numbers formatted as dates'],
   empty_required: ['আবশ্যক ঘর খালি', 'Required field empty'],
   formula_mismatch: ['সূত্রের সাথে অমিল', 'Formula result disagrees'],
+  worker_designation_no_grade: ['গ্রেড ছাড়া শ্রমিক পদবি', 'Worker designation without a grade'],
 }
 
 async function load() {
