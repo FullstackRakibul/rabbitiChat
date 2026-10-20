@@ -1728,7 +1728,9 @@ check('GR2.6', 'R2', 'fake', "a question naming a confirmed page's title gets it
   const distractors = []
   for (let i = 0; i < 8; i++) {
     const d = await asAdmin('POST', '/api/hr/library', { name: `eval-gr26-${k}-${i}`, hrType: 'note', mode: 'search',
-      content: `# Note ${i}\n\n${`Zorblax stipend ${k} payment dates and payment schedule. `.repeat(6)}Distractor ${i}.\n` })
+      // The title in each distractor's heading too: since the heading bonus (aed9b99) a page whose
+      // heading alone names the question would otherwise outrank them, and pinning would go untested.
+      content: `# Zorblax stipend ${k} payment dates ${i}\n\n${`Zorblax stipend ${k} payment dates and payment schedule. `.repeat(6)}Distractor ${i}.\n` })
     distractors.push(d.json?.id)
   }
   await embedded()
@@ -2011,10 +2013,12 @@ check('GR2.17', 'R2', 'fake', 'an Ask answer citing a label that was never sent 
     real = [...(body.messages.at(-1)?.content ?? '').matchAll(/^\[([^\]\n]+)\] \(/gm)].map((m) => m[1])[0]
     return { words: words(`Notice pay is day's basic × notice days [${real}]. The code says the same [${RB_FAKE_CITE}].`) }
   })
-  const r = await hrChat(await rbEditor(), { message: 'What is notice pay on Retrenchment?' })
+  const asker = await rbEditor()
+  const r = await hrChat(asker, { message: 'What is notice pay on Retrenchment?' })
   script(null)
   const frame = r.frames.find((f) => f.type === 'unverified')
-  const saved = r.convId ? (await asAdmin('GET', `/api/hr/conversations/${r.convId}`)).json?.messages?.at(-1)?.meta : null
+  // Read back as the person who asked: a conversation is its owner's, and anyone else gets 404.
+  const saved = r.convId ? (await call(ctx.api.url, 'GET', `/api/hr/conversations/${r.convId}`, { token: asker.token })).json?.messages?.at(-1)?.meta : null
   const ui = read('frontend/src/components/hr/HrAsk.vue') + read('frontend/src/lib/hr-text.js')
   return ok(r.status === 200 && !!real && JSON.stringify(frame?.citations) === JSON.stringify([RB_FAKE_CITE]) && JSON.stringify(saved?.unverifiedCitations) === JSON.stringify([RB_FAKE_CITE])
       && /data-unknown-source/.test(ui) && /অজানা উৎস · unknown source/.test(ui),

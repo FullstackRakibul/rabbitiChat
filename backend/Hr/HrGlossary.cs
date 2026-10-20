@@ -1,7 +1,7 @@
 // The HR module's glossary: Bengali searched in English too.
 //
-// The glossary is an ordinary Library item (by default named "hr-glossary"; the
-// name is Hr:GlossaryItem), which HR edits like any other. Each term is one line,
+// The glossary is an ordinary Library item of the glossary type (the seeded one is
+// named "hr-glossary"; at most one is active), which HR edits like any other. Each term is one line,
 //
 //   <Bengali> | <English> | <other spellings, comma-separated>
 //

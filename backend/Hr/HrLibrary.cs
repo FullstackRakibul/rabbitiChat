@@ -246,9 +246,24 @@ public sealed class HrLibrary(
         var pinned = await PinnedRulebookHitsAsync(question, scope, ct);
         // Searched as asked and, through the glossary, in English too; the glossary's own
         // term lists are not excerpts (unless "Search in" picks the glossary itself).
-        var (query, _) = await ExpandAsync(question, ct);
+        var (query, terms) = await ExpandAsync(question, ct);
         var searchScope = scope is { Count: > 0 } ? scope : await DefaultScopeAsync(excludeRulebookCopies: false, ct);
-        var hits = pinned.Concat((await SearchAsync(query, searchScope, MaxExcerpts, ct)).Where(h => pinned.All(p => p.ChunkId != h.ChunkId))).ToList();
+        var ranked = await SearchAsync(query, searchScope, MaxExcerpts, ct);
+        // "In English too" is a search of its own: appended to the question, the glossary's
+        // term ("Retrenchment") is outweighed by the question's other words, which the
+        // code's chunks repeat ("Non-Management"). The two rankings are fused the way the
+        // hybrid search fuses its two sides — 1/(60 + rank) from each list.
+        if (terms.Count > 0)
+        {
+            var english = await SearchAsync(string.Join(" ", terms), searchScope, MaxExcerpts, ct);
+            ranked = ranked.Select((h, i) => (Hit: h, Score: 1.0 / (61 + i)))
+                .Concat(english.Select((h, i) => (Hit: h, Score: 1.0 / (61 + i))))
+                .GroupBy(x => x.Hit.ChunkId)
+                .Select(g => (g.First().Hit, Score: g.Sum(x => x.Score)))
+                .OrderByDescending(x => x.Score).ThenBy(x => x.Hit.ChunkId)
+                .Take(MaxExcerpts).Select(x => x.Hit).ToList();
+        }
+        var hits = pinned.Concat(ranked.Where(h => pinned.All(p => p.ChunkId != h.ChunkId))).ToList();
         var pinnedIds = pinned.Select(p => p.ChunkId).ToHashSet();
         var excerpts = await TakeExcerptsAsync(hits, MaxExcerpts, ExcerptBudget, pinnedIds, ct);
 
