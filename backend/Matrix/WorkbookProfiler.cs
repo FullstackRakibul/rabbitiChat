@@ -82,7 +82,9 @@ public sealed class MxGrid
             switch (value.Type)
             {
                 case XLDataType.Number: raw.Number = value.GetNumber(); break;
-                case XLDataType.DateTime: raw.Date = value.GetDateTime(); raw.Number = raw.Date.ToOADate(); break;
+                // The serial as stored: Date→ToOADate is off by one below 1 Mar 1900 (Excel counts a 29 Feb 1900),
+                // which turned a 2 formatted as a date into 3.
+                case XLDataType.DateTime: raw.Date = value.GetDateTime(); raw.Number = value.GetUnifiedNumber(); break;
                 case XLDataType.Boolean: raw.Bool = value.GetBoolean(); break;
                 case XLDataType.Text: raw.Text = value.GetText(); break;
                 case XLDataType.TimeSpan: raw.Text = value.GetTimeSpan().ToString(@"hh\:mm\:ss"); raw.Type = XLDataType.Text; break;

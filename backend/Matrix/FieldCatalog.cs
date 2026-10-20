@@ -319,6 +319,9 @@ public static class MatrixNormalisers
 {
     public const string EmpId6 = "emp-id-6";
 
+    /// <summary>Text compared trimmed and lower-cased — designations against the equivalency lookup.</summary>
+    public const string TrimLower = "trim-lower";
+
     /// <summary>"512" → "000512"; text that is not all digits is returned trimmed.</summary>
     public static string? PadEmpId(string? id)
     {

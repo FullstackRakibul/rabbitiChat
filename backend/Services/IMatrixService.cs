@@ -40,4 +40,14 @@ public interface IMatrixService
     Task<MxResult<MxFixResult>> FixAsync(User user, int issueId, MxFixInput input, CancellationToken ct = default);
 
     IReadOnlyList<MxFieldDto> Catalog();
+
+    /// <summary>Runs a MatrixQuery (§3.6) for the caller: validated, permission-checked, parameterised, with provenance and citations.</summary>
+    Task<MxResult<MxQueryResult>> QueryAsync(User user, System.Text.Json.JsonElement query, bool explain, CancellationToken ct = default);
+
+    Task<List<MxKpiDto>> ListKpisAsync(CancellationToken ct = default);
+    Task<MxResult<MxKpiDto>> UpdateKpiAsync(string key, MxKpiInput input, CancellationToken ct = default);
+    Task<MxResult<MxKpiResult>> RunKpiAsync(User user, string key, MxKpiRunInput input, CancellationToken ct = default);
+
+    /// <summary>The dataset's report card (§3.8): the one made at import, or made now.</summary>
+    Task<MxResult<MxReportCardDto>> CardAsync(User user, int datasetId, CancellationToken ct = default);
 }

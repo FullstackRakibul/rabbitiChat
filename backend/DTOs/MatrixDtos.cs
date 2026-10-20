@@ -158,3 +158,56 @@ public sealed record MxFixResult(int IssueId, string Field, string RawColumn, in
 // ---- Catalog ----
 
 public sealed record MxFieldDto(string Key, string Group, string Role, string Type, string Sensitivity, string En, string Bn, bool Derived);
+
+// ---- Queries (§3.6) ----
+
+/// <param name="Explain">Also return the SQL and its parameters (the query's own words are always returned).</param>
+public sealed record MxQueryRequest(System.Text.Json.JsonElement Query, bool? Explain);
+
+public sealed record MxQueryColumn(string Key, string Label, string Role, string Type);
+
+public sealed record MxQueryDataset(int Id, string Name, string Kind, string? ReportDate, int RowCount);
+
+public sealed record MxQueryJoin(int DatasetId, string Kind, string On, long Unmatched);
+
+/// <summary>Where a result came from: its query in words, the datasets and their dates, how many rows matched, and the joins' misses.</summary>
+public sealed record MxProvenance(
+    string Plain, List<MxQueryDataset> Datasets, long MatchedRows, List<MxQueryJoin> Joins, string? Sql, List<object>? Params);
+
+/// <summary>Rows: each group's values and measures, a "_cite" token for the rows behind it, and "_cites" per count_if measure.</summary>
+public sealed record MxQueryResult(List<MxQueryColumn> Columns, List<Dictionary<string, object?>> Rows, MxProvenance Provenance);
+
+// ---- KPIs (§3.7) ----
+
+public sealed record MxKpiDto(string Key, string Area, string NameEn, string NameBn, string Words, string Unit, string Shape,
+    string? Query, System.Text.Json.JsonElement? Thresholds, string[]? Kinds);
+
+public sealed record MxKpiInput(string? NameEn, string? NameBn, string? Words, System.Text.Json.JsonElement? Thresholds);
+
+/// <param name="Previous">The snapshot before Dataset (snapshot KPIs); default: the one before it of the same layout.</param>
+/// <param name="Against">The manpower or master dataset attendance % is measured against; default: the current master.</param>
+public sealed record MxKpiRunInput(System.Text.Json.JsonElement? Dataset, System.Text.Json.JsonElement? Previous,
+    System.Text.Json.JsonElement? Against, Dictionary<string, System.Text.Json.JsonElement>? Params);
+
+public sealed record MxKpiSummary(double? Min, double? Median, double? Max, int Count);
+
+public sealed record MxKpiResult(string Key, string NameEn, string NameBn, string Unit, double? Value, string? Text,
+    string? GroupBy, List<Dictionary<string, object?>> Rows, MxKpiSummary? Summary, string? Detail, string? Cite, MxProvenance? Provenance);
+
+// ---- Report cards (§3.8) ----
+
+public sealed record MxCardItem(string Key, string Label, string LabelBn, double? Value, string? Text, string Unit, string? Cite);
+
+public sealed record MxCardEntry(string Label, double? Value, string Unit, string? Cite);
+
+public sealed record MxCardBreakdown(string Key, string Label, string LabelBn, List<MxCardEntry> Top, List<MxCardEntry> Bottom);
+
+public sealed record MxCardChange(string Key, string Label, double? Before, double? After, double? Change);
+
+public sealed record MxCardComparison(int PreviousId, string? PreviousDate, List<MxCardChange> Items);
+
+public sealed record MxCardIssue(string Check, string Severity, int Count);
+
+public sealed record MxReportCardDto(int DatasetId, string Kind, string Name, string? ReportDate, List<string> Scope,
+    List<MxCardItem> Items, List<MxCardBreakdown> Breakdowns, MxCardComparison? Comparison, List<MxCardIssue> Quality,
+    int Tokens, DateTime CreatedAtUtc);

@@ -128,57 +128,133 @@ public class MatrixRepository : IMatrixRepository
     }
 
     public async Task<(int Total, List<Dictionary<string, object?>> Rows)> RowsAsync(MxDataset dataset, IReadOnlyList<string> keys,
-        IReadOnlyList<MxRowFilter> filters, IReadOnlyList<int>? onlyRows, int offset, int limit, CancellationToken ct = default)
+        string where, IReadOnlyList<object> whereArgs, IReadOnlyList<int>? onlyRows, int offset, int limit, CancellationToken ct = default)
     {
         var conn = await OpenAsync(ct);
-        var where = new List<string>();
-        var args = new List<object>();
-        string P(object v) { args.Add(v); return "$a" + (args.Count - 1); }
-
-        foreach (var f in filters)
-        {
-            var col = Q(f.Key);
-            switch (f.Op)
-            {
-                case "=": where.Add($"{col} = {P(f.Values.FirstOrDefault() ?? "")}"); break;
-                case "contains": where.Add($"instr(lower(CAST({col} AS TEXT)), lower({P(f.Values.FirstOrDefault() ?? "")})) > 0"); break;
-                case "in": where.Add($"{col} IN ({string.Join(", ", f.Values.Select(v => P(v)))})"); break;
-                case "empty": where.Add($"({col} IS NULL OR {col} = '')"); break;
-                default: throw new ArgumentException($"Unknown filter operator '{f.Op}'.");
-            }
-        }
-        if (onlyRows is not null) where.Add(onlyRows.Count == 0 ? "0" : $"\"_row\" IN ({string.Join(", ", onlyRows.Select(r => P(r)))})");
-        var whereSql = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "";
+        // The condition comes from MatrixQuery.WhereFor ($p0, $p1 … over alias b); the rest is added here.
+        var args = whereArgs.ToList();
+        string P(object v) { args.Add(v); return "$p" + (args.Count - 1); }
+        var conds = new List<string>();
+        if (!string.IsNullOrWhiteSpace(where)) conds.Add(where);
+        if (onlyRows is not null) conds.Add(onlyRows.Count == 0 ? "0" : $"b.\"_row\" IN ({string.Join(", ", onlyRows.Select(r => P(r)))})");
+        var whereSql = conds.Count > 0 ? " WHERE " + string.Join(" AND ", conds) : "";
 
         await using var count = conn.CreateCommand();
-        count.CommandText = $"SELECT count(*) FROM {TableOf(dataset)}{whereSql}";
-        Bind(count, args);
+        count.CommandText = $"SELECT count(*) FROM {TableOf(dataset)} b{whereSql}";
+        Bind(count, args, "$p");
         var total = Convert.ToInt32(await count.ExecuteScalarAsync(ct));
 
         await using var cmd = conn.CreateCommand();
-        var select = string.Join(", ", new[] { "_row" }.Concat(keys).Select(Q));
-        cmd.CommandText = $"SELECT {select} FROM {TableOf(dataset)}{whereSql} ORDER BY \"_row\" LIMIT {P(limit)} OFFSET {P(offset)}";
-        Bind(cmd, args);
+        var select = string.Join(", ", new[] { "_row" }.Concat(keys).Select(k => "b." + Q(k)));
+        cmd.CommandText = $"SELECT {select} FROM {TableOf(dataset)} b{whereSql} ORDER BY b.\"_row\" LIMIT {P(limit)} OFFSET {P(offset)}";
+        Bind(cmd, args, "$p");
+        return (total, await ReadAsync(cmd, ct));
+    }
+
+    public async Task<List<Dictionary<string, object?>>> QueryAsync(string sql, IReadOnlyList<object> args, CancellationToken ct = default)
+    {
+        var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        Bind(cmd, args.ToList(), "$p");
+        return await ReadAsync(cmd, ct);
+    }
+
+    public async Task<long> ScalarAsync(string sql, IReadOnlyList<object> args, CancellationToken ct = default)
+    {
+        var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        Bind(cmd, args.ToList(), "$p");
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    private static async Task<List<Dictionary<string, object?>>> ReadAsync(DbCommand cmd, CancellationToken ct)
+    {
         var rows = new List<Dictionary<string, object?>>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            var row = new Dictionary<string, object?>(keys.Count + 1);
+            var row = new Dictionary<string, object?>(reader.FieldCount);
             for (var i = 0; i < reader.FieldCount; i++) row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
             rows.Add(row);
         }
-        return (total, rows);
+        return rows;
     }
 
-    private static void Bind(DbCommand cmd, List<object> args)
+    /// <summary>Binds the parameters the SQL names (a query's count reuses its arguments without the limit).</summary>
+    private static void Bind(DbCommand cmd, List<object> args, string prefix = "$a")
     {
         for (var i = 0; i < args.Count; i++)
         {
+            var name = prefix + i;
+            if (!System.Text.RegularExpressions.Regex.IsMatch(cmd.CommandText, System.Text.RegularExpressions.Regex.Escape(name) + @"(?!\d)")) continue;
             var p = cmd.CreateParameter();
-            p.ParameterName = "$a" + i;
+            p.ParameterName = name;
             p.Value = args[i];
             cmd.Parameters.Add(p);
         }
+    }
+
+    // ---- relations, KPI definitions, report cards ----
+
+    public Task<List<MxRelation>> ListRelationsAsync(CancellationToken ct = default) => _db.MxRelations.AsNoTracking().ToListAsync(ct);
+
+    public Task<List<MxKpiDefinition>> ListKpiDefinitionsAsync(CancellationToken ct = default) => _db.MxKpiDefinitions.AsNoTracking().ToListAsync(ct);
+
+    public Task<MxKpiDefinition?> GetKpiDefinitionAsync(string key, CancellationToken ct = default) => _db.MxKpiDefinitions.FirstOrDefaultAsync(k => k.Key == key, ct);
+
+    public async Task SaveCardAsync(int datasetId, string json, CancellationToken ct = default)
+    {
+        _db.MxReportCards.RemoveRange(await _db.MxReportCards.Where(c => c.DatasetId == datasetId).ToListAsync(ct));
+        _db.MxReportCards.Add(new MxReportCard { DatasetId = datasetId, Json = json, CreatedAtUtc = DateTime.UtcNow });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public Task<MxReportCard?> GetCardAsync(int datasetId, CancellationToken ct = default) =>
+        _db.MxReportCards.AsNoTracking().Where(c => c.DatasetId == datasetId).OrderByDescending(c => c.Id).FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// How the report kinds join (§3.2), for missing rows only: attendance to the master and
+    /// manpower lists by employee ID (six digits), designations to the equivalency lookup
+    /// (trimmed, case-insensitive), and separations to the master.
+    /// </summary>
+    public static void SeedRelations(AppDbContext db)
+    {
+        var want = new (string L, string LF, string R, string RF, string N)[]
+        {
+            (MxReportKind.AttendanceDaily, "emp_id", MxReportKind.Master, "emp_id", MatrixNormalisers.EmpId6),
+            (MxReportKind.AttendanceDaily, "emp_id", MxReportKind.Manpower, "emp_id", MatrixNormalisers.EmpId6),
+            (MxReportKind.SeparationList, "emp_id", MxReportKind.Master, "emp_id", MatrixNormalisers.EmpId6),
+            (MxReportKind.Master, "designation", MxReportKind.DesignationLookup, "designation", MatrixNormalisers.TrimLower),
+            (MxReportKind.Manpower, "designation", MxReportKind.DesignationLookup, "designation", MatrixNormalisers.TrimLower),
+            (MxReportKind.SeparationList, "designation", MxReportKind.DesignationLookup, "designation", MatrixNormalisers.TrimLower),
+        };
+        var have = db.MxRelations.AsNoTracking().ToList();
+        var added = false;
+        foreach (var w in want.Where(w => !have.Any(h => h.LeftKind == w.L && h.LeftField == w.LF && h.RightKind == w.R && h.RightField == w.RF)))
+        {
+            db.MxRelations.Add(new MxRelation { LeftKind = w.L, LeftField = w.LF, RightKind = w.R, RightField = w.RF, Normaliser = w.N });
+            added = true;
+        }
+        if (added) db.SaveChanges();
+    }
+
+    /// <summary>One MxKpiDefinition per KpiLibrary KPI, for missing keys only — a manager's edit is never overwritten.</summary>
+    public static void SeedKpis(AppDbContext db)
+    {
+        var have = db.MxKpiDefinitions.Select(k => k.Key).ToHashSet();
+        var added = false;
+        foreach (var k in KpiLibrary.All.Where(k => !have.Contains(k.Key)))
+        {
+            db.MxKpiDefinitions.Add(new MxKpiDefinition
+            {
+                Key = k.Key, NameEn = k.En, NameBn = k.Bn, Description = k.Words, FormulaWords = k.Words, QueryJson = k.Query,
+                Unit = k.Unit, ThresholdsJson = "{}", UpdatedAtUtc = DateTime.UtcNow,
+            });
+            added = true;
+        }
+        if (added) db.SaveChanges();
     }
 
     public async Task<HashSet<string>> DistinctAsync(MxDataset dataset, string key, CancellationToken ct = default)

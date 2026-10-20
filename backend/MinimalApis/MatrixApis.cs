@@ -12,6 +12,11 @@
 //   GET  /api/matrix/datasets/{id}/quality      its quality issues                                   section:matrix.data
 //   POST /api/matrix/quality/{id}/fix           apply an issue's fix (raw kept, logged)              action:matrix.fix
 //   GET  /api/matrix/catalog                    the field catalog                                    section:matrix.data
+//   POST /api/matrix/query                      run a MatrixQuery { query, explain? }                 section:matrix.dashboards
+//   GET  /api/matrix/kpis                       the KPI library and thresholds                       section:matrix.dashboards
+//   PUT  /api/matrix/kpis/{key}                 names, formula words, thresholds                     action:matrix.kpis.edit
+//   POST /api/matrix/kpis/{key}/run             { dataset?, previous?, against?, params? }           section:matrix.dashboards
+//   GET  /api/matrix/datasets/{id}/card         the report card                                      section:matrix.dashboards
 //
 // The whole of /api/matrix is gated by the `matrix` tab in TabAccessMiddleware;
 // each route asks AccessPolicy for its own section or action. No rule is
@@ -87,6 +92,24 @@ namespace RabbitIC.Api.MinimalApis
             g.MapPost("/quality/{id:int}/fix", async (int id, MxFixInput? input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixFix, ct) is { } refused ? refused.Result
                     : Map(await svc.FixAsync(await User(ctx, db), id, input ?? new MxFixInput(null), ct)));
+
+            g.MapPost("/query", async (MxQueryRequest input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.QueryAsync(await User(ctx, db), input.Query, input.Explain == true, ct)));
+
+            g.MapGet("/kpis", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Results.Ok(new { kpis = await svc.ListKpisAsync(ct) }));
+
+            g.MapPut("/kpis/{key}", async (string key, MxKpiInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixKpisEdit, ct) is { } refused ? refused.Result : Map(await svc.UpdateKpiAsync(key, input, ct)));
+
+            g.MapPost("/kpis/{key}/run", async (string key, MxKpiRunInput? input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.RunKpiAsync(await User(ctx, db), key, input ?? new MxKpiRunInput(null, null, null, null), ct)));
+
+            g.MapGet("/datasets/{id:int}/card", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result : Map(await svc.CardAsync(await User(ctx, db), id, ct)));
 
             g.MapGet("/catalog", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixData, ct) is { } refused ? refused.Result

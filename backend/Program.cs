@@ -421,6 +421,9 @@ using (var scope = app.Services.CreateScope())
 	RbacSeeder.SeedModelPolicies(db, app.Configuration, app.Logger);
 	// What each role gets: one row per role and permission key, missing rows only.
 	RbacSeeder.SeedRolePermissions(db, app.Logger);
+	// Matrix: how report kinds join, and the KPI library's editable definitions — missing rows only.
+	RabbitIC.Api.Repositories.MatrixRepository.SeedRelations(db);
+	RabbitIC.Api.Repositories.MatrixRepository.SeedKpis(db);
 
 	// মানব সম্পদ. The hr-assistant account, only when it does not exist and only
 	// from HR_ASSISTANT_SECRET; then the HR library from docs/hr/, only files not

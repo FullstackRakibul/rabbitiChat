@@ -710,6 +710,278 @@ check('G-M1.8', 'M1', 'LIVE quality counts per real file (no personal data)', as
   return ok(out.length >= 5 && !out.some((l) => /import \d/.test(l)), out.join(' ‖ '))
 }, { live: true })
 
+// ═══════════════════════════════ Phase M2 ═══════════════════════════════
+//
+// Every expected number here is computed again, independently, from the fixture
+// workbooks themselves (readWorkbook + plain JS) — never from the server's own
+// tables or code.
+
+/** A fixture sheet as objects keyed by header text (cell text as stored). */
+function sheetObjects(file, sheetName, headerRow = 1) {
+  const sheet = readWorkbook(path.join(FIXTURES, file)).find((s) => s.name === sheetName)
+  const cols = new Map()
+  const rows = new Map()
+  for (const [ref, v] of sheet.cells) {
+    const m = /^([A-Z]+)(\d+)$/.exec(ref)
+    const r = Number(m[2])
+    if (r === headerRow) cols.set(m[1], v)
+    else if (r > headerRow) {
+      if (!rows.has(r)) rows.set(r, {})
+      rows.get(r)[m[1]] = v
+    }
+  }
+  return [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, cells]) => {
+    const o = {}
+    for (const [letter, header] of cols) o[header] = cells[letter] ?? null
+    return o
+  })
+}
+
+const countBy = (rows, key) => rows.reduce((m, r) => { const k = key(r) ?? 'null'; m[k] = (m[k] ?? 0) + 1; return m }, {})
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null }
+const round2 = (x) => Math.round(x * 100) / 100
+const lineOf = (wing) => { const m = /^\s*line\s*[-–:#]?\s*(\d+)/i.exec(wing ?? ''); return m ? Number(m[1]) : null }
+const sameMap = (a, b) => {
+  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort()
+  return ka.join('|') === kb.join('|') && ka.every((k) => Math.abs(Number(a[k]) - Number(b[k])) < 1e-6)
+}
+/** A KPI's breakdown rows as { group value → value }. */
+const asMap = (res, field) => Object.fromEntries((res?.rows ?? []).map((r) => [r[field] === null || r[field] === undefined ? 'null' : String(r[field]), r.value]))
+
+async function runKpi(user, key, body) {
+  return as(user, 'POST', `/api/matrix/kpis/${key}/run`, body)
+}
+
+async function fixtureIds() {
+  const master = datasetOf(await fixtureImport('fx-master.xlsx', ['HRM', 'unit ', 'Sheet1']), 'HRM')
+  const att = datasetOf(await fixtureImport('fx-attendance.xlsx', ['rptDailyAttDetailsReport_Factor']), 'rptDailyAttDetailsReport_Factor')
+  const hr = datasetOf(await fixtureImport('fx-hr-basic.xlsx'), 'Sheet1')
+  return { master: master.id, att: att.id, hr: hr.id }
+}
+
+// ---- G-M2.1 The validator ----
+
+check('G-M2.1', 'M2', 'the validator refuses unknown datasets and fields, salary without permission, bad operators, big limits and injections — each with its reason', async () => {
+  const u = await users()
+  const { master } = await fixtureIds()
+  const q = (query, user = u.sys, explain = false) => as(user, 'POST', '/api/matrix/query', { query, explain })
+  const base = { dataset: String(master), measures: [['count', '*', 'n']] }
+  const cases = [
+    ['unknown dataset ref', { ...base, dataset: 'current:nope' }, 400, /dataset/i],
+    ['no such dataset', { ...base, dataset: '999999' }, 400, /dataset/i],
+    ['unknown field', { ...base, group_by: ['shoe_size'] }, 400, /shoe_size/],
+    ['salary without view-salary', { ...base, measures: [['sum', 'gross', 'g']] }, 403, /view-salary/],
+    ['forbidden operator', { ...base, filter: [['section', '~=', 'Sewing']] }, 400, /operator/i],
+    ['limit 10,000', { ...base, group_by: ['section'], limit: 10000 }, 400, /500/],
+    ['injection in a value', { ...base, filter: [['section', '=', "x'; DROP TABLE MxDatasets; --"]] }, 400, /value/i],
+    ['injection in a field name', { ...base, group_by: ['section; DROP TABLE MxDatasets'] }, 400, /field/i],
+    ['names grouped', { ...base, group_by: ['name'] }, 400, /personal/i],
+  ]
+  const out = []
+  let pass = true
+  for (const [name, query, status, reason] of cases) {
+    const r = await q(query)
+    const good = r.status === status && reason.test(r.json?.error ?? '')
+    pass &&= good
+    out.push(`${name} → ${r.status} "${(r.json?.error ?? '').slice(0, 90)}"${good ? '' : ' ✗'}`)
+  }
+  const tables = await sql("select count(*) n from sqlite_master where name = 'MxDatasets'")
+  const valid = await q({ ...base, filter: [['section', '=', 'Sewing'], ['status', 'in', ['Active']]], group_by: ['unit'] }, ctx.admin, true)
+  const sqlText = valid.json?.provenance?.sql ?? ''
+  const paramsOnly = valid.status === 200 && /\$p\d+/.test(sqlText) && !/Sewing|Active/.test(sqlText) && (valid.json?.provenance?.params ?? []).includes('Sewing')
+  return ok(pass && tables[0].n === 1 && paramsOnly,
+    `${out.join(' · ')} · MxDatasets still there ${tables[0].n === 1} · valid query SQL uses parameters only ${paramsOnly}: ${sqlText.slice(0, 400)} · params ${JSON.stringify(valid.json?.provenance?.params)}`)
+})
+
+// ---- G-M2.2 Correctness: 15+ KPIs against an independent computation ----
+
+check('G-M2.2', 'M2', '16 KPI queries on the fixtures equal an independent JS computation over the fixture rows', async () => {
+  const { master, att, hr } = await fixtureIds()
+  const M = sheetObjects('fx-master.xlsx', 'HRM')
+  const A = sheetObjects('fx-attendance.xlsx', 'rptDailyAttDetailsReport_Factor', 3)
+  const H = sheetObjects('fx-hr-basic.xlsx', 'Sheet1')
+  const active = M.filter((r) => (r.EmpStatusName ?? '').trim() === 'Active')
+  const sewing = active.filter((r) => r.SectionName === 'Sewing' && lineOf(r.WingName) !== null)
+  const perLine = (pred) => {
+    const lines = {}
+    for (const r of sewing) { const l = lineOf(r.WingName); lines[l] = (lines[l] ?? 0) + (pred(r) ? 1 : 0) }
+    return lines
+  }
+  const linesPerUnit = {}
+  for (const r of sewing) (linesPerUnit[r.UnitName ?? 'null'] ??= new Set()).add(lineOf(r.WingName))
+  const ops = perLine((r) => /operator/i.test(r.DesignationName ?? ''))
+  const qc = perLine((r) => /quality inspector|quality controller|checker/i.test(r.DesignationName ?? ''))
+  const grossByUnit = {}
+  for (const r of active) grossByUnit[r.UnitName ?? 'null'] = (grossByUnit[r.UnitName ?? 'null'] ?? 0) + Number(r.GrossSalary)
+
+  const want = {
+    active_headcount: active.length,
+    headcount_by_unit: countBy(active, (r) => r.UnitName),
+    headcount_by_section: countBy(active, (r) => r.SectionName),
+    headcount_by_gender: countBy(active, (r) => r.Gender),
+    female_pct: round2((100 * active.filter((r) => r.Gender === 'Female').length) / active.length),
+    headcount_by_emp_type: countBy(active, (r) => r.EmpTypeName),
+    headcount_by_grade: countBy(active, (r) => r.GradeId),
+    sewing_lines_per_unit: Object.fromEntries(Object.entries(linesPerUnit).map(([k, v]) => [k, v.size])),
+    operators_per_line: ops,
+    operators_per_line_summary: { min: Math.min(...Object.values(ops)), median: median(Object.values(ops)), max: Math.max(...Object.values(ops)) },
+    qc_per_line: qc,
+    att_present: A.filter((r) => ['P', 'LT'].includes(r.Status)).length,
+    att_late: A.filter((r) => r.Status === 'LT').length,
+    ot_over_2h: A.filter((r) => Number(r['OT Hours']) > 2).length,
+    shift_mix: countBy(A, (r) => r['Shift ']),
+    separations_by_status: countBy(H.filter((r) => r.EmpStatusName !== 'Active'), (r) => r.EmpStatusName),
+    gross_by_unit: grossByUnit,
+  }
+  const run = async (key, dataset) => (await runKpi(ctx.admin, key, { dataset })).json
+  const got = {
+    active_headcount: (await run('active_headcount', master))?.value,
+    headcount_by_unit: asMap(await run('headcount_by_unit', master), 'unit'),
+    headcount_by_section: asMap(await run('headcount_by_section', master), 'section'),
+    headcount_by_gender: asMap(await run('headcount_by_gender', master), 'gender'),
+    female_pct: (await run('female_pct', master))?.value,
+    headcount_by_emp_type: asMap(await run('headcount_by_emp_type', master), 'emp_type'),
+    headcount_by_grade: asMap(await run('headcount_by_grade', master), 'grade_id'),
+    sewing_lines_per_unit: asMap(await run('sewing_lines_per_unit', master), 'unit'),
+  }
+  const opsRes = await run('operators_per_line', master)
+  got.operators_per_line = asMap(opsRes, 'line_no')
+  got.operators_per_line_summary = { min: opsRes?.summary?.min, median: opsRes?.summary?.median, max: opsRes?.summary?.max }
+  got.qc_per_line = asMap(await run('qc_per_line', master), 'line_no')
+  got.att_present = (await run('att_present', att))?.value
+  got.att_late = (await run('att_late', att))?.value
+  got.ot_over_2h = (await run('ot_over_2h', att))?.value
+  got.shift_mix = asMap(await run('shift_mix', att), 'shift')
+  got.separations_by_status = asMap(await run('separations_by_status', hr), 'status')
+  got.gross_by_unit = asMap(await run('gross_by_unit', master), 'unit')
+
+  const bad = Object.keys(want).filter((k) => typeof want[k] === 'object' ? !sameMap(want[k], got[k] ?? {}) : !(typeof got[k] === 'number' && Math.abs(want[k] - got[k]) <= 1e-6))
+  return ok(bad.length === 0,
+    `${Object.keys(want).length - bad.length}/${Object.keys(want).length} equal` + (bad.length ? ` · differ: ${bad.map((k) => `${k} want ${JSON.stringify(want[k]).slice(0, 120)} got ${JSON.stringify(got[k]).slice(0, 120)}`).join(' | ')}`
+      : ` · e.g. active ${got.active_headcount}, female ${got.female_pct}%, operators per line ${JSON.stringify(got.operators_per_line_summary)}, late ${got.att_late}, OT > 2 h ${got.ot_over_2h}`))
+})
+
+// ---- G-M2.3 Joins ----
+
+check('G-M2.3', 'M2', 'attendance joined to the master by emp_id gives present and late per sewing line; people missing from the master are counted', async () => {
+  const { master, att } = await fixtureIds()
+  const M = sheetObjects('fx-master.xlsx', 'HRM')
+  const A = sheetObjects('fx-attendance.xlsx', 'rptDailyAttDetailsReport_Factor', 3)
+  const firstById = new Map()
+  for (const r of M) if (r.EmpID && !firstById.has(r.EmpID)) firstById.set(r.EmpID, r)
+  const present = {}, late = {}
+  let unmatched = 0
+  for (const a of A) {
+    const m = firstById.get(a['Emp ID'])
+    if (!m) { unmatched++; continue }
+    if (m.SectionName !== 'Sewing' || lineOf(m.WingName) === null) continue
+    const l = lineOf(m.WingName)
+    present[l] = (present[l] ?? 0) + (['P', 'LT'].includes(a.Status) ? 1 : 0)
+    late[l] = (late[l] ?? 0) + (a.Status === 'LT' ? 1 : 0)
+  }
+  const r = await asAdmin('POST', '/api/matrix/query', { query: {
+    dataset: String(att), join: [{ dataset: String(master), on: 'emp_id' }],
+    filter: [['master.line_type', '=', 'Sewing']], group_by: ['master.line_no'],
+    measures: [['count_if', ['att_status', 'in', ['P', 'LT']], 'present'], ['count_if', ['att_status', '=', 'LT'], 'late']], limit: 500,
+  } })
+  const rows = r.json?.rows ?? []
+  const gotPresent = Object.fromEntries(rows.map((x) => [String(x['master.line_no']), x.present]))
+  const gotLate = Object.fromEntries(rows.map((x) => [String(x['master.line_no']), x.late]))
+  const join = r.json?.provenance?.joins?.[0]
+  return ok(r.status === 200 && sameMap(present, gotPresent) && sameMap(late, gotLate) && join?.unmatched === unmatched && unmatched === ctx.M.attendance.notInMaster,
+    `${r.status} · ${rows.length} sewing lines · present per line equal ${sameMap(present, gotPresent)} · late equal ${sameMap(late, gotLate)} · in attendance, not in the master: ${join?.unmatched} (independent ${unmatched}) · ${r.json?.provenance?.plain ?? r.json?.error}`)
+})
+
+// ---- G-M2.5 Report cards ----
+
+check('G-M2.5', 'M2', 'a report card for each dataset kind: built by code, under 3,000 tokens, every value cited, a count\'s citation reopens exactly its rows', async () => {
+  const { master, att, hr } = await fixtureIds()
+  const des = datasetOf(await fixtureImport('fx-designation.xlsx'), 'Sheet1').id
+  const mp = datasetOf(await fixtureImport('fx-manpower.xlsx'), 'Sheet1').id
+  const out = []
+  let pass = true
+  for (const [kind, id] of [['master', master], ['attendance-daily', att], ['separation-list', hr], ['designation-lookup', des], ['manpower', mp]]) {
+    const r = await asAdmin('GET', `/api/matrix/datasets/${id}/card`)
+    const card = r.json
+    const items = [...(card?.items ?? []), ...(card?.breakdowns ?? []).flatMap((b) => [...b.top, ...b.bottom])]
+    const uncited = items.filter((i) => !i.cite).length
+    let reopened = 0, wrong = 0
+    for (const i of items.filter((x) => x.unit === 'people' && x.cite).slice(0, 6)) {
+      const rows = await asAdmin('GET', `/api/matrix/datasets/${id}/rows?limit=1&highlight=${encodeURIComponent(i.cite)}`)
+      if (rows.json?.total === i.value) reopened++; else wrong++
+    }
+    const good = r.status === 200 && card.kind === kind && card.tokens < 3000 && items.length > 0 && uncited === 0 && reopened > 0 && wrong === 0
+    pass &&= good
+    out.push(`${kind}: ${items.length} values, ${card?.tokens} tokens, uncited ${uncited}, citations reopened ${reopened}${wrong ? ` WRONG ${wrong}` : ''}${card?.comparison ? `, compared with dataset ${card.comparison.previousId}` : ''}${good ? '' : ' ✗'}`)
+  }
+  const att2 = (await sql("select Id from MxDatasets where ReportKind = 'attendance-daily' order by Id desc limit 1"))[0]?.Id
+  const second = (await asAdmin('GET', `/api/matrix/datasets/${att2}/card`)).json
+  pass &&= !!second?.comparison && second.comparison.items.length > 0
+  return ok(pass, `${out.join(' · ')} · 20 May attendance compared with the previous snapshot: ${second?.comparison?.items?.length ?? 0} items`)
+})
+
+// ---- G-M2.6 Snapshots ----
+
+check('G-M2.6', 'M2', 'two manpower snapshots a month apart give joiners, separations and attrition % equal to an independent computation', async () => {
+  const importAs = async (file, reportDate) => {
+    const r = await upload(ctx.admin, [path.join(FIXTURES, file)])
+    const up = r.json.uploads[0]
+    const imp = await asAdmin('POST', `/api/matrix/uploads/${up.id}/import`, { tables: [{ table: tableOf(up, 'Sheet1').id, confirm: 'suggestions', reportDate }] })
+    return imp.json.datasets[0].id
+  }
+  const may = await importAs('fx-manpower.xlsx', ctx.M.manpower2.previousReportDate)
+  const june = await importAs('fx-manpower-2.xlsx', ctx.M.manpower2.reportDate)
+  const ids = (f) => new Set(sheetObjects(f, 'Sheet1').map((r) => r['Employee ID']))
+  const a = ids('fx-manpower.xlsx'), b = ids('fx-manpower-2.xlsx')
+  const joiners = [...b].filter((x) => !a.has(x)).length
+  const leavers = [...a].filter((x) => !b.has(x)).length
+  const attrition = round2((100 * leavers) / ((a.size + b.size) / 2))
+  const body = { dataset: june, previous: may }
+  const got = {
+    joiners: (await runKpi(ctx.admin, 'joiners_since_previous', body)).json?.value,
+    separations: (await runKpi(ctx.admin, 'separations_since_previous', body)).json?.value,
+    attrition: (await runKpi(ctx.admin, 'attrition_pct', body)).json?.value,
+  }
+  return ok(got.joiners === joiners && got.separations === leavers && Math.abs(got.attrition - attrition) < 0.01,
+    `joiners ${got.joiners} (independent ${joiners}) · separations ${got.separations} (${leavers}) · attrition ${got.attrition}% (${attrition}%: separations ÷ average of opening and closing active headcount × 100)`)
+})
+
+// ---- G-M2.7 Builds are shared with G-M1.10 (they run in every phase) ----
+
+// ---- G-M2.4 Live KPIs (counts only) ----
+
+check('G-M2.4', 'M2', 'LIVE KPIs on the real files (counts only)', async () => {
+  const ds = await asAdmin('GET', '/api/matrix/datasets')
+  const real = (ds.json?.datasets ?? []).filter((d) => !d.fileName.startsWith('fx-'))
+  const pick = (f) => real.find((d) => d.fileName === REAL[f] && (f !== 'master' || d.sheet === 'HRM'))?.id
+  const master = pick('master'), att = pick('attendance')
+  if (!master || !att) return ok(false, 'the live master and attendance imports are missing (run with --live, after the M1 live checks)')
+  const run = async (key, body) => (await runKpi(ctx.admin, key, body)).json
+  const byUnit = await run('headcount_by_unit', { dataset: master })
+  const lines = await run('sewing_lines_per_unit', { dataset: master })
+  const ops = await run('operators_per_line', { dataset: master })
+  const female = await run('female_pct', { dataset: master })
+  const grade = await run('headcount_by_grade', { dataset: master })
+  const eqv = await run('headcount_by_equivalency_grade', { dataset: master })
+  const attPct = await run('attendance_pct', { dataset: att, against: master })
+  const late = await run('late_pct', { dataset: att })
+  const ot = await run('ot_over_2h', { dataset: att })
+  const fmt = (r, f) => (r?.rows ?? []).map((x) => `${x[r.groupBy ?? f]}:${x.value}`).join(', ')
+  const lines2 = [
+    `active headcount by unit [${fmt(byUnit, 'unit')}]`,
+    `sewing lines per unit [${fmt(lines, 'unit')}]`,
+    `operators per line min ${ops?.summary?.min} · median ${ops?.summary?.median} · max ${ops?.summary?.max} over ${ops?.summary?.count} lines`,
+    `female ${female?.value}%`,
+    `GradeId distribution [${fmt(grade, 'grade_id')}]`,
+    `equivalency grade (staff, through the lookup) [${fmt(eqv, 'equivalency_grade')}]`,
+    `attendance on ${attPct?.provenance?.datasets?.[0]?.reportDate}: ${attPct?.value}% of active manpower (${attPct?.detail})`,
+    `late ${late?.value}%`,
+    `OT above 2 h: ${ot?.value} people`,
+  ]
+  const good = [byUnit, lines, ops, female, grade, attPct, late, ot].every((r) => r && !r.error) && (byUnit.rows?.length ?? 0) > 0 && ops?.summary?.count > 0
+  return ok(good, lines2.join(' ‖ '))
+}, { live: true })
+
 // ─────────────────────────────── users ───────────────────────────────
 
 /**

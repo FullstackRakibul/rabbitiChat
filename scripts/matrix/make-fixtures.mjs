@@ -361,7 +361,7 @@ function makeManpower(dir, M, file, reportDate, count = 1173) {
     rows.push(MANPOWER_HEADERS.map((h) => v[h] ?? null))
   }
   writeWorkbook(path.join(dir, file), [{ name: 'Sheet1', rows }])
-  return { file, rows: count, cols: MANPOWER_HEADERS.length }
+  return { file, rows: count, cols: MANPOWER_HEADERS.length, sheetRows: rows }
 }
 
 // ─────────────────────────────── a two-row header ───────────────────────────────
@@ -394,6 +394,23 @@ export function makeFixtures(dir) {
   writeWorkbook(path.join(dir, 'fx-designation-2.xlsx'), [{ name: 'Sheet1', rows: [...M.designationRows, [MISSING_FROM_LOOKUP[0], 'Equivalent M3', 'M3']] }])
   M.designation2 = { file: 'fx-designation-2.xlsx', rows: M.designationRows.length }
   delete M.designationRows
+
+  // A month later (M2's snapshots): 40 people have left, 25 have joined, the rest are the same people.
+  // Made last, so its random draws change no other fixture.
+  const may = M.manpower.sheetRows
+  delete M.manpower.sheetRows
+  const idCol = MANPOWER_HEADERS.indexOf('Employee ID'), nameCol = MANPOWER_HEADERS.indexOf('Name')
+  const leaving = new Set(may.slice(1).map((r) => r[idCol]).filter((_, i) => i % 29 === 3).slice(0, 40))
+  const june = [may[0], ...may.slice(1).filter((r) => !leaving.has(r[idCol]))]
+  for (let i = 0; i < 25; i++) {
+    const r = [...may[1 + i * 7]]
+    r[idCol] = newId()
+    r[nameCol] = fakeName() + ' '
+    june.push(r)
+  }
+  writeWorkbook(path.join(dir, 'fx-manpower-2.xlsx'), [{ name: 'Sheet1', rows: june }])
+  M.manpower2 = { file: 'fx-manpower-2.xlsx', rows: june.length - 1, leavers: leaving.size, joiners: 25,
+    reportDate: '2026-06-01', previousReportDate: '2026-05-01' }
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(M, null, 2))
   return M
 }

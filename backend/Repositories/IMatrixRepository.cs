@@ -6,9 +6,6 @@ using RabbitIC.Api.Models;
 
 namespace RabbitIC.Api.Repositories;
 
-/// <summary>A filter on a dataset column: op is "=", "contains" or "in".</summary>
-public sealed record MxRowFilter(string Key, string Op, IReadOnlyList<string> Values);
-
 public interface IMatrixRepository
 {
     Task<MxUpload> AddUploadAsync(MxUpload upload, CancellationToken ct = default);
@@ -33,9 +30,23 @@ public interface IMatrixRepository
     /// <summary>Marks this dataset the current snapshot of its kind and template, and every older one not.</summary>
     Task SetCurrentAsync(MxDataset dataset, CancellationToken ct = default);
 
-    /// <summary>Rows of a dataset, paged; columns from <paramref name="keys"/> (already validated) plus _row.</summary>
+    /// <summary>
+    /// Rows of a dataset (alias b), paged; columns from <paramref name="keys"/> (already validated) plus _row.
+    /// <paramref name="where"/> is a condition MatrixQuery.WhereFor built, with its parameters.
+    /// </summary>
     Task<(int Total, List<Dictionary<string, object?>> Rows)> RowsAsync(MxDataset dataset, IReadOnlyList<string> keys,
-        IReadOnlyList<MxRowFilter> filters, IReadOnlyList<int>? onlyRows, int offset, int limit, CancellationToken ct = default);
+        string where, IReadOnlyList<object> whereArgs, IReadOnlyList<int>? onlyRows, int offset, int limit, CancellationToken ct = default);
+
+    /// <summary>Runs SQL that MatrixQuery compiled (names from code, every value a $p parameter).</summary>
+    Task<List<Dictionary<string, object?>>> QueryAsync(string sql, IReadOnlyList<object> args, CancellationToken ct = default);
+
+    Task<long> ScalarAsync(string sql, IReadOnlyList<object> args, CancellationToken ct = default);
+
+    Task<List<MxRelation>> ListRelationsAsync(CancellationToken ct = default);
+    Task<List<MxKpiDefinition>> ListKpiDefinitionsAsync(CancellationToken ct = default);
+    Task<MxKpiDefinition?> GetKpiDefinitionAsync(string key, CancellationToken ct = default);
+    Task SaveCardAsync(int datasetId, string json, CancellationToken ct = default);
+    Task<MxReportCard?> GetCardAsync(int datasetId, CancellationToken ct = default);
 
     /// <summary>Distinct trimmed, lower-cased values of a column (the designation lookup).</summary>
     Task<HashSet<string>> DistinctAsync(MxDataset dataset, string key, CancellationToken ct = default);
