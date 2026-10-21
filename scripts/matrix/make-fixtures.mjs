@@ -164,6 +164,9 @@ function makeMaster(dir, M) {
   // A worker designation missing from the lookup AND without a GradeId: the lookup check
   // ignores it (workers are out of its scope); the worker-grade check counts it, once.
   people.slice(600, 603).forEach((p) => { p.DesignationName = 'Thread Cutter'; p.EmpTypeName = 'Schedule-A'; p.GradeId = null })
+  // One grade written two ways (the real master mixes "3" and "Grade 3"): 9 cells as text "Grade N", 2 as "Grade 0N".
+  people.slice(700, 709).forEach((p) => { p.GradeId = `Grade ${p.GradeId}` })
+  people.slice(709, 711).forEach((p) => { p.GradeId = `Grade 0${p.GradeId}` })
 
   const row = (p) => MASTER_HEADERS.map((h) => p[h] ?? null)
   const hrm = [MASTER_HEADERS, ...people.map(row)]
@@ -217,7 +220,7 @@ function makeMaster(dir, M) {
     unknownHeaders: ['MachineCode', 'LineChiefRemarks'],
     plants: {
       dup_emp_id: 4, id_leading_zeros: 2, mixed_date_formats: 5, near_duplicate_values: 1, trailing_spaces: 7,
-      empty_required: { unit: 3, status: 2, emp_id: 1 }, designation_not_in_lookup: 2, worker_designation_no_grade: 1, formula_mismatch: 3,
+      empty_required: { unit: 3, status: 2, emp_id: 1 }, designation_not_in_lookup: 2, worker_designation_no_grade: 1, grade_forms_unified: 11, formula_mismatch: 3,
       // After the newer lookup (fx-designation-2.xlsx) adds one of the two: the re-check leaves 1.
       designation_after_recheck: 1,
       cross_sheet_person: (() => {

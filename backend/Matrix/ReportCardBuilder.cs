@@ -63,9 +63,7 @@ public static class ReportCardBuilder
 
         // The snapshot before this one, of the same kind and layout.
         MxCardComparison? comparison = null;
-        var previous = ctx.Datasets.Where(x => x.ReportKind == d.ReportKind && x.TemplateId == d.TemplateId && x.Id != d.Id
-                && string.CompareOrdinal(x.ReportDate ?? "", d.ReportDate ?? "") <= 0 && x.Id < d.Id)
-            .OrderBy(x => x.ReportDate ?? "").ThenBy(x => x.Id).LastOrDefault();
+        var previous = MatrixQuery.PreviousSnapshot(d, ctx.Datasets);
         if (previous is not null)
         {
             var changes = new List<MxCardChange>();

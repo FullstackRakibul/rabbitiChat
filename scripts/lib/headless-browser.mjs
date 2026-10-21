@@ -134,9 +134,24 @@ export async function launchBrowser({ base, profileRoot }) {
           await sleep(300)
           return ids ?? []
         },
-        async shot(file) {
-          const { data } = await s('Page.captureScreenshot', { format: 'png' })
+        async shot(file, { full = false } = {}) {
+          const { data } = await s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: full })
           fs.writeFileSync(file, Buffer.from(data, 'base64'))
+        },
+        /** A real mouse click at page coordinates (canvas charts take no element clicks). */
+        async mouseClick(x, y) {
+          for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+            await s('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: type === 'mouseMoved' ? 0 : 1 })
+          await sleep(300)
+        },
+        /** The page through the browser's own print-to-PDF — what "Print / PDF" produces. */
+        async pdf() {
+          const { data } = await s('Page.printToPDF', { printBackground: true })
+          return Buffer.from(data, 'base64')
+        },
+        /** Blurs every element matching the selector (screenshots of real data). */
+        async blur(selector) {
+          await evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).forEach((e) => { e.style.filter = 'blur(6px)' }); 0`)
         },
       }
       return p

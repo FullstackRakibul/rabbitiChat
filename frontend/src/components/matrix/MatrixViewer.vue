@@ -12,8 +12,8 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { VList } from 'virtua/vue'
-import { Filter, Loader2, X } from '@lucide/vue'
-import { getMatrixRows } from '@/services/index.js'
+import { Download, Filter, Loader2, X } from '@lucide/vue'
+import { downloadMatrixExport, getMatrixRows } from '@/services/index.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCell, formatDate, lakh } from '@/lib/matrix-format.js'
@@ -25,6 +25,13 @@ const props = defineProps({
   highlight: { type: String, default: '' },
 })
 const emit = defineEmits(['close', 'clear-highlight'])
+
+const exporting = ref(false)
+/** The cleaned dataset as a file; the server leaves out sensitive columns and what this user may not see. */
+async function exportAs(kind) {
+  exporting.value = true
+  try { await downloadMatrixExport(kind, props.dataset.id) } catch (e) { error.value = e.message } finally { exporting.value = false }
+}
 
 const PAGE = 300
 const ROW_H = 34
@@ -122,6 +129,10 @@ function sensitivityLabel(c) {
       </Button>
       <Button size="sm" variant="ghost" :aria-pressed="showFilters" @click="showFilters = !showFilters">
         <Filter class="size-4" /> ফিল্টার <span class="text-xs opacity-70">Filters</span>
+      </Button>
+      <Button v-for="kind in ['xlsx', 'csv']" :key="kind" size="sm" variant="ghost" :disabled="exporting"
+        :title="`Download .${kind} — without sensitive columns, and without what you may not see`" :data-export="kind" @click="exportAs(kind)">
+        <Download class="size-4" /> .{{ kind }}
       </Button>
       <Button size="sm" variant="outline" @click="emit('close')">Close</Button>
     </header>

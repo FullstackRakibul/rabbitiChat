@@ -190,23 +190,26 @@ const unesc = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quo
 export function readWorkbook(file) {
   const files = unzip(fs.readFileSync(file))
   const sstXml = files.get('xl/sharedStrings.xml')?.toString('utf8') ?? ''
-  const sst = [...sstXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) =>
-    unesc([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join('')))
+  // Element names may carry a namespace prefix (<x:c>, <x:v>: ClosedXML writes them so).
+  const T = /<(?:\w+:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?t>/g
+  const sst = [...sstXml.matchAll(/<(?:\w+:)?si>([\s\S]*?)<\/(?:\w+:)?si>/g)].map((m) =>
+    unesc([...m[1].matchAll(T)].map((t) => t[1]).join('')))
   const wb = files.get('xl/workbook.xml').toString('utf8')
   const rels = files.get('xl/_rels/workbook.xml.rels').toString('utf8')
-  const target = new Map([...rels.matchAll(/<Relationship [^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)].map((m) => [m[1], m[2]]))
+  // Attributes in any order (ClosedXML writes Target before Id).
+  const target = new Map([...rels.matchAll(/<(?:\w+:)?Relationship\s([^>]*)>/g)].map((m) => [/\bId="([^"]+)"/.exec(m[1])?.[1], /\bTarget="([^"]+)"/.exec(m[1])?.[1]]))
   const sheets = []
-  for (const m of wb.matchAll(/<sheet [^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)) {
+  for (const m of wb.matchAll(/<(?:\w+:)?sheet [^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)) {
     const path = 'xl/' + target.get(m[2]).replace(/^\/?xl\//, '')
     const xml = files.get(path)?.toString('utf8') ?? ''
     const cells = new Map()
-    for (const c of xml.matchAll(/<c r="([A-Z]+\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    for (const c of xml.matchAll(/<(?:\w+:)?c r="([A-Z]+\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?c>)/g)) {
       const attrs = c[2], body = c[3] ?? ''
-      const v = body.match(/<v>([\s\S]*?)<\/v>/)?.[1]
+      const v = body.match(/<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/)?.[1]
       const t = attrs.match(/t="([^"]+)"/)?.[1]
       let text = null
       if (t === 's' && v !== undefined) text = sst[Number(v)]
-      else if (t === 'inlineStr') text = unesc([...body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''))
+      else if (t === 'inlineStr') text = unesc([...body.matchAll(T)].map((x) => x[1]).join(''))
       else if (v !== undefined) text = unesc(v)
       if (text !== null) cells.set(c[1], text)
     }

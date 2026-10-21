@@ -93,6 +93,12 @@ GROQ_API_KEY=…              → OpenAiCompatible__Providers__1__ApiKey
 (`__` is .NET's separator for nested config keys, so an env var overrides the matching
 entry in `appsettings.json` without the file being edited.)
 
+A key, token or password written into any `appsettings*.json` is **ignored**: at start-up
+`backend/Secrets/SecretConfig.cs` discards secret-shaped values from those files (ApiKey,
+AuthToken, Password, ClientSecret …, and password or token parameters of a connection
+string) and logs the key's name, never its value. `scripts/matrix-eval.mjs` (G-M3.8) fails
+if one is committed to any config file.
+
 Two independent locks keep developer keys out of the image:
 
 1. `.dockerignore` excludes `appsettings.Development.json` from the build context.

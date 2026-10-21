@@ -17,6 +17,14 @@
 //   PUT  /api/matrix/kpis/{key}                 names, formula words, thresholds                     action:matrix.kpis.edit
 //   POST /api/matrix/kpis/{key}/run             { dataset?, previous?, against?, params? }           section:matrix.dashboards
 //   GET  /api/matrix/datasets/{id}/card         the report card                                      section:matrix.dashboards
+//   GET  /api/matrix/dashboards                 the dashboards the caller may see                    section:matrix.dashboards
+//   GET  /api/matrix/dashboards/{id}            one, with its layout                                 section:matrix.dashboards
+//   POST /api/matrix/dashboards/{id}/run        { filters, compare } → every widget's numbers        section:matrix.dashboards
+//   POST /api/matrix/dashboards                 create (or copy)                                     action:matrix.dashboards.edit
+//   PUT  /api/matrix/dashboards/{id}            rename, lay out, share                               action:matrix.dashboards.edit
+//   DELETE /api/matrix/dashboards/{id}          delete (not an automatic one)                        action:matrix.dashboards.edit
+//   GET  /api/matrix/export/{xlsx|csv}/{id}     a dataset, without sensitive columns                 section:matrix.data
+//   GET  /api/matrix/export/dashboard/{id}      a dashboard's layout as JSON                         section:matrix.data
 //
 // The whole of /api/matrix is gated by the `matrix` tab in TabAccessMiddleware;
 // each route asks AccessPolicy for its own section or action. No rule is
@@ -114,6 +122,48 @@ namespace RabbitIC.Api.MinimalApis
             g.MapGet("/catalog", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixData, ct) is { } refused ? refused.Result
                     : Results.Ok(new { fields = svc.Catalog() }));
+
+            // ---- dashboards (§3.8): reading needs the section, every change the edit action ----
+
+            g.MapGet("/dashboards", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Results.Ok(new { dashboards = await svc.ListDashboardsAsync(await User(ctx, db), ct) }));
+
+            g.MapGet("/dashboards/{id:int}", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.GetDashboardAsync(await User(ctx, db), id, ct)));
+
+            g.MapPost("/dashboards/{id:int}/run", async (int id, MxDashboardRunInput? input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.RunDashboardAsync(await User(ctx, db), id, input ?? new MxDashboardRunInput(null), ct)));
+
+            g.MapPost("/dashboards", async (MxDashboardInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+            {
+                if (await Caller(ctx, db, access, PermissionKeys.MatrixDashboardsEdit, ct) is { } refused) return refused.Result;
+                var r = await svc.CreateDashboardAsync(await User(ctx, db), input, ct);
+                return r.Outcome == MxOutcome.Ok ? Results.Json(r.Value, statusCode: StatusCodes.Status201Created) : Error(r.Outcome, r.Error);
+            });
+
+            g.MapPut("/dashboards/{id:int}", async (int id, MxDashboardInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboardsEdit, ct) is { } refused ? refused.Result
+                    : Map(await svc.UpdateDashboardAsync(await User(ctx, db), id, input, ct)));
+
+            g.MapDelete("/dashboards/{id:int}", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+            {
+                if (await Caller(ctx, db, access, PermissionKeys.MatrixDashboardsEdit, ct) is { } refused) return refused.Result;
+                var r = await svc.DeleteDashboardAsync(await User(ctx, db), id, ct);
+                return r.Outcome == MxOutcome.Ok ? Results.NoContent() : Error(r.Outcome, r.Error);
+            });
+
+            // ---- export: a dataset as xlsx or csv, or a dashboard's layout ----
+
+            g.MapGet("/export/{kind}/{id:int}", async (string kind, int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+            {
+                if (await Caller(ctx, db, access, PermissionKeys.MatrixData, ct) is { } refused) return refused.Result;
+                var r = await svc.ExportAsync(await User(ctx, db), kind, id, ct);
+                if (r.Outcome != MxOutcome.Ok) return Error(r.Outcome, r.Error);
+                return Results.File(r.Value!.Bytes, r.Value.ContentType, r.Value.FileName);
+            });
 
             return app;
         }

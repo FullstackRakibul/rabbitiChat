@@ -13,6 +13,10 @@ using RabbitIC.Api.Retrieval;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Secrets come from user-secrets or the environment only; any found in appsettings*.json
+// are discarded here, before anything reads them (backend/Secrets/SecretConfig.cs).
+var droppedSecrets = RabbitIC.Api.Secrets.SecretConfig.Scrub(builder.Configuration);
+
 
 // ---- Config ----
 var ollamaUrl = builder.Configuration["Ollama:Url"] ?? "http://localhost:11434";
@@ -328,6 +332,10 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 
 
 var app = builder.Build();
+
+// Names only — a discarded value is never logged.
+foreach (var key in droppedSecrets)
+	app.Logger.LogWarning("Secret config: ignored a value for {Key}; set it with user-secrets or the environment instead.", key);
 
 // Swagger UI at /swagger — enabled in all environments (this is an internal tool).
 app.UseSwagger();

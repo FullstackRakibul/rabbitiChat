@@ -187,12 +187,17 @@ public sealed record MxKpiInput(string? NameEn, string? NameBn, string? Words, S
 /// <param name="Previous">The snapshot before Dataset (snapshot KPIs); default: the one before it of the same layout.</param>
 /// <param name="Against">The manpower or master dataset attendance % is measured against; default: the current master.</param>
 public sealed record MxKpiRunInput(System.Text.Json.JsonElement? Dataset, System.Text.Json.JsonElement? Previous,
-    System.Text.Json.JsonElement? Against, Dictionary<string, System.Text.Json.JsonElement>? Params);
+    System.Text.Json.JsonElement? Against, Dictionary<string, System.Text.Json.JsonElement>? Params,
+    List<RabbitIC.Api.Matrix.MxScopeFilter>? Scope = null);
 
 public sealed record MxKpiSummary(double? Min, double? Median, double? Max, int Count);
 
 public sealed record MxKpiResult(string Key, string NameEn, string NameBn, string Unit, double? Value, string? Text,
-    string? GroupBy, List<Dictionary<string, object?>> Rows, MxKpiSummary? Summary, string? Detail, string? Cite, MxProvenance? Provenance);
+    string? GroupBy, List<Dictionary<string, object?>> Rows, MxKpiSummary? Summary, string? Detail, string? Cite, MxProvenance? Provenance)
+{
+    /// <summary>The dashboard filters (Scope keys) this run could apply; the others do not fit its dataset.</summary>
+    public List<string> ScopeApplied { get; init; } = new();
+}
 
 // ---- Report cards (§3.8) ----
 
@@ -211,3 +216,43 @@ public sealed record MxCardIssue(string Check, string Severity, int Count);
 public sealed record MxReportCardDto(int DatasetId, string Kind, string Name, string? ReportDate, List<string> Scope,
     List<MxCardItem> Items, List<MxCardBreakdown> Breakdowns, MxCardComparison? Comparison, List<MxCardIssue> Quality,
     int Tokens, DateTime CreatedAtUtc);
+
+// ---- Dashboards (§3.8) ----
+
+public sealed record MxDashboardSummaryDto(int Id, string Name, string? NameBn, string? ReportKind, string? Auto, bool Shared,
+    int OwnerUserId, bool CanEdit, int Widgets, DateTime UpdatedAtUtc);
+
+public sealed record MxDashboardDto(int Id, string Name, string? NameBn, string? ReportKind, string? Auto, bool Shared,
+    int OwnerUserId, bool CanEdit, System.Text.Json.JsonElement Layout, DateTime UpdatedAtUtc);
+
+/// <summary>POST creates (Layout omitted: an empty dashboard; CopyOf: a copy of that one); PUT renames, re-lays out, shares.</summary>
+public sealed record MxDashboardInput(string? Name, System.Text.Json.JsonElement? Layout, bool? Shared, string? ReportKind, int? CopyOf);
+
+/// <summary>The filters of §3.8, applied to every widget whose dataset has the field. From/To: ISO dates.</summary>
+public sealed record MxDashboardFilters(List<string>? Unit, List<string>? Section, List<int>? Line, List<string>? EmpType,
+    List<string>? Status, List<string>? Shift, string? From, string? To);
+
+public sealed record MxDashboardRunInput(MxDashboardFilters? Filters, bool Compare = false);
+
+public sealed record MxTrendPoint(int DatasetId, string? ReportDate, double? Value, string? Cite);
+
+/// <summary>The same widget on the previous snapshot: a value's change, or the previous rows.</summary>
+public sealed record MxWidgetCompare(int PreviousId, string? PreviousDate, double? Before, double? After, double? Change,
+    List<Dictionary<string, object?>>? Rows);
+
+/// <summary>
+/// One widget's numbers, with what produced them: its KPI and run input, or the query that
+/// ran (dashboard filters included) — running either again gives the same numbers.
+/// </summary>
+public sealed record MxWidgetResult(
+    string Id, string Type, string NameEn, string NameBn, string? Kpi, System.Text.Json.JsonElement? Query, MxKpiRunInput? Input,
+    string? Unit, double? Value, string? Text, List<string> GroupBy, List<string> Measures, List<Dictionary<string, object?>> Rows,
+    MxKpiSummary? Summary, string? Detail, string? Cite, string? State, System.Text.Json.JsonElement? Thresholds,
+    MxWidgetCompare? Compare, List<MxTrendPoint>? Trend, List<string> FiltersApplied, List<string> FiltersIgnored,
+    int? DatasetId, string? ReportDate, string? Error);
+
+public sealed record MxDashboardRun(int Id, string Name, List<MxWidgetResult> Widgets,
+    Dictionary<string, List<object>> FilterOptions, List<MxQueryDataset> Datasets);
+
+/// <summary>A file to send: its name, media type and bytes.</summary>
+public sealed record MxExportFile(string FileName, string ContentType, byte[] Bytes, List<string> Headers);

@@ -71,3 +71,71 @@ export function fixMatrixIssue(issueId, note) {
 export function getMatrixCatalog() {
   return http.get('/matrix/catalog')
 }
+
+// ---- Dashboards (§3.8) ----
+
+/** The dashboards the caller may see: { dashboards: [{ id, name, nameBn, auto, canEdit, widgets, … }] }. */
+export function listMatrixDashboards() {
+  return http.get('/matrix/dashboards')
+}
+
+/** One dashboard with its layout: { id, name, nameBn, auto, shared, canEdit, layout: { widgets } }. */
+export function getMatrixDashboard(id) {
+  return http.get(`/matrix/dashboards/${id}`)
+}
+
+/**
+ * Every widget's numbers. `filters` is { unit, section, line, empType, status, shift, from, to };
+ * `compare` adds the previous snapshot's rows. Returns { widgets, filterOptions, datasets }.
+ */
+export function runMatrixDashboard(id, { filters, compare = false } = {}) {
+  return http.post(`/matrix/dashboards/${id}/run`, { filters: filters ?? null, compare })
+}
+
+export function createMatrixDashboard(input) {
+  return http.post('/matrix/dashboards', input)
+}
+
+export function saveMatrixDashboard(id, { name, layout, shared }) {
+  return http.put(`/matrix/dashboards/${id}`, { name, layout, shared })
+}
+
+export function deleteMatrixDashboard(id) {
+  return http.del(`/matrix/dashboards/${id}`)
+}
+
+// ---- KPIs (§3.7) ----
+
+/** The KPI library: { kpis: [{ key, area, nameEn, nameBn, words, unit, shape, query, thresholds, kinds }] }. */
+export function listMatrixKpis() {
+  return http.get('/matrix/kpis')
+}
+
+/** Names, formula words or thresholds ({ direction, green, amber } or { cleared: true }). */
+export function updateMatrixKpi(key, patch) {
+  return http.put(`/matrix/kpis/${key}`, patch)
+}
+
+// ---- Export ----
+
+/**
+ * Downloads a dataset as .xlsx or .csv (kind) — the server leaves out what the caller
+ * may not see — or a dashboard's layout (kind "dashboard").
+ */
+export async function downloadMatrixExport(kind, id) {
+  const res = await http.raw(`/matrix/export/${kind}/${id}`)
+  const name = /filename="?([^";]+)/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? `matrix-${kind}-${id}`
+  saveBlob(await res.blob(), name)
+}
+
+/** Saves a Blob (or a data: URL) under a file name, through a temporary link. */
+export function saveBlob(blobOrUrl, name) {
+  const url = typeof blobOrUrl === 'string' ? blobOrUrl : URL.createObjectURL(blobOrUrl)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  if (typeof blobOrUrl !== 'string') setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}

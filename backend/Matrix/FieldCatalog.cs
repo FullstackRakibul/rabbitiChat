@@ -329,4 +329,23 @@ public static class MatrixNormalisers
         if (string.IsNullOrEmpty(t)) return null;
         return t.All(char.IsAsciiDigit) && t.Length < 6 ? t.PadLeft(6, '0') : t;
     }
+
+    private static readonly System.Text.RegularExpressions.Regex GradeWord =
+        new(@"^(?:grade(?![a-z])|gr\.)\s*[-:#]?\s*", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// One GradeId, one spelling: "Grade 3", "grade-03", "Gr. 3" and the number 3 are all "3";
+    /// "Grade M3" is "M3". Text that is not a grade is returned trimmed.
+    /// </summary>
+    public static string? Grade(string? grade)
+    {
+        var t = grade?.Trim();
+        if (string.IsNullOrEmpty(t)) return null;
+        var rest = GradeWord.Replace(t, "", 1).Trim();
+        if (rest.Length == 0) return t;
+        if (double.TryParse(rest, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
+            && n >= 0 && Math.Abs(n - Math.Round(n)) < 1e-9)
+            return ((long)Math.Round(n)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return rest;
+    }
 }

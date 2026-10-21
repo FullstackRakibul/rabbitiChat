@@ -21,7 +21,7 @@ using RabbitIC.Api.Repositories;
 
 namespace RabbitIC.Api.Services;
 
-public class MatrixService : IMatrixService
+public partial class MatrixService : IMatrixService
 {
     public const string Masked = "•••";
     private static readonly string[] Extensions = { ".xlsx", ".xlsm", ".csv" };
@@ -216,7 +216,7 @@ public class MatrixService : IMatrixService
 
             // A newer designation lookup: the datasets already imported are checked against it again.
             if (kind == MxReportKind.DesignationLookup && (await _repo.GetDatasetAsync(dataset.Id, ct))?.IsCurrent == true)
-                await RecheckDesignationsAsync(dataset.Id, ct);
+                await RecheckDesignationsAsync(user, dataset.Id, ct);
 
             // The report card, made by code at import (§3.8).
             await BuildCardAsync(user, (await _repo.GetDatasetAsync(dataset.Id, ct))!, ct);
@@ -225,6 +225,9 @@ public class MatrixService : IMatrixService
         upload.Status = MxUpload.StatusImported;
         await _repo.SaveChangesAsync(ct);
         _cache.Remove(BytesKey(upload.Id));   // §3.4: the file is not kept after import
+
+        // Each kind brings its automatic dashboards (§3.8).
+        await EnsureAutoDashboardsAsync(ct);
 
         var names = string.Join(", ", usedTemplates.Select(t => $"{t.Name} v{t.Version}").Distinct());
         var message = allFromTemplates
@@ -294,7 +297,11 @@ public class MatrixService : IMatrixService
     /// and an employee type, against the lookup just imported — the same check the import
     /// runs (QualityChecks.DesignationLookupIssue), over the rows already stored.
     /// </summary>
-    private async Task RecheckDesignationsAsync(int lookupId, CancellationToken ct)
+    /// <summary>
+    /// Checks the current datasets against a newer lookup. A dataset whose designation issue
+    /// changes gets its report card rebuilt, so the card never shows the old count.
+    /// </summary>
+    private async Task RecheckDesignationsAsync(User user, int lookupId, CancellationToken ct)
     {
         var lookup = await LookupAsync(ct);
         if (lookup is null) return;
@@ -311,7 +318,13 @@ public class MatrixService : IMatrixService
                 r.TryGetValue("grade_id", out var g) ? g?.ToString() : null)).ToList();
             var firstCol = ClosedXML.Excel.XLHelper.GetColumnNumberFromLetter(new string(d.TableRange.TakeWhile(char.IsAsciiLetter).ToArray()));
             string RefOf(int row) => $"{d.Sheet}!{MxCells.Letter(firstCol + des.SourceIndex.Value)}{row}";
-            await _repo.ReplaceIssuesAsync(d.Id, MxCheck.DesignationNotInLookup, QualityChecks.DesignationLookupIssue(people, lookup, RefOf, des), ct);
+            var before = (await _repo.ListIssuesAsync(d.Id, ct)).FirstOrDefault(i => i.Check == MxCheck.DesignationNotInLookup);
+            var after = QualityChecks.DesignationLookupIssue(people, lookup, RefOf, des);
+            var same = before is null ? after is null
+                : after is not null && before.Count == after.Count && before.Detail == after.Detail && before.SampleRefsJson == after.SampleRefsJson;
+            if (same) continue;
+            await _repo.ReplaceIssuesAsync(d.Id, MxCheck.DesignationNotInLookup, after, ct);
+            await BuildCardAsync(user, d, ct);
         }
     }
 
@@ -483,6 +496,7 @@ public class MatrixService : IMatrixService
                 row[c.GroupBy[i].Text] = v;
                 groupFilters.Add(JsonSerializer.SerializeToElement(v is null
                     ? new object[] { c.GroupBy[i].Column.Key, "is_null" }
+                    : c.GroupBy[i].Part == "month" ? new object[] { c.GroupBy[i].Column.Key, "starts_with", v }
                     : new object[] { c.GroupBy[i].Column.Key, "=", v }));
             }
             foreach (var m in c.Measures) row[m.Name] = r[m.Alias];
@@ -535,7 +549,11 @@ public class MatrixService : IMatrixService
         if (!string.IsNullOrWhiteSpace(input.NameEn)) d.NameEn = input.NameEn.Trim();
         if (!string.IsNullOrWhiteSpace(input.NameBn)) d.NameBn = input.NameBn.Trim();
         if (!string.IsNullOrWhiteSpace(input.Words)) d.FormulaWords = input.Words.Trim();
-        if (input.Thresholds is { ValueKind: JsonValueKind.Object } t) d.ThresholdsJson = t.GetRawText();
+        if (input.Thresholds is { } t)
+        {
+            if (KpiLibrary.ThresholdProblem(t) is { } problem) return MxResult<MxKpiDto>.Fail(MxOutcome.Invalid, "Thresholds: " + problem);
+            d.ThresholdsJson = t.GetRawText();
+        }
         d.UpdatedAtUtc = DateTime.UtcNow;
         await _repo.SaveChangesAsync(ct);
         return MxResult<MxKpiDto>.Success((await ListKpisAsync(ct)).First(k => k.Key == key));
@@ -549,7 +567,15 @@ public class MatrixService : IMatrixService
 
     private static string? RefText(JsonElement? e) => e is { ValueKind: JsonValueKind.Number or JsonValueKind.String } v ? v.ToString() : null;
 
+    /// <summary>Runs a KPI; its result says which dashboard filters (input.Scope) it could apply.</summary>
     private async Task<MxKpiResult> RunKpiCoreAsync(MxQueryContext ctx, string key, MxKpiRunInput input, CancellationToken ct)
+    {
+        var applied = new HashSet<string>();
+        var r = await RunKpiShapeAsync(ctx, key, input, applied, ct);
+        return r with { ScopeApplied = applied.Union(r.ScopeApplied).Distinct().ToList() };
+    }
+
+    private async Task<MxKpiResult> RunKpiShapeAsync(MxQueryContext ctx, string key, MxKpiRunInput input, HashSet<string> applied, CancellationToken ct)
     {
         var kpi = KpiLibrary.Find(key) ?? throw new MxQueryError(400, $"No KPI \"{key}\".");
         var def = await _repo.GetKpiDefinitionAsync(key, ct);
@@ -564,9 +590,7 @@ public class MatrixService : IMatrixService
         MxDataset Previous()
         {
             if (RefText(input.Previous) is { } p) return MatrixQuery.Resolve(p, ctx, out _)[0];
-            return ctx.Datasets.Where(x => x.ReportKind == d.ReportKind && x.TemplateId == d.TemplateId && x.Id != d.Id
-                    && string.CompareOrdinal(x.ReportDate ?? "", d.ReportDate ?? "") <= 0)
-                .OrderBy(x => x.ReportDate ?? "").ThenBy(x => x.Id).LastOrDefault()
+            return MatrixQuery.PreviousSnapshot(d, ctx.Datasets)
                 ?? throw new MxQueryError(400, $"There is no snapshot before dataset {d.Id}.");
         }
         string Param(string name, string fallback) => input.Params is not null && input.Params.TryGetValue(name, out var v) ? v.ToString() : fallback;
@@ -584,6 +608,7 @@ public class MatrixService : IMatrixService
                 if (node["filter"] is not System.Text.Json.Nodes.JsonArray fa) node["filter"] = fa = new System.Text.Json.Nodes.JsonArray();
                 fa.Add(System.Text.Json.Nodes.JsonNode.Parse("[\"status\", \"in\", [\"Active\"]]"));
             }
+            applied.UnionWith(MatrixQuery.ApplyScope(node, input.Scope, ctx));
             return await RunQueryAsync(ctx, JsonSerializer.SerializeToElement(node), false, ct);
         }
         static double? Num(object? v) => v switch { null => null, long l => l, double x => x, int i => i, _ => double.TryParse(v.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var p) ? p : null };
@@ -598,10 +623,13 @@ public class MatrixService : IMatrixService
         {
             case MxKpiShape.Value:
             {
-                var r = await Run(kpi, d, kpi.Query.Contains("{prev}") ? Previous() : null);
+                var against = kpi.Query.Contains("{prev}") ? Previous() : null;
+                var r = await Run(kpi, d, against);
                 var row = r.Rows.FirstOrDefault();
                 var v = row?["value"];
-                return new MxKpiResult(key, en, bn, kpi.Unit, Round(Num(v)), v is string s ? s : null, null, new(), null, null, row is null ? null : CiteOf(row), r.Provenance);
+                // A snapshot KPI says which snapshot it was measured against.
+                var detail = against is null ? null : $"against the snapshot of {against.ReportDate ?? "no date"} (dataset {against.Id})";
+                return new MxKpiResult(key, en, bn, kpi.Unit, Round(Num(v)), v is string s ? s : null, null, new(), null, detail, row is null ? null : CiteOf(row), r.Provenance);
             }
             case MxKpiShape.Rows:
             case MxKpiShape.PerLine:
@@ -629,6 +657,7 @@ public class MatrixService : IMatrixService
                 var sep = await RunKpiCoreAsync(ctx, "separations_since_previous", input with { Dataset = JsonSerializer.SerializeToElement(d.Id), Previous = JsonSerializer.SerializeToElement(prev.Id) }, ct);
                 var a = await RunKpiCoreAsync(ctx, "active_headcount", input with { Dataset = JsonSerializer.SerializeToElement(prev.Id) }, ct);
                 var b = await RunKpiCoreAsync(ctx, "active_headcount", input with { Dataset = JsonSerializer.SerializeToElement(d.Id) }, ct);
+                applied.UnionWith(sep.ScopeApplied.Intersect(a.ScopeApplied).Intersect(b.ScopeApplied));
                 var avg = ((a.Value ?? 0) + (b.Value ?? 0)) / 2;
                 var value = avg > 0 ? Math.Round(100 * (sep.Value ?? 0) / avg, 2) : (double?)null;
                 return new MxKpiResult(key, en, bn, kpi.Unit, value, null, null, new(), null,
@@ -640,20 +669,26 @@ public class MatrixService : IMatrixService
                     : ctx.Datasets.Where(x => x.IsCurrent && x.ReportKind is MxReportKind.Master or MxReportKind.Manpower).OrderBy(x => x.ReportKind == MxReportKind.Master ? 0 : 1).FirstOrDefault()
                       ?? throw new MxQueryError(400, "Attendance % needs a master or manpower list to measure against.");
                 var kind = against.ReportKind;
-                var present = await RunQueryAsync(ctx, JsonSerializer.SerializeToElement(new
+                var presentNode = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(new
                 {
                     dataset = d.Id.ToString(CultureInfo.InvariantCulture),
                     join = new[] { new { dataset = against.Id.ToString(CultureInfo.InvariantCulture), on = "emp_id" } },
                     group_by = new[] { $"{kind}.unit" },
                     measures = new object[] { new object[] { "count_if", new object[] { "att_status", "in", new[] { "P", "LT" } }, "present" } },
                     limit = 500,
-                }), false, ct);
+                }))!.AsObject();
+                var presentScope = MatrixQuery.ApplyScope(presentNode, input.Scope, ctx);
+                var present = await RunQueryAsync(ctx, JsonSerializer.SerializeToElement(presentNode), false, ct);
                 var activeFilter = Columns(against).Any(c => c.Key == "status") ? new object[] { new object[] { "status", "in", new[] { "Active" } } } : Array.Empty<object>();
-                var active = await RunQueryAsync(ctx, JsonSerializer.SerializeToElement(new
+                var activeNode = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(new
                 {
                     dataset = against.Id.ToString(CultureInfo.InvariantCulture), filter = activeFilter, group_by = new[] { "unit" },
                     measures = new object[] { new object[] { "count", "*", "active" } }, limit = 500,
-                }), false, ct);
+                }))!.AsObject();
+                // The people side takes the filters the master has (unit, section …); attendance-only ones (shift, date) narrow the present side.
+                MatrixQuery.ApplyScope(activeNode, input.Scope?.Where(s => s.Key is not ("shift" or "date") && !(s.Key == "status")).ToList(), ctx);
+                applied.UnionWith(presentScope);
+                var active = await RunQueryAsync(ctx, JsonSerializer.SerializeToElement(activeNode), false, ct);
                 var activeByUnit = active.Rows.ToDictionary(x => x["unit"]?.ToString() ?? "", x => Num(x["active"]) ?? 0);
                 var rows = present.Rows.Where(x => x[$"{kind}.unit"] is not null).Select(x =>
                 {
@@ -734,6 +769,8 @@ public class MatrixService : IMatrixService
             DatasetId = d.Id, IssueId = issue.Id, Field = issue.Field, Kind = issue.FixKind, RowsChanged = changed,
             ByUserId = user.Id, AtUtc = DateTime.UtcNow, Note = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim(),
         }, ct);
+        // The fix changed values and closed an issue: the card is made again from what is there now.
+        await BuildCardAsync(user, d, ct);
         return MxResult<MxFixResult>.Success(new MxFixResult(issue.Id, issue.Field, "_raw_" + issue.Field, changed, issue.FixKind));
     }
 

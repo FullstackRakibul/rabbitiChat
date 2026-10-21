@@ -92,7 +92,8 @@ Two demo IELTS reading tests are also seeded, shared and read-only.
 }
 ```
 
-**Never commit a real API key.** Use user-secrets or environment variables:
+**Never commit a real API key.** A key written into `appsettings*.json` is ignored at
+start-up (the log names it). Use user-secrets or environment variables:
 
 ```bash
 dotnet user-secrets set "OllamaCloud:ApiKey" "…"

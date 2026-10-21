@@ -50,4 +50,17 @@ public interface IMatrixService
 
     /// <summary>The dataset's report card (§3.8): the one made at import, or made now.</summary>
     Task<MxResult<MxReportCardDto>> CardAsync(User user, int datasetId, CancellationToken ct = default);
+
+    /// <summary>The dashboards the caller may see (shared ones and their own); the automatic ones are made first if missing.</summary>
+    Task<List<MxDashboardSummaryDto>> ListDashboardsAsync(User user, CancellationToken ct = default);
+    Task<MxResult<MxDashboardDto>> GetDashboardAsync(User user, int id, CancellationToken ct = default);
+    Task<MxResult<MxDashboardDto>> CreateDashboardAsync(User user, MxDashboardInput input, CancellationToken ct = default);
+    Task<MxResult<MxDashboardDto>> UpdateDashboardAsync(User user, int id, MxDashboardInput input, CancellationToken ct = default);
+    Task<MxResult<bool>> DeleteDashboardAsync(User user, int id, CancellationToken ct = default);
+
+    /// <summary>Every widget's numbers for the caller, with the dashboard's filters, and what ran to make them.</summary>
+    Task<MxResult<MxDashboardRun>> RunDashboardAsync(User user, int id, MxDashboardRunInput input, CancellationToken ct = default);
+
+    /// <summary>A dataset as xlsx or csv (no sensitive columns; personal and salary only when permitted), or a dashboard layout as json.</summary>
+    Task<MxResult<MxExportFile>> ExportAsync(User user, string kind, int id, CancellationToken ct = default);
 }

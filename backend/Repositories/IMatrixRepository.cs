@@ -46,6 +46,12 @@ public interface IMatrixRepository
     Task<List<MxKpiDefinition>> ListKpiDefinitionsAsync(CancellationToken ct = default);
     Task<MxKpiDefinition?> GetKpiDefinitionAsync(string key, CancellationToken ct = default);
     Task SaveCardAsync(int datasetId, string json, CancellationToken ct = default);
+
+    Task<List<MxDashboard>> ListDashboardsAsync(CancellationToken ct = default);
+    Task<MxDashboard?> GetDashboardAsync(int id, CancellationToken ct = default);
+    Task<MxDashboard> AddDashboardAsync(MxDashboard dashboard, CancellationToken ct = default);
+    Task DeleteDashboardAsync(MxDashboard dashboard, CancellationToken ct = default);
+
     Task<MxReportCard?> GetCardAsync(int datasetId, CancellationToken ct = default);
 
     /// <summary>Distinct trimmed, lower-cased values of a column (the designation lookup).</summary>

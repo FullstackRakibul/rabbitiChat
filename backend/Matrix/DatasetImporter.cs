@@ -105,7 +105,9 @@ public static class DatasetImporter
             {
                 var v = MxCells.Classify(g.Cell(r, gridCol));
                 build.Raw[col.Key].Add(v);
-                row[index[col.Key]] = Convert(v, col.Type);
+                var stored = Convert(v, col.Type);
+                // "3" and "Grade 3" are one grade (QualityChecks counts the cells rewritten).
+                row[index[col.Key]] = col.Field == "grade_id" && stored is string s ? MatrixNormalisers.Grade(s) : stored;
             }
 
             string? Text(string key) => index.TryGetValue(key, out var i) ? row[i] as string : null;

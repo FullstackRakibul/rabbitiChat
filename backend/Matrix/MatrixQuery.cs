@@ -51,9 +51,10 @@ public sealed class MxQuerySource
     public required List<MxDataset> Datasets { get; init; }
 }
 
-public sealed record MxFieldRef(string Text, MxQuerySource Source, MxDsColumn Column)
+/// <summary>A field as a query names it. <paramref name="Part"/> "month": a date grouped by its month ("joining_date:month" → 2026-05).</summary>
+public sealed record MxFieldRef(string Text, MxQuerySource Source, MxDsColumn Column, string? Part = null)
 {
-    public string Sql => $"{Source.Alias}.\"{Column.Key}\"";
+    public string Sql => Part == "month" ? $"substr({Source.Alias}.\"{Column.Key}\", 1, 7)" : $"{Source.Alias}.\"{Column.Key}\"";
     public bool OnBase => Source.Alias == "b";
 }
 
@@ -117,15 +118,24 @@ public static class MatrixQuery
         {
             case "current": return new() { current };
             case "previous":
-                return ofKind.Where(d => d.TemplateId == current.TemplateId && d.Id != current.Id
-                        && string.CompareOrdinal(d.ReportDate ?? "", current.ReportDate ?? "") <= 0)
-                    .OrderBy(d => d.ReportDate ?? "").ThenBy(d => d.Id).LastOrDefault() is { } p ? new() { p }
+                return PreviousSnapshot(current, ofKind) is { } p ? new() { p }
                     : throw new MxQueryError(400, $"There is no {kind} snapshot before the current one.");
             default:
                 snapshots = true;
                 return ofKind.Where(d => d.TemplateId == current.TemplateId).OrderBy(d => d.ReportDate ?? "").ThenBy(d => d.Id).ToList();
         }
     }
+
+    /// <summary>
+    /// The snapshot before <paramref name="d"/> — one rule for previous:, the KPIs, the report
+    /// card and the dashboards: the same kind and layout (template), an earlier report date,
+    /// or the same date and imported earlier; the latest of those.
+    /// </summary>
+    public static MxDataset? PreviousSnapshot(MxDataset d, IEnumerable<MxDataset> all) =>
+        all.Where(x => x.ReportKind == d.ReportKind && x.TemplateId == d.TemplateId && x.Id != d.Id
+                && (string.CompareOrdinal(x.ReportDate ?? "", d.ReportDate ?? "") < 0
+                    || (string.CompareOrdinal(x.ReportDate ?? "", d.ReportDate ?? "") == 0 && x.Id < d.Id)))
+            .OrderBy(x => x.ReportDate ?? "").ThenBy(x => x.Id).LastOrDefault();
 
     private static string Table(MxDataset d) =>
         DatasetImporter.SafeName.IsMatch(d.TableName) ? $"\"{d.TableName}\"" : throw new InvalidOperationException("Unsafe table name.");
@@ -158,6 +168,7 @@ public static class MatrixQuery
         var joins = new List<MxQuerySource>();
         var joinKeys = new List<(MxQuerySource, MxFieldRef)>();
         var joinSql = new List<string>();
+        var ctes = new List<string>();
         var unmatched = new List<string>();
         if (q.TryGetProperty("join", out var js) && js.ValueKind == JsonValueKind.Array)
         {
@@ -175,8 +186,11 @@ public static class MatrixQuery
                 var norm = Normaliser(b.Kind, src.Kind, on, ctx);
                 var key = Norm(norm, $"\"{right.Key}\"");
                 // One row per key on the joined side (its first), so a repeated ID never doubles a count.
-                joinSql.Add($"LEFT JOIN (SELECT * FROM {src.From} WHERE \"_row\" IN (SELECT min(\"_row\") FROM {src.From} WHERE \"{right.Key}\" IS NOT NULL GROUP BY {key})) {src.Alias} "
-                          + $"ON {Norm(norm, $"b.\"{left.Key}\"")} = {Norm(norm, $"{src.Alias}.\"{right.Key}\"")}");
+                // The joined side is made once (a materialised CTE) with its normalised key as a
+                // column, _jk: SQLite then indexes it on the fly, and each base row is one lookup —
+                // not a rescan of the joined dataset with the normaliser run on every row.
+                ctes.Add($"{src.Alias} AS MATERIALIZED (SELECT *, {key} AS \"_jk\" FROM {src.From} WHERE \"_row\" IN (SELECT min(\"_row\") FROM {src.From} WHERE \"{right.Key}\" IS NOT NULL GROUP BY {key}))");
+                joinSql.Add($"LEFT JOIN {src.Alias} ON {Norm(norm, $"b.\"{left.Key}\"")} = {src.Alias}.\"_jk\"");
                 unmatched.Add($"SELECT count(*) FROM {b.From} b WHERE b.\"{left.Key}\" IS NOT NULL AND {Norm(norm, $"b.\"{left.Key}\"")} NOT IN (SELECT {key} FROM {src.From} WHERE \"{right.Key}\" IS NOT NULL)");
                 joins.Add(src);
                 joinKeys.Add((src, new MxFieldRef(on, b, left)));
@@ -187,6 +201,9 @@ public static class MatrixQuery
         MxFieldRef Field(string? text, string use)
         {
             var t = (text ?? "").Trim();
+            // "<date field>:month" groups a date by its month; only in group_by.
+            string? part = null;
+            if (use == "group" && t.EndsWith(":month", StringComparison.Ordinal)) { part = "month"; t = t[..^6]; }
             MxFieldRef? found = null;
             var dot = t.IndexOf('.');
             if (dot > 0)
@@ -201,6 +218,11 @@ public static class MatrixQuery
                 foreach (var s in sources)
                     if (s.Columns.FirstOrDefault(c => c.Key == t) is { } col) { found = new MxFieldRef(t, s, col); break; }
             if (found is null) throw new MxQueryError(400, $"Unknown field \"{t}\": not a column of the dataset{(joins.Count > 0 ? " or its joins" : "")}.");
+            if (part is not null)
+            {
+                if (found.Column.Type != MxType.Date) throw new MxQueryError(400, $"\"{t}:month\": only a date field can be grouped by month.");
+                found = found with { Text = t + ":month", Part = part };
+            }
 
             var sens = found.Column.Sensitivity;
             if (sens == MxSensitivity.Salary && !ctx.CanSalary)
@@ -274,12 +296,13 @@ public static class MatrixQuery
         // ---- SQL ----
         var select = groups.Select((g, i) => $"{g.Sql} AS g{i}").Concat(measures.Select(m => $"{m.Sql} AS {m.Alias}"))
             .Append("group_concat(b.\"_row\") AS _rows").ToList();
+        var with = ctes.Count > 0 ? $"WITH {string.Join(", ", ctes)} " : "";
         var from = $"FROM {b.From} b {string.Join(" ", joinSql)}";
         var whereSql = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "";
         var groupSql = groups.Count > 0 ? " GROUP BY " + string.Join(", ", groups.Select((_, i) => $"g{i}")) : "";
         args.Add(limit);
-        var sql = $"SELECT {string.Join(", ", select)} {from}{whereSql}{groupSql}{(order.Count > 0 ? " ORDER BY " + string.Join(", ", order) : "")} LIMIT $p{args.Count - 1}";
-        var countSql = $"SELECT count(*) {from}{whereSql}";
+        var sql = $"{with}SELECT {string.Join(", ", select)} {from}{whereSql}{groupSql}{(order.Count > 0 ? " ORDER BY " + string.Join(", ", order) : "")} LIMIT $p{args.Count - 1}";
+        var countSql = $"{with}SELECT count(*) {from}{whereSql}";
 
         // The base dataset's own filter, for citations that reopen rows in the viewer.
         var baseArgs = new List<object>();
@@ -454,4 +477,43 @@ public static class MatrixQuery
         }, args, ctx).Sql).ToList();
         return (string.Join(" AND ", conds), args);
     }
+
+    // ───────────────────────── dashboard scope ─────────────────────────
+
+    /// <summary>
+    /// A dashboard filter added to every query that can take it (§3.8): the first of
+    /// <see cref="MxScopeFilter.Fields"/> the base dataset has, else one a join has (as
+    /// "&lt;kind&gt;.&lt;field&gt;"). Returns the keys of the filters applied; the others did not fit.
+    /// </summary>
+    public static List<string> ApplyScope(System.Text.Json.Nodes.JsonObject node, IReadOnlyList<MxScopeFilter>? scope, MxQueryContext ctx)
+    {
+        var applied = new List<string>();
+        if (scope is null || scope.Count == 0) return applied;
+        var baseSets = Resolve(node["dataset"]?.ToString(), ctx, out _);
+        var baseKeys = baseSets.Select(ctx.ColumnsOf).Select(cs => cs.Select(c => c.Key).ToHashSet())
+            .Aggregate((a, b) => { a.IntersectWith(b); return a; });
+        var joins = new List<(string Kind, HashSet<string> Keys)>();
+        if (node["join"] is System.Text.Json.Nodes.JsonArray ja)
+            foreach (var j in ja)
+                if (j?["dataset"]?.ToString() is { } r && Resolve(r, ctx, out _) is [var jd, ..])
+                    joins.Add((jd.ReportKind, ctx.ColumnsOf(jd).Select(c => c.Key).ToHashSet()));
+
+        foreach (var f in scope)
+        {
+            string? field = f.Fields.FirstOrDefault(baseKeys.Contains);
+            if (field is null)
+                foreach (var (kind, keys) in joins)
+                    if (f.Fields.FirstOrDefault(keys.Contains) is { } k) { field = $"{kind}.{k}"; break; }
+            if (field is null) continue;
+            if (node["filter"] is not System.Text.Json.Nodes.JsonArray fa) node["filter"] = fa = new System.Text.Json.Nodes.JsonArray();
+            var cond = new System.Text.Json.Nodes.JsonArray(field, f.Op);
+            foreach (var v in f.Values) cond.Add(System.Text.Json.Nodes.JsonNode.Parse(v.GetRawText()));
+            fa.Add(cond);
+            applied.Add(f.Key);
+        }
+        return applied;
+    }
 }
+
+/// <summary>One dashboard filter: its key (unit, section, line, emp_type, status, shift, date), the fields it can sit on, in order, and its condition.</summary>
+public sealed record MxScopeFilter(string Key, string[] Fields, string Op, JsonElement[] Values);

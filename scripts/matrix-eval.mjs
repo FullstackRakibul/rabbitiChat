@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Matrix eval — see docs/MATRIX_PROMPT.md §4 (Phase M1) and §8.
+// Matrix eval — see docs/MATRIX_PROMPT.md §4–§6 (Phases M1–M3) and §8.
 //
 //   node scripts/matrix-eval.mjs --phase M1            every M1 check on the synthetic fixtures
 //   node scripts/matrix-eval.mjs --phase M1 --live     also the live gates on matrix-samples/ (counts only)
 //   node scripts/matrix-eval.mjs --only G-M1.6         one gate
 //   node scripts/matrix-eval.mjs --no-build            reuse the last eval build
-//   node scripts/matrix-eval.mjs --shots <dir>         where G-M1.9 writes its screenshots
+//   node scripts/matrix-eval.mjs --shots <dir>         where G-M1.9 and G-M3 write their screenshots
 //
 // Environment: MATRIX_EVAL_ADMIN_USER, MATRIX_EVAL_ADMIN_SECRET (the seeded
 // administrator; never written here).
@@ -27,6 +27,7 @@ import { buildApi, startApi, call, startFakeOllama, API_BIN_DIR } from './oddity
 import { launchBrowser } from './lib/headless-browser.mjs'
 import { makeFixtures } from './matrix/make-fixtures.mjs'
 import { readWorkbook } from './matrix/xlsx-lite.mjs'
+import { scanRepo, scanText } from './lib/config-secrets.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const EVAL_ROOT = path.join(os.tmpdir(), 'matrix-eval')
@@ -471,6 +472,7 @@ check('G-M1.8', 'M1', 'each quality check fires on its planted fixture with the 
     ['master', 'empty_required', 'emp_id', P.empty_required.emp_id],
     ['master', 'designation_not_in_lookup', 'designation', P.designation_not_in_lookup],
     ['master', 'worker_designation_no_grade', 'designation', P.worker_designation_no_grade],
+    ['master', 'grade_forms_unified', 'grade_id', P.grade_forms_unified],
     ['s1', 'formula_mismatch', 'basic', P.formula_mismatch, ctx.M.master.refs.formula_mismatch],
     ['hr', 'null_text', null, ctx.M.hrBasic.null_text],
     ['hr', 'separation_before_joining', null, ctx.M.hrBasic.separation_before_joining],
@@ -740,6 +742,13 @@ function sheetObjects(file, sheetName, headerRow = 1) {
 const countBy = (rows, key) => rows.reduce((m, r) => { const k = key(r) ?? 'null'; m[k] = (m[k] ?? 0) + 1; return m }, {})
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null }
 const round2 = (x) => Math.round(x * 100) / 100
+/** GradeId as one spelling, written here again: "Grade 3", "Grade 03" and 3 are "3". */
+const gradeOf = (g) => {
+  if (g === null || g === undefined || String(g).trim() === '') return null
+  const m = /^(?:grade(?![a-z])|gr\.)\s*[-:#]?\s*(.+)$/i.exec(String(g).trim())
+  const rest = (m ? m[1] : String(g)).trim()
+  return /^\d+(\.0+)?$/.test(rest) ? String(Number(rest)) : rest
+}
 const lineOf = (wing) => { const m = /^\s*line\s*[-–:#]?\s*(\d+)/i.exec(wing ?? ''); return m ? Number(m[1]) : null }
 const sameMap = (a, b) => {
   const ka = Object.keys(a).sort(), kb = Object.keys(b).sort()
@@ -821,7 +830,7 @@ check('G-M2.2', 'M2', '16 KPI queries on the fixtures equal an independent JS co
     headcount_by_gender: countBy(active, (r) => r.Gender),
     female_pct: round2((100 * active.filter((r) => r.Gender === 'Female').length) / active.length),
     headcount_by_emp_type: countBy(active, (r) => r.EmpTypeName),
-    headcount_by_grade: countBy(active, (r) => r.GradeId),
+    headcount_by_grade: countBy(active, (r) => gradeOf(r.GradeId)),
     sewing_lines_per_unit: Object.fromEntries(Object.entries(linesPerUnit).map(([k, v]) => [k, v.size])),
     operators_per_line: ops,
     operators_per_line_summary: { min: Math.min(...Object.values(ops)), median: median(Object.values(ops)), max: Math.max(...Object.values(ops)) },
@@ -982,12 +991,587 @@ check('G-M2.4', 'M2', 'LIVE KPIs on the real files (counts only)', async () => {
   return ok(good, lines2.join(' ‖ '))
 }, { live: true })
 
+// ═══════════════════════════════ Phase M3 ═══════════════════════════════
+//
+// The dashboards' numbers are checked twice: against the KPI or query each widget
+// says it ran (run again through the public routes), and, for the main tiles,
+// against an independent computation over the fixture workbooks.
+
+/** Every fixture kind imported once: master, both attendance days, the separation list, the lookup, two manpower snapshots. */
+async function m3Setup() {
+  if (ctx.m3) return ctx.m3
+  const ids = await fixtureIds()
+  await fixtureImport('fx-designation.xlsx')
+  const have = async (kind, date) => (await sql('select Id from MxDatasets where ReportKind = ? and ReportDate = ? order by Id desc limit 1', kind, date))[0]?.Id
+  const importAs = async (file, sheet, reportDate) => {
+    const up = (await upload(ctx.admin, [path.join(FIXTURES, file)])).json.uploads[0]
+    const r = await asAdmin('POST', `/api/matrix/uploads/${up.id}/import`, { tables: [{ table: tableOf(up, sheet).id, confirm: 'suggestions', ...(reportDate ? { reportDate } : {}) }] })
+    if (r.status !== 200) throw new Error(`import ${file} → ${r.status} ${r.text.slice(0, 200)}`)
+    return r.json.datasets[0].id
+  }
+  ids.att2 = await have('attendance-daily', ctx.M.attendance2.reportDate)
+    ?? await importAs('fx-attendance-2.xlsx', 'rptDailyAttDetailsReport_Factor')
+  ids.may = await have('manpower', ctx.M.manpower2.previousReportDate) ?? await importAs('fx-manpower.xlsx', 'Sheet1', ctx.M.manpower2.previousReportDate)
+  ids.june = await have('manpower', ctx.M.manpower2.reportDate) ?? await importAs('fx-manpower-2.xlsx', 'Sheet1', ctx.M.manpower2.reportDate)
+  const list = (await asAdmin('GET', '/api/matrix/dashboards')).json?.dashboards ?? []
+  ids.dash = Object.fromEntries(list.filter((d) => d.auto).map((d) => [d.auto, d.id]))
+  ctx.m3 = ids
+  return ids
+}
+
+const runDash = async (user, id, body = {}) => (await as(user, 'POST', `/api/matrix/dashboards/${id}/run`, body)).json
+const plainRows = (rows) => JSON.stringify((rows ?? []).map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !k.startsWith('_')))))
+const numbersOf = (w) => JSON.stringify([w.value, plainRows(w.rows), (w.trend ?? []).map((p) => p.value)])
+const widgetOf = (run, id) => run?.widgets?.find((w) => w.id === id)
+
+function activeMaster() {
+  return sheetObjects('fx-master.xlsx', 'HRM').map((r, i) => ({ ...r, _src: i + 2 })).filter((r) => (r.EmpStatusName ?? '').trim() === 'Active')
+}
+const presentOf = (A) => A.filter((r) => ['P', 'LT'].includes(r.Status)).length
+
+/** The fixture file a dataset came from (the eval's own uploads). */
+const fileOf = async (id) => (await sql('select u.FileName f from MxDatasets d join MxUploads u on u.Id = d.UploadId where d.Id = ?', id))[0]?.f
+
+/** Active staff whose designation the current lookup lacks — written here again, from the workbooks. */
+async function noGradeOf(rows) {
+  const id = (await sql("select Id from MxDatasets where ReportKind = 'designation-lookup' and IsCurrent = 1 order by Id desc limit 1"))[0]?.Id
+  const lookup = new Set(sheetObjects(await fileOf(id), 'Sheet1').map((r) => String(r.DesignationName ?? '').trim().toLowerCase()))
+  return rows.filter((r) => ['Management', 'Non-Management'].includes(r.EmpTypeName) && !lookup.has(String(r.DesignationName ?? '').trim().toLowerCase())).length
+}
+
+// ---- G-M3.1 Automatic dashboards ----
+
+check('G-M3.1', 'M3', 'each fixture kind creates its automatic dashboard; every widget\'s numbers equal its own KPI or query run again, and the main tiles an independent computation', async () => {
+  const S = await m3Setup()
+  const want = ['manpower-overview', 'line-board', 'attendance-today', 'joiners-separations', 'data-quality']
+  const missing = want.filter((a) => !S.dash[a])
+  let widgets = 0, equal = 0
+  const bad = [], runs = {}
+  for (const a of want.filter((x) => S.dash[x])) {
+    const run = runs[a] = await runDash(ctx.admin, S.dash[a])
+    for (const w of run?.widgets ?? []) {
+      widgets++
+      if (w.error) { bad.push(`${a}/${w.id}: ${w.error}`); continue }
+      const again = w.kpi ? (await runKpi(ctx.admin, w.kpi, w.input)).json : (await asAdmin('POST', '/api/matrix/query', { query: w.query })).json
+      const same = plainRows(again?.rows) === plainRows(w.rows) && (!w.kpi || again?.value === w.value)
+      if (same) equal++; else bad.push(`${a}/${w.id} differs from its own run`)
+    }
+  }
+  const active = activeMaster()
+  const A2 = sheetObjects('fx-attendance-2.xlsx', 'rptDailyAttDetailsReport_Factor', 3)
+  const H = sheetObjects('fx-hr-basic.xlsx', 'Sheet1')
+  // Joiners: the current manpower snapshot against the one before it, whichever files those are in this run.
+  const jw = widgetOf(runs['joiners-separations'], 'joiners')
+  const ids = (file) => new Set(sheetObjects(file, 'Sheet1').map((r) => r['Employee ID']))
+  // The snapshot before, by the rule written again here: same kind and layout, an earlier report date, or the same date imported earlier.
+  const cur = (await sql("select ReportKind k, TemplateId t, coalesce(ReportDate, '') r from MxDatasets where Id = ?", jw?.datasetId ?? -1))[0]
+  const prevId = cur && (await sql("select Id from MxDatasets where ReportKind = ? and TemplateId = ? and Id <> ? and (coalesce(ReportDate, '') < ? or (coalesce(ReportDate, '') = ? and Id < ?)) order by coalesce(ReportDate, '') desc, Id desc limit 1",
+    cur.k, cur.t, jw.datasetId, cur.r, cur.r, jw.datasetId))[0]?.Id
+  const joiners = prevId
+    ? await (async () => { const now = ids(await fileOf(jw.datasetId)), before = ids(await fileOf(prevId)); return [...now].filter((x) => !before.has(x)).length })()
+    : 'no previous snapshot'
+  const independent = [
+    ['manpower-overview/headcount', widgetOf(runs['manpower-overview'], 'headcount')?.value, active.length],
+    ['line-board/lines', widgetOf(runs['line-board'], 'lines')?.value, new Set(active.filter((r) => r.SectionName === 'Sewing' && lineOf(r.WingName) !== null).map((r) => lineOf(r.WingName))).size],
+    ['attendance-today/present (20 May)', widgetOf(runs['attendance-today'], 'present')?.value, presentOf(A2)],
+    ['joiners-separations/separations', widgetOf(runs['joiners-separations'], 'separations')?.value, H.filter((r) => r.EmpStatusName && r.EmpStatusName !== 'Active').length],
+    ['joiners-separations/joiners', jw?.value, joiners],
+    ['manpower-overview/no-grade', widgetOf(runs['manpower-overview'], 'no-grade')?.value, await noGradeOf(active)],
+  ]
+  const wrong = independent.filter(([, got, exp]) => got !== exp)
+  return ok(!missing.length && widgets > 30 && equal === widgets && !wrong.length,
+    `dashboards ${want.filter((a) => S.dash[a]).join(', ')}${missing.length ? ` · MISSING ${missing.join(', ')}` : ''} · ${equal}/${widgets} widgets equal their own run`
+    + `${bad.length ? ` · ${bad.slice(0, 6).join(' | ')}` : ''} · independent: ${independent.map(([n, g, e]) => `${n} ${g}${g === e ? '' : ` ≠ ${e}`}`).join(', ')}`)
+})
+
+// ---- G-M3.2 Filters and drill-down ----
+
+check('G-M3.2', 'M3', 'a unit filter changes every widget of the Manpower overview and the Line board, to the independent numbers', async () => {
+  const S = await m3Setup()
+  const active = activeMaster()
+  const units = Object.entries(countBy(active, (r) => r.UnitName)).filter(([u]) => u !== 'null').sort((a, b) => b[1] - a[1])
+  const unit = units[0][0]
+  const out = []
+  let pass = true
+  for (const a of ['manpower-overview', 'line-board']) {
+    const all = await runDash(ctx.admin, S.dash[a])
+    const one = await runDash(ctx.admin, S.dash[a], { filters: { unit: [unit] } })
+    // Sewing lines: every fixture unit runs all of them, so that tile keeps its number — it must still equal the unit's own count.
+    const unitLines = new Set(active.filter((r) => r.UnitName === unit && r.SectionName === 'Sewing' && lineOf(r.WingName) !== null).map((r) => lineOf(r.WingName))).size
+    // Staff without a grade mapping: the unit may hold every one of them (it depends on the current lookup).
+    const unitNoGrade = await noGradeOf(active.filter((r) => r.UnitName === unit))
+    const same = (w) => (w.id === 'lines' && w.value === unitLines) || (w.id === 'no-grade' && w.value === unitNoGrade)
+    const notApplied = one.widgets.filter((w) => !w.filtersApplied.includes('unit'))
+    const unchanged = one.widgets.filter((w) => w.filtersApplied.includes('unit') && numbersOf(w) === numbersOf(widgetOf(all, w.id)) && !same(w))
+    pass &&= notApplied.length === 0 && unchanged.length === 0 && one.widgets.every((w) => !w.error)
+    out.push(`${a}: the filter reached ${one.widgets.length - notApplied.length}/${one.widgets.length} widgets, changed ${one.widgets.length - unchanged.length - one.widgets.filter(same).length}`
+      + `${one.widgets.some(same) ? ` (${one.widgets.filter(same).map((w) => `${w.id} ${w.value}`).join(', ')}: the same as for every unit, and equal to the unit's independent count)` : ''}`
+      + `${unchanged.length ? ` · unchanged: ${unchanged.map((w) => w.id).join(', ')}` : ''}${notApplied.length ? ` · not reached: ${notApplied.map((w) => w.id).join(', ')}` : ''}`)
+    if (a === 'manpower-overview') {
+      const got = widgetOf(one, 'headcount')?.value, exp = active.filter((r) => r.UnitName === unit).length
+      pass &&= got === exp
+      const ng = widgetOf(one, 'no-grade')?.value
+      pass &&= ng === unitNoGrade
+      out.push(`headcount in the unit ${got} (independent ${exp}) · staff without a grade mapping ${ng} (independent ${unitNoGrade})`)
+    } else {
+      const ops = {}
+      for (const r of active.filter((x) => x.UnitName === unit && x.SectionName === 'Sewing' && lineOf(x.WingName) !== null))
+        ops[lineOf(r.WingName)] = (ops[lineOf(r.WingName)] ?? 0) + (/operator/i.test(r.DesignationName ?? '') ? 1 : 0)
+      const got = Object.fromEntries((widgetOf(one, 'board')?.rows ?? []).map((r) => [String(r.line_no), r.operators]))
+      pass &&= sameMap(ops, got)
+      out.push(`line board operators per line equal the independent count ${sameMap(ops, got)} over ${Object.keys(ops).length} lines`)
+    }
+  }
+  const att = await runDash(ctx.admin, S.dash['attendance-today'], { filters: { unit: [unit] } })
+  out.push(`attendance today (for the record): the unit filter reaches ${att.widgets.filter((w) => w.filtersApplied.includes('unit')).map((w) => w.id).join(', ') || 'none'}; the others say it does not apply`)
+  return ok(pass, `unit "${unit}" · ${out.join(' · ')}`)
+})
+
+check('G-M3.2', 'M3', 'clicking a line\'s bar opens the viewer with exactly that line\'s operators highlighted (screenshots)', async () => {
+  const S = await m3Setup()
+  const shots = ctx.args.shots
+  fs.mkdirSync(shots, { recursive: true })
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dashboard=${S.dash['line-board']}`)
+    await p.waitFor('[data-widget="operators"] [data-chart-ready]', 20000)
+    await p.shot(path.join(shots, 'line-board-light-1280.png'), { full: true })
+    const target = await p.eval(`(async () => {
+      const el = document.querySelector('[data-widget="operators"] [data-matrix-chart]')
+      el.scrollIntoView({ block: 'center' })
+      await new Promise((r) => setTimeout(r, 400))
+      const c = el.__mxChart, rows = el.__mxRows
+      const i = Math.floor(rows.length / 2)
+      const top = c.convertToPixel({ seriesIndex: 0 }, [i, rows[i].value]), base = c.convertToPixel({ seriesIndex: 0 }, [i, 0])
+      const box = el.getBoundingClientRect()
+      return { x: box.left + top[0], y: box.top + (top[1] + base[1]) / 2, line: rows[i].line_no, value: rows[i].value }
+    })()`)
+    await p.mouseClick(target.x, target.y)
+    await p.waitFor('[data-matrix-viewer] [data-hl-row]', 15000)
+    const url = new URL(await p.eval('location.href'))
+    const shown = await p.eval(`({ total: Number(document.querySelector('[data-matrix-viewer]').getAttribute('data-total')),
+      rows: [...document.querySelectorAll('[data-hl-row]')].map((e) => Number(e.getAttribute('data-src-row'))) })`)
+    await p.shot(path.join(shots, 'line-drill-viewer-light-1280.png'))
+    const want = activeMaster().filter((r) => r.SectionName === 'Sewing' && lineOf(r.WingName) === target.line && /operator/i.test(r.DesignationName ?? '')).map((r) => r._src)
+    const api = (await asAdmin('GET', `/api/matrix/datasets/${url.searchParams.get('dataset')}/rows?limit=2000&only=true&highlight=${encodeURIComponent(url.searchParams.get('highlight') ?? '')}`)).json
+    const apiRows = (api?.rows ?? []).map((r) => r._row)
+    const exact = apiRows.length === want.length && want.every((r) => apiRows.includes(r)) && shown.rows.every((r) => want.includes(r))
+    return ok(Number(url.searchParams.get('dataset')) === S.master && shown.total === want.length && exact && target.value === want.length,
+      `clicked line ${target.line} (bar ${target.value}) → ${url.pathname}?dataset=${url.searchParams.get('dataset')}&highlight=… · viewer ${shown.total} rows, ${shown.rows.length} on screen · `
+      + `the token reopens ${apiRows.length} rows, exactly the independent ${want.length} operators of that line: ${exact}`)
+  } finally { await browser.close() }
+})
+
+// ---- G-M3.3 Editor ----
+
+check('G-M3.3', 'M3', 'editor through the API: add, move, resize, change type, rename, save, reload; bad layouts refused; a non-editor gets 403', async () => {
+  const S = await m3Setup()
+  const u = await users()
+  const copy = await as(u.sys, 'POST', '/api/matrix/dashboards', { copyOf: S.dash['manpower-overview'], name: 'Eval copy' })
+  const layout = structuredClone(copy.json?.layout ?? { widgets: [] })
+  const w = (id) => layout.widgets.find((x) => x.id === id)
+  layout.widgets.push({ id: 'eval-new', type: 'bar', kpi: 'headcount_by_designation', dataset: 'current:master', x: 0, y: 30, w: 6, h: 4 })
+  Object.assign(w('by-gender'), { x: 6, y: 18 })                     // move
+  Object.assign(w('by-grade'), { w: 8, h: 5 })                       // resize
+  w('by-section').type = 'bar'                                       // change type
+  w('tenure').title = { en: 'Years of service', bn: 'চাকরির বছর' }    // rename a widget
+  const put = await as(u.sys, 'PUT', `/api/matrix/dashboards/${copy.json?.id}`, { name: 'Eval board', layout })
+  const back = (await as(u.sys, 'GET', `/api/matrix/dashboards/${copy.json?.id}`)).json
+  const same = JSON.stringify(back?.layout?.widgets) === JSON.stringify(layout.widgets) && back?.name === 'Eval board'
+  const bad1 = await as(u.sys, 'PUT', `/api/matrix/dashboards/${copy.json?.id}`, { layout: { widgets: [{ ...layout.widgets[0], x: 10, w: 4 }] } })
+  const bad2 = await as(u.sys, 'PUT', `/api/matrix/dashboards/${copy.json?.id}`, { layout: { widgets: [{ id: 'q', type: 'bar', query: { dataset: 'current:master', filter: [['section', '=', "x'; DROP TABLE MxDashboards; --"]] }, x: 0, y: 0, w: 6, h: 4 }] } })
+  const bad3 = await as(u.sys, 'PUT', `/api/matrix/dashboards/${copy.json?.id}`, { layout: { widgets: [{ id: 'q', type: 'pie3d', kpi: 'active_headcount', x: 0, y: 0, w: 6, h: 4 }] } })
+  const viewer = {
+    get: (await as(u.limited, 'GET', `/api/matrix/dashboards/${copy.json?.id}`)).status,
+    put: (await as(u.limited, 'PUT', `/api/matrix/dashboards/${copy.json?.id}`, { name: 'x' })).status,
+    post: (await as(u.limited, 'POST', '/api/matrix/dashboards', { name: 'x' })).status,
+    del: (await as(u.limited, 'DELETE', `/api/matrix/dashboards/${copy.json?.id}`)).status,
+    canEdit: (await as(u.limited, 'GET', `/api/matrix/dashboards/${copy.json?.id}`)).json?.canEdit,
+  }
+  const autoDel = (await as(u.sys, 'DELETE', `/api/matrix/dashboards/${S.dash['manpower-overview']}`)).status
+  ctx.m3.copy = copy.json?.id
+  return ok(copy.status === 201 && put.status === 200 && same && bad1.status === 400 && bad2.status === 400 && bad3.status === 400
+      && viewer.get === 200 && viewer.put === 403 && viewer.post === 403 && viewer.del === 403 && viewer.canEdit === false && autoDel === 400,
+    `copy ${copy.status} · save ${put.status} · reloaded layout and name identical ${same} · refused: off the grid ${bad1.status} "${bad1.json?.error}", injection ${bad2.status} "${bad2.json?.error}", unknown type ${bad3.status} · `
+    + `non-editor: read ${viewer.get}, canEdit ${viewer.canEdit}, save ${viewer.put}, create ${viewer.post}, delete ${viewer.del} · deleting an automatic dashboard ${autoDel}`)
+})
+
+check('G-M3.3', 'M3', 'editor in the browser: rename, change type, move, resize, add, save and reload; a non-editor sees no edit controls (screenshots)', async () => {
+  const S = await m3Setup()
+  const u = await users()
+  const copy = (await as(u.sys, 'POST', '/api/matrix/dashboards', { copyOf: S.dash['manpower-overview'], name: 'Eval UI copy' })).json
+  const before = copy.layout.widgets.find((w) => w.id === 'by-unit')
+  const shots = ctx.args.shots
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(u.sys, 'light', 1280, 900, `/matrix?dashboard=${copy.id}`)
+    await p.waitFor('[data-widget="by-unit"] [data-chart-ready]', 20000)
+    await p.click('[data-dash-edit]')
+    await p.type('[data-dash-name]', 'Eval UI board')
+    await p.eval(`(() => { const s = document.querySelector('[data-widget="by-unit"] [data-w-type]'); s.value = 'donut'; s.dispatchEvent(new Event('change', { bubbles: true })) })(); 0`)
+    await p.click('[data-widget="by-unit"] [data-w-move="down"]')
+    await p.click('[data-widget="by-unit"] [data-w-wider]')
+    await p.eval(`(() => { for (const [sel, v] of [['[data-add-kpi]', 'headcount_by_department'], ['[data-add-type]', 'bar']]) { const s = document.querySelector(sel); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })) } })(); 0`)
+    await p.click('[data-add-widget]')
+    await p.shot(path.join(shots, 'editor-light-1280.png'), { full: true })
+    await p.click('[data-dash-save]')
+    await p.waitFor('[data-dash-saved]', 10000)
+    await p.reload()
+    await p.waitFor('[data-widget="by-unit"] [data-chart-ready]', 20000)
+    const title = await p.eval('document.querySelector("[data-dash-title]")?.textContent?.trim()')
+    const saved = (await as(u.sys, 'GET', `/api/matrix/dashboards/${copy.id}`)).json
+    const after = saved.layout.widgets.find((w) => w.id === 'by-unit')
+    const added = saved.layout.widgets.find((w) => w.kpi === 'headcount_by_department' && w.type === 'bar')
+    const okUi = saved.name === 'Eval UI board' && title?.includes('Eval UI board') && after.type === 'donut' && after.y === before.y + 1 && after.w === before.w + 1 && !!added
+
+    const q = await browser.page()
+    await q.session(u.limited, 'light', 1280, 900, `/matrix?dashboard=${copy.id}`)
+    await q.waitFor('[data-widget="by-unit"] [data-chart-ready]', 20000)
+    const controls = await q.eval('document.querySelectorAll("[data-dash-edit], [data-dash-save], [data-w-type], [data-add-widget]").length')
+    await q.shot(path.join(shots, 'viewer-only-light-1280.png'))
+    return ok(okUi && controls === 0,
+      `saved and reloaded: name "${saved.name}" (shown "${title}") · by-unit type ${before.type}→${after.type}, y ${before.y}→${after.y}, w ${before.w}→${after.w} · added ${added ? `${added.id} (${added.kpi}, ${added.type})` : 'nothing'} · non-editor edit controls ${controls}`)
+  } finally { await browser.close() }
+})
+
+// ---- G-M3.4 Thresholds and trends ----
+
+check('G-M3.4', 'M3', 'KPI tiles colour by thresholds (seeded, then set by a manager); trends use the snapshot series; compare with previous gives the change', async () => {
+  const S = await m3Setup()
+  const u = await users()
+  const A = sheetObjects('fx-attendance.xlsx', 'rptDailyAttDetailsReport_Factor', 3)
+  const A2 = sheetObjects('fx-attendance-2.xlsx', 'rptDailyAttDetailsReport_Factor', 3)
+  const latePct = round2((100 * A2.filter((r) => r.Status === 'LT').length) / presentOf(A2))
+  const stateOf = (v, t) => t.direction === 'lower' ? (v <= t.green ? 'green' : v <= t.amber ? 'amber' : 'red') : (v >= t.green ? 'green' : v >= t.amber ? 'amber' : 'red')
+  const seeded = { direction: 'lower', green: 5, amber: 10 }
+  const run0 = await runDash(ctx.admin, S.dash['attendance-today'])
+  const tile = widgetOf(run0, 'late-pct')
+  const states = []
+  for (const [want, t] of [['green', { direction: 'lower', green: latePct + 1, amber: latePct + 2 }], ['amber', { direction: 'lower', green: latePct - 2, amber: latePct + 1 }], ['red', { direction: 'lower', green: latePct - 2, amber: latePct - 1 }]]) {
+    const put = await asAdmin('PUT', '/api/matrix/kpis/late_pct', { thresholds: t })
+    states.push(`${want}:${put.status === 200 ? widgetOf(await runDash(ctx.admin, S.dash['attendance-today']), 'late-pct')?.state : put.status}`)
+  }
+  const refused = (await asAdmin('PUT', '/api/matrix/kpis/late_pct', { thresholds: { direction: 'lower', green: 10, amber: 5 } })).status
+  const sysPut = (await as(u.sys, 'PUT', '/api/matrix/kpis/late_pct', { thresholds: seeded })).status
+  await asAdmin('PUT', '/api/matrix/kpis/late_pct', { thresholds: seeded })
+
+  const trend = widgetOf(run0, 'trend')?.trend ?? []
+  const trendOk = trend.length === 2 && trend[0].reportDate === ctx.M.attendance.reportDate && trend[0].value === presentOf(A) && trend[1].value === presentOf(A2)
+  const mpTrend = widgetOf(await runDash(ctx.admin, S.dash['joiners-separations']), 'trend')?.trend ?? []
+  const mpDates = mpTrend.map((x) => x.reportDate)
+  const mpOk = mpDates.includes(ctx.M.manpower2.previousReportDate) && mpDates.includes(ctx.M.manpower2.reportDate) && mpDates.every((d, i) => i === 0 || d >= mpDates[i - 1])
+  const present = widgetOf(run0, 'present')
+  const cmpOk = present?.compare?.before === presentOf(A) && present?.compare?.after === presentOf(A2) && present?.compare?.change === presentOf(A2) - presentOf(A)
+  const withRows = widgetOf(await runDash(ctx.admin, S.dash['attendance-today'], { compare: true }), 'by-dept')
+  const prevRun = (await runKpi(ctx.admin, 'present_by_department', { dataset: withRows?.compare?.previousId })).json
+  const rowsOk = !!withRows?.compare?.rows && plainRows(withRows.compare.rows) === plainRows(prevRun?.rows)
+  return ok(tile?.value === latePct && tile?.state === stateOf(latePct, seeded) && states.join() === 'green:green,amber:amber,red:red' && refused === 400 && sysPut === 403
+      && trendOk && mpOk && cmpOk && rowsOk,
+    `late % ${tile?.value} (independent ${latePct}) seeded state ${tile?.state} · set by a manager → ${states.join(' ')} · amber below green refused ${refused} · System without kpis.edit ${sysPut} · `
+    + `present trend ${trend.map((x) => `${x.reportDate}:${x.value}`).join(' → ')} (independent ${presentOf(A)} → ${presentOf(A2)}) · manpower trend ${mpDates.join(' → ')} · `
+    + `compare: present ${present?.compare?.before} → ${present?.compare?.after} (${present?.compare?.change}) · by department against ${withRows?.compare?.previousDate} equal to its own run ${rowsOk}`)
+})
+
+check('G-M3.4', 'M3', 'in the browser: tiles carry their threshold state, the trend chart has the snapshot points, "compare with previous" shows the change', async () => {
+  const S = await m3Setup()
+  const run = await runDash(ctx.admin, S.dash['attendance-today'])
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dashboard=${S.dash['attendance-today']}`)
+    await p.waitFor('[data-widget="trend"] [data-chart-ready]', 20000)
+    const tiles = await p.eval(`Object.fromEntries([...document.querySelectorAll('[data-widget][data-type="kpi"]')].map((e) => [e.getAttribute('data-widget'), e.getAttribute('data-state') || null]))`)
+    const points = await p.eval(`document.querySelector('[data-widget="trend"] [data-matrix-chart]').__mxChart.getOption().series[0].data.length`)
+    await p.click('[data-dash-compare]')
+    await p.waitFor('[data-widget="present"] [data-compare]', 10000)
+    const change = await p.eval(`document.querySelector('[data-widget="present"] [data-compare]').getAttribute('data-change')`)
+    await p.shot(path.join(ctx.args.shots, 'attendance-compare-light-1280.png'), { full: true })
+    const want = Object.fromEntries(run.widgets.filter((w) => w.type === 'kpi').map((w) => [w.id, w.state ?? null]))
+    return ok(JSON.stringify(tiles) === JSON.stringify(want) && points === 2 && Number(change) === widgetOf(run, 'present').compare.change,
+      `tile states ${JSON.stringify(tiles)} (API ${JSON.stringify(want)}) · trend points ${points} · present change shown ${change}`)
+  } finally { await browser.close() }
+})
+
+// ---- G-M3.5 Export ----
+
+async function download(user, url) {
+  const res = await fetch(`${ctx.api.url}${url}`, { headers: { Authorization: `Bearer ${user.token}` } })
+  return { status: res.status, name: /filename="?([^";]+)/.exec(res.headers.get('content-disposition') ?? '')?.[1], bytes: Buffer.from(await res.arrayBuffer()) }
+}
+
+function csvHeader(bytes) {
+  const text = bytes.toString('utf8').replace(/^﻿/, '')
+  const line = text.split(/\r?\n/)[0]
+  const out = []; let cur = '', q = false
+  for (const ch of line) { if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = '' } else cur += ch }
+  out.push(cur)
+  return { headers: out, rows: text.split(/\r?\n/).filter(Boolean).length - 1 }
+}
+
+function xlsxSheet(bytes, name) {
+  const file = path.join(EVAL_ROOT, `export-${name}.xlsx`)
+  fs.writeFileSync(file, bytes)
+  const sheet = readWorkbook(file)[0]
+  const headers = [], cols = new Map()
+  let rows = 0
+  for (const [ref, v] of sheet.cells) {
+    const m = /^([A-Z]+)(\d+)$/.exec(ref)
+    if (m[2] === '1') { headers.push(v); cols.set(v, m[1]) } else rows = Math.max(rows, Number(m[2]) - 1)
+  }
+  const column = (header) => [...sheet.cells].filter(([ref]) => ref.replace(/\d+$/, '') === cols.get(header) && !/^[A-Z]+1$/.test(ref)).map(([, v]) => v)
+  return { headers, rows, column }
+}
+
+check('G-M3.5', 'M3', 'dataset export: .xlsx and .csv without sensitive columns, without salary for a user without view-salary, without names without view-personal (headers listed)', async () => {
+  const S = await m3Setup()
+  const u = await users()
+  const ds = (await asAdmin('GET', `/api/matrix/datasets/${S.master}`)).json
+  const salary = ds.columns.filter((c) => c.sensitivity === 'salary').map((c) => c.header.trim())
+  const personal = ds.columns.filter((c) => c.sensitivity === 'personal').map((c) => c.header.trim())
+  const out = []
+  let pass = true
+  for (const [who, user, seeSalary, seePersonal] of [['admin', ctx.admin, true, true], ['System', u.sys, false, true], ['limited', u.limited, false, false]]) {
+    for (const kind of ['xlsx', 'csv']) {
+      const f = await download(user, `/api/matrix/export/${kind}/${S.master}`)
+      const t = kind === 'xlsx' ? xlsxSheet(f.bytes, `${who}`) : csvHeader(f.bytes)
+      const sens = t.headers.filter((h) => SENSITIVE_COLUMN.test(String(h).replace(/[^a-z]/gi, '').toLowerCase()))
+      const sal = t.headers.filter((h) => salary.includes(String(h).trim()))
+      const per = t.headers.filter((h) => personal.includes(String(h).trim()))
+      const zeros = kind === 'xlsx' ? t.column('EmpID').filter((v) => /^00\d{4}$/.test(String(v))).length : 0
+      const good = f.status === 200 && t.rows === ds.rowCount && t.headers[0] === 'Source row' && sens.length === 0
+        && (seeSalary ? sal.length === salary.length : sal.length === 0) && (seePersonal ? per.length === personal.length : per.length === 0)
+        && (kind !== 'xlsx' || zeros > 0)
+      pass &&= good
+      out.push(`${who} ${kind} ${f.status} ${f.name}: ${t.headers.length} columns, ${t.rows} rows, salary ${sal.length}, names ${per.length}, sensitive ${sens.length}${kind === 'xlsx' ? `, IDs kept with their leading zeros ${zeros}` : ''}${good ? '' : ' ✗'}`)
+    }
+  }
+  const sysHeaders = csvHeader((await download(u.sys, `/api/matrix/export/csv/${S.master}`)).bytes).headers
+  const denied = [(await download(u.gen, `/api/matrix/export/csv/${S.master}`)).status, (await download(u.dev, `/api/matrix/export/xlsx/${S.master}`)).status]
+  const layout = await download(ctx.admin, `/api/matrix/export/dashboard/${S.dash['line-board']}`)
+  const layoutOk = layout.status === 200 && JSON.parse(layout.bytes.toString('utf8')).layout?.widgets?.length > 0
+  return ok(pass && denied.every((s) => s === 403) && layoutOk,
+    `${out.join(' · ')} · General and DevOps ${denied.join(', ')} · dashboard layout ${layout.status} ${layout.name} · System's headers: ${sysHeaders.join(', ')}`)
+})
+
+check('G-M3.5', 'M3', 'PNG of each chart (ECharts\' own export), and a print view that the browser prints to PDF (screenshots)', async () => {
+  const S = await m3Setup()
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dashboard=${S.dash['manpower-overview']}`)
+    await p.waitFor('[data-widget="trend"] [data-chart-ready]', 20000)
+    const pngs = await p.eval(`[...document.querySelectorAll('[data-matrix-chart]')].map((el) => {
+      const url = el.__mxChart.getDataURL({ type: 'png', pixelRatio: 1 })
+      const bin = atob(url.split(',')[1])
+      const u32 = (o) => ((bin.charCodeAt(o) << 24) | (bin.charCodeAt(o + 1) << 16) | (bin.charCodeAt(o + 2) << 8) | bin.charCodeAt(o + 3)) >>> 0
+      return { png: bin.slice(1, 4) === 'PNG', w: u32(16), h: u32(20), bytes: bin.length, button: !!el.closest('[data-widget]').querySelector('[data-png]') }
+    })`)
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dashboard=${S.dash['manpower-overview']}&print=1`)
+    await p.waitFor('[data-print-view] [data-widget="trend"] [data-chart-ready]', 20000)
+    const view = await p.eval(`({ widgets: document.querySelectorAll('[data-print-view] [data-widget]').length, edit: document.querySelectorAll('[data-dash-edit], [data-png], [data-matrix-section], [data-dash-filters]').length })`)
+    const pdf = await p.pdf()
+    fs.writeFileSync(path.join(ctx.args.shots, 'manpower-overview-print.pdf'), pdf)
+    await p.shot(path.join(ctx.args.shots, 'manpower-overview-print-1280.png'), { full: true })
+    const run = await runDash(ctx.admin, S.dash['manpower-overview'])
+    const charts = run.widgets.filter((w) => w.type !== 'kpi' && w.type !== 'table' && w.type !== 'line-board').length
+    return ok(pngs.length === charts && pngs.every((x) => x.png && x.w > 100 && x.h > 100 && x.button) && view.widgets === run.widgets.length && view.edit === 0 && pdf.subarray(0, 4).toString() === '%PDF' && pdf.length > 10000,
+      `${pngs.length} charts (${charts} chart widgets): every one a PNG ${pngs.every((x) => x.png)}, e.g. ${pngs[0]?.w}×${pngs[0]?.h} px, each with its PNG button ${pngs.every((x) => x.button)} · print view ${view.widgets}/${run.widgets.length} widgets, controls ${view.edit} · PDF ${pdf.length} bytes`)
+  } finally { await browser.close() }
+})
+
+// ---- G-M3.7 Colours from theme tokens ----
+
+check('G-M3.7', 'M3', 'no hard-coded colours in Matrix code; chart colours are the theme tokens read at runtime (light and dark differ)', async () => {
+  const files = fs.readdirSync(path.join(REPO, 'frontend/src/components/matrix')).map((f) => `frontend/src/components/matrix/${f}`)
+    .concat(['frontend/src/components/tabs/MatrixTab.vue', 'frontend/src/lib/matrix-format.js', 'frontend/src/lib/matrix-chart.js'].filter(exists))
+  const literal = /#[0-9a-f]{3,8}\b(?![-\w])|\brgba?\(|\bhsla?\((?!var|\$\{)|\b(?:color|background|fill|stroke)\s*:\s*['"](?:red|green|blue|orange|black|white|gray|grey)['"]/i
+  const hits = files.flatMap((f) => read(f).split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => literal.test(l) && !/^\s*(\/\/|\/?\*|<!--)/.test(l)).map(([f, n]) => `${f}:${n}`))
+  const css = read('frontend/src/assets/index.css')
+  const tokens = ['--chart-1', '--chart-8', '--status-green', '--status-amber', '--status-red']
+  const inBoth = tokens.every((t) => { const at = css.indexOf('.dark {'); return css.slice(0, at).includes(t + ':') && css.slice(at).includes(t + ':') })
+  const chartSrc = read('frontend/src/components/matrix/MatrixChart.vue')
+  const S = await m3Setup()
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    const probe = `(() => { const css = getComputedStyle(document.documentElement); const c = document.querySelector('[data-widget="by-unit"] [data-matrix-chart]').__mxChart;
+      return { option: c.getOption().color.slice(0, 3), tokens: [1, 2, 3].map((i) => css.getPropertyValue('--chart-' + i).trim()) } })()`
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dashboard=${S.dash['manpower-overview']}`)
+    await p.waitFor('[data-widget="by-unit"] [data-chart-ready]', 20000)
+    const light = await p.eval(probe)
+    await p.setTheme('dark')
+    await sleep(800)
+    const dark = await p.eval(probe)
+    const flat = (s) => String(s).replace(/[\s,]/g, '')
+    const resolved = (x) => x.option.every((c, i) => flat(c) === flat(`hsl(${x.tokens[i]})`))
+    return ok(hits.length === 0 && inBoth && /getComputedStyle/.test(chartSrc) && /--chart-/.test(chartSrc) && resolved(light) && resolved(dark) && light.option[0] !== dark.option[0],
+      `literal colours ${hits.length ? hits.join(', ') : 'none'} in ${files.length} files · tokens in light and dark ${inBoth} · chart colours light ${light.option.join(' ')} = tokens ${resolved(light)} · dark ${dark.option.join(' ')} = tokens ${resolved(dark)}`)
+  } finally { await browser.close() }
+})
+
+// ---- G-M3.8–9 Secrets: none in committed config, none read from appsettings ----
+
+check('G-M3.8', 'M3', 'no key-, token- or password-looking value in any committed config file (the scanner proven on planted samples)', async () => {
+  const { files, findings } = scanRepo(REPO)
+  // Planted samples, built here so no real-looking secret is written into this file.
+  const fake = (prefix, n) => prefix + 'Ab3'.repeat(Math.ceil(n / 3)).slice(0, n)
+  const positives = [
+    `{ "OllamaCloud": { "ApiKey": "${fake('', 40)}" } }`,
+    `GROQ_API_KEY=${fake('gsk_', 30)}`,
+    `      OllamaCloud__ApiKey: ${fake('', 32)}`,
+    `  ConnectionStrings__Default = "Data Source=x.db;Password=${fake('', 12)}"`,
+    `    //"Default": "libsql://db.example.invalid?authToken=${fake('eyJ', 20)}.${fake('eyJ', 20)}.${fake('', 20)}"`,
+    `"Url": "https://admin:${fake('', 10)}@host.example.invalid"`,
+  ]
+  const negatives = ['"ApiKey": ""', 'OLLAMA_CLOUD_API_KEY=', '      OllamaCloud__ApiKey: ${OLLAMA_CLOUD_API_KEY:-}', '"Key": "openrouter"', '"UserSecretsId": "1b452343-33e8-4e83-99bd-0014a8836328"', '  ConnectionStrings__Default = "Data Source=/data/rabbitic.db"']
+  const caught = positives.filter((s) => scanText(s).length > 0).length
+  const quiet = negatives.filter((s) => scanText(s).length === 0).length
+  return ok(findings.length === 0 && caught === positives.length && quiet === negatives.length && files.some((f) => f.endsWith('appsettings.json')),
+    `${files.length} committed config files scanned (${files.join(', ')}) · findings ${findings.length ? findings.map((f) => `${f.file}:${f.line} ${f.key ?? ''} (${f.rule})`).join(' | ') : 'none'} · scanner: ${caught}/${positives.length} planted secrets caught, ${quiet}/${negatives.length} placeholders left alone`)
+})
+
+check('G-M3.9', 'M3', 'a key put in appsettings.json is never read (search reports not_configured, the log names the key, not the value); the environment\'s key is', async () => {
+  const bin = path.join(EVAL_ROOT, 'api-bin-secret')
+  fs.rmSync(bin, { recursive: true, force: true })
+  fs.cpSync(API_BIN_DIR, bin, { recursive: true })
+  const planted = crypto.randomBytes(16).toString('hex') + '.' + crypto.randomBytes(12).toString('base64url')
+  const file = path.join(bin, 'appsettings.json')
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/("ApiKey"\s*:\s*")[^"]*(")/, `$1${planted}$2`))
+  const results = []
+  for (const [label, env] of [['appsettings only', { OllamaCloud__ApiKey: undefined }], ['environment', { OllamaCloud__ApiKey: 'env-' + crypto.randomBytes(8).toString('hex') }]]) {
+    const runDir = fs.mkdtempSync(path.join(EVAL_ROOT, 'secret-'))
+    const api = await startApi({ fakeUrl: ctx.fake.url, runDir, binDir: bin, env })
+    try {
+      const r = await call(api.url, 'POST', '/api/auth/login', { body: { username: process.env.MATRIX_EVAL_ADMIN_USER, secret: process.env.MATRIX_EVAL_ADMIN_SECRET } })
+      const h = await call(api.url, 'GET', '/api/search/health', { token: r.json?.token })
+      results.push({ label, status: h.status, said: h.json?.status })
+    } finally { await api.stop() }
+    const log = fs.readFileSync(path.join(runDir, 'api.log'), 'utf8')
+    results.at(-1).logged = log.includes('ignored a value for appsettings.json:OllamaCloud:ApiKey')
+    results.at(-1).leaked = log.includes(planted)
+  }
+  const [a, e] = results
+  return ok(a.status === 503 && a.said === 'not_configured' && a.logged && !a.leaked && e.said !== 'not_configured' && !e.leaked,
+    results.map((x) => `${x.label}: health ${x.status} ${x.said} · warning names the key ${x.logged} · planted value in the log ${x.leaked}`).join(' ‖ '))
+})
+
+// ---- G-M3.10 GradeId: "3" and "Grade 3" are one value ----
+
+check('G-M3.10', 'M3', 'GradeId "Grade 3", "Grade 03" and 3 are stored as one value; the change is reported as an info issue', async () => {
+  const S = await m3Setup()
+  const M = sheetObjects('fx-master.xlsx', 'HRM')
+  const spelled = await sql(`select count(*) n from mx_ds_${S.master} where grade_id like '%grade%'`)
+  const stored = countBy(await sql(`select grade_id from mx_ds_${S.master}`), (r) => r.grade_id)
+  const want = countBy(M, (r) => gradeOf(r.GradeId))
+  const issue = (await issuesOf(S.master)).find((i) => i.check === 'grade_forms_unified')
+  const plantedForms = M.filter((r) => typeof r.GradeId === 'string' && /grade/i.test(r.GradeId)).length
+  return ok(spelled[0].n === 0 && sameMap(want, stored) && issue?.count === ctx.M.master.plants.grade_forms_unified && issue?.count === plantedForms && issue?.severity === 'info',
+    `cells still spelled "Grade …" ${spelled[0].n} · grade counts equal the independent normalisation ${sameMap(want, stored)} (${Object.keys(stored).length} grades) · issue ${issue?.check} ${issue?.severity} ×${issue?.count} (planted ${plantedForms}): ${issue?.detail}`)
+})
+
+// ---- G-M3.11 A lookup re-check refreshes the cards whose issues it changes ----
+
+check('G-M3.11', 'M3', 'importing a lookup re-checks the datasets; a dataset whose issues change gets its report card made again, the others keep theirs', async () => {
+  const S = await m3Setup()
+  const stamp = async (id) => (await sql('select CreatedAtUtc from MxReportCards where DatasetId = ? order by Id desc limit 1', id))[0]?.CreatedAtUtc
+  const count = async (id) => (await issuesOf(id)).find((i) => i.check === 'designation_not_in_lookup')?.count ?? 0
+  const cardCount = async (id) => (await asAdmin('GET', `/api/matrix/datasets/${id}/card`)).json?.quality?.find((q) => q.check === 'designation_not_in_lookup')?.count ?? 0
+  const steps = []
+  for (const file of ['fx-designation-2.xlsx', 'fx-designation.xlsx', 'fx-designation.xlsx']) {
+    const before = { card: await stamp(S.master), att: await stamp(S.att2), n: await count(S.master) }
+    await sleep(20)
+    const up = (await upload(ctx.admin, [path.join(FIXTURES, file)])).json.uploads[0]
+    const st = (await asAdmin('POST', `/api/matrix/uploads/${up.id}/import`, { tables: [{ table: tableOf(up, 'Sheet1').id, confirm: 'suggestions' }] })).status
+    const after = { card: await stamp(S.master), att: await stamp(S.att2), n: await count(S.master) }
+    steps.push({ file, st, changed: before.n !== after.n, refreshed: before.card !== after.card, att: before.att === after.att, matches: (await cardCount(S.master)) === after.n, from: before.n, to: after.n })
+  }
+  const pass = steps.every((s) => s.st === 200 && s.att && s.matches && s.refreshed === s.changed) && steps.some((s) => s.changed) && steps.some((s) => !s.changed)
+  return ok(pass, steps.map((s) => `${s.file} ${s.st}: master's lookup issue ${s.from}→${s.to}, card made again ${s.refreshed}, card shows the new count ${s.matches}, attendance card untouched ${s.att}`).join(' · '))
+})
+
+// ---- G-M3.12 Definitions ----
+
+check('G-M3.12', 'M3', 'Definitions lists every KPI with its formula in words and every field; thresholds are edited there only with kpis.edit (screenshots)', async () => {
+  const u = await users()
+  const kpis = (await asAdmin('GET', '/api/matrix/kpis')).json?.kpis ?? []
+  const fields = (await asAdmin('GET', '/api/matrix/catalog')).json?.fields ?? []
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, '/matrix?section=definitions')
+    await p.waitFor('[data-matrix-definitions] [data-kpi]', 15000)
+    const shown = await p.eval(`({ kpis: document.querySelectorAll('[data-kpi]').length, words: [...document.querySelectorAll('[data-kpi] [data-kpi-words]')].filter((e) => e.textContent.trim().length > 5).length,
+      fields: document.querySelectorAll('[data-field]').length, edit: document.querySelectorAll('[data-threshold-edit]').length })`)
+    await p.shot(path.join(ctx.args.shots, 'definitions-light-1280.png'))
+    await p.click('[data-kpi="ot_over_2h"] [data-threshold-edit]')
+    await p.eval(`(() => { const set = (sel, v) => { const e = document.querySelector('[data-kpi="ot_over_2h"] ' + sel); e.value = v; e.dispatchEvent(new Event(e.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })) };
+      set('[data-th-direction]', 'lower'); set('[data-th-green]', '10'); set('[data-th-amber]', '30') })(); 0`)
+    await p.click('[data-kpi="ot_over_2h"] [data-threshold-save]')
+    await sleep(800)
+    const saved = (await asAdmin('GET', '/api/matrix/kpis')).json.kpis.find((k) => k.key === 'ot_over_2h')?.thresholds
+    await asAdmin('PUT', '/api/matrix/kpis/ot_over_2h', { thresholds: { cleared: true } })
+    const q = await browser.page()
+    await q.session(u.sys, 'light', 1280, 900, '/matrix?section=definitions')
+    await q.waitFor('[data-matrix-definitions] [data-kpi]', 15000)
+    const sysEdit = await q.eval('document.querySelectorAll("[data-threshold-edit]").length')
+    return ok(shown.kpis === kpis.length && shown.words === kpis.length && shown.fields === fields.length && shown.edit === kpis.length
+        && saved?.direction === 'lower' && saved?.green === 10 && saved?.amber === 30 && sysEdit === 0,
+      `${shown.kpis}/${kpis.length} KPIs, ${shown.words} with their formula in words · ${shown.fields}/${fields.length} fields · admin edit controls ${shown.edit}, saved through the page ${JSON.stringify(saved)} · System (no kpis.edit) edit controls ${sysEdit}`)
+  } finally { await browser.close() }
+})
+
+// ---- G-M3.6 Live screenshots (counts only; personal data blurred) ----
+
+check('G-M3.6', 'M3', 'LIVE Manpower overview and Line board on the real master, Attendance today on the real attendance: light and dark, desktop and 360 px (counts only)', async () => {
+  const ds = (await asAdmin('GET', '/api/matrix/datasets')).json?.datasets ?? []
+  const real = ds.filter((d) => !d.fileName.startsWith('fx-'))
+  const master = real.find((d) => d.fileName === REAL.master && d.sheet === 'HRM')?.id
+  const att = real.find((d) => d.fileName === REAL.attendance)?.id
+  if (!master || !att) return ok(false, 'the live master and attendance imports are missing (run with --live)')
+  const S = await m3Setup()
+  const out = []
+  let pass = true
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    for (const auto of ['manpower-overview', 'line-board', 'attendance-today']) {
+      // A copy of the automatic dashboard pointed at the real datasets by id.
+      const src = (await asAdmin('GET', `/api/matrix/dashboards/${S.dash[auto]}`)).json
+      const text = JSON.stringify(src.layout).replaceAll('"current:master"', `"${master}"`).replaceAll('"current:attendance-daily"', `"${att}"`)
+      const copy = (await asAdmin('POST', '/api/matrix/dashboards', { name: `Live — ${src.name}`, layout: JSON.parse(text) })).json
+      const run = await runDash(ctx.admin, copy.id)
+      const errors = run.widgets.filter((w) => w.error)
+      const names = run.widgets.some((w) => (w.rows ?? []).some((r) => 'name' in r || 'name_bn' in r))
+      pass &&= !!copy.id && !names
+      out.push(`${auto}: ${run.widgets.length} widgets, ${errors.length} without a result${errors.length ? ` (${errors.map((w) => `${w.id}: ${w.error.slice(0, 80)}`).join('; ')})` : ''}, names in any result ${names}`)
+      const p = await browser.page()
+      for (const theme of ['light', 'dark']) {
+        for (const width of [1280, 360]) {
+          // A tall window: the tab scrolls inside its own frame, so the whole dashboard is in one picture.
+          await p.session(ctx.admin, theme, width, width === 360 ? 5200 : 2000, `/matrix?dashboard=${copy.id}`)
+          await p.waitFor('[data-dashboard] [data-widget]', 20000)
+          await sleep(1500)
+          await p.blur('[data-personal]')
+          await p.shot(path.join(ctx.args.shots, `live-${auto}-${theme}-${width}.png`), { full: true })
+          if (width === 360) {
+            const overflow = await p.eval('document.documentElement.scrollWidth > window.innerWidth')
+            pass &&= !overflow
+            if (overflow) out.push(`${auto} ${theme} 360px scrolls sideways`)
+          }
+        }
+      }
+    }
+  } finally { await browser.close() }
+  return ok(pass, `${out.join(' · ')} · 12 screenshots in ${ctx.args.shots} (live-*.png)`)
+}, { live: true })
+
 // ─────────────────────────────── users ───────────────────────────────
 
 /**
  * admin; System (matrix, view-personal); hr-assistant; General (no matrix);
- * DevOps (no matrix); and a "limited" General who has the Data section but not
- * view-personal — General's preset rows are raised in the database for that.
+ * DevOps (no matrix); and a "limited" General who has the Data and Dashboards sections but not
+ * view-personal nor dashboards.edit — General's preset rows are raised in the database for that.
  */
 async function users() {
   if (ctx.users) return ctx.users
@@ -1002,7 +1586,7 @@ async function users() {
   await ctx.api.stop()
   const { DatabaseSync } = await import('node:sqlite')
   const db = new DatabaseSync(ctx.api.dbPath)
-  for (const key of ['tab:matrix', 'section:matrix.data'])
+  for (const key of ['tab:matrix', 'section:matrix.data', 'section:matrix.dashboards'])
     db.prepare("insert into UserPermissionOverrides (UserId, Key, Effect, UpdatedAtUtc) values (?, ?, 'allow', ?)").run(u.limited.id, key, new Date().toISOString())
   db.close()
   ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port })
@@ -1052,6 +1636,9 @@ async function main() {
   const order = ['M1', 'M2', 'M3', 'M4']
   const selected = checks.filter((c) => order.indexOf(c.phase) <= order.indexOf(args.phase) && (args.live || !c.live)
     && (!args.only || c.id === args.only || c.id.startsWith(args.only + '.')))
+    // The live checks last: once the real files are imported they are the current datasets,
+    // and every fixture check before them must still read the fixtures.
+    .sort((a, b) => Number(a.live) - Number(b.live))
   if (!selected.length) { console.error('No checks match.'); process.exit(2) }
 
   ctx.M = makeFixtures(FIXTURES)

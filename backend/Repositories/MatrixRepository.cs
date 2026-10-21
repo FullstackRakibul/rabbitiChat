@@ -211,6 +211,25 @@ public class MatrixRepository : IMatrixRepository
         await _db.SaveChangesAsync(ct);
     }
 
+    public Task<List<MxDashboard>> ListDashboardsAsync(CancellationToken ct = default) =>
+        _db.MxDashboards.OrderBy(d => d.Id).ToListAsync(ct);
+
+    public Task<MxDashboard?> GetDashboardAsync(int id, CancellationToken ct = default) =>
+        _db.MxDashboards.FirstOrDefaultAsync(d => d.Id == id, ct);
+
+    public async Task<MxDashboard> AddDashboardAsync(MxDashboard dashboard, CancellationToken ct = default)
+    {
+        _db.MxDashboards.Add(dashboard);
+        await _db.SaveChangesAsync(ct);
+        return dashboard;
+    }
+
+    public async Task DeleteDashboardAsync(MxDashboard dashboard, CancellationToken ct = default)
+    {
+        _db.MxDashboards.Remove(dashboard);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public Task<MxReportCard?> GetCardAsync(int datasetId, CancellationToken ct = default) =>
         _db.MxReportCards.AsNoTracking().Where(c => c.DatasetId == datasetId).OrderByDescending(c => c.Id).FirstOrDefaultAsync(ct);
 
@@ -250,10 +269,13 @@ public class MatrixRepository : IMatrixRepository
             db.MxKpiDefinitions.Add(new MxKpiDefinition
             {
                 Key = k.Key, NameEn = k.En, NameBn = k.Bn, Description = k.Words, FormulaWords = k.Words, QueryJson = k.Query,
-                Unit = k.Unit, ThresholdsJson = "{}", UpdatedAtUtc = DateTime.UtcNow,
+                Unit = k.Unit, ThresholdsJson = KpiLibrary.DefaultThresholds.GetValueOrDefault(k.Key, "{}"), UpdatedAtUtc = DateTime.UtcNow,
             });
             added = true;
         }
+        // Starting thresholds for definitions that have none yet ("{}"); thresholds a manager cleared are {"cleared": true}.
+        foreach (var d in db.MxKpiDefinitions.Where(d => d.ThresholdsJson == "{}").ToList())
+            if (KpiLibrary.DefaultThresholds.TryGetValue(d.Key, out var th)) { d.ThresholdsJson = th; added = true; }
         if (added) db.SaveChanges();
     }
 

@@ -27,6 +27,7 @@ public static class MxCheck
     public const string EmptyRequired = "empty_required";
     public const string FormulaMismatch = "formula_mismatch";
     public const string WorkerDesignationNoGrade = "worker_designation_no_grade";
+    public const string GradeFormsUnified = "grade_forms_unified";
 
     public const string FixTrim = "trim";
     public const string FixUnify = "unify";
@@ -179,6 +180,16 @@ public static class QualityChecks
                 issues.Add(issue);
             if (Col("grade_id") is not null && WorkerGradeIssue(people, RefOf, des) is { } grade)
                 issues.Add(grade);
+        }
+
+        // ---- one grade written two ways ("3" and "Grade 3"): stored as one ----
+        if (Col("grade_id") is { } gradeCol)
+        {
+            var rewritten = Raw(gradeCol).Select((v, i) => (k: KeyOf(v), i)).Where(x => x.k is not null && MatrixNormalisers.Grade(x.k) != x.k.Trim()).Select(x => x.i).ToList();
+            var forms = rewritten.Select(i => KeyOf(Raw(gradeCol)[i])!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToList();
+            Add(MxCheck.GradeFormsUnified, "info", rewritten.Count, gradeCol, rewritten,
+                $"{rewritten.Count} {gradeCol.Header} cell(s) were written another way ({string.Join(", ", forms.Select(x => $"\"{x}\""))}…) and are stored as the plain grade, so \"3\" and \"Grade 3\" count as one.",
+                "Nothing to do here; use one spelling for grades in the source system.");
         }
 
         // ---- formulas whose cached result disagrees with their inputs ----

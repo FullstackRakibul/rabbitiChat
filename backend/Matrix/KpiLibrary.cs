@@ -162,6 +162,48 @@ public static class KpiLibrary
 
     private static readonly Dictionary<string, MxKpi> ByKey = All.ToDictionary(k => k.Key);
 
+    /// <summary>
+    /// Starting thresholds, which managers then set (PUT /kpis/{key}). The shape is
+    /// {"direction": "higher" | "lower", "green": n, "amber": n}: for "higher", a value at or
+    /// above green is green, at or above amber is amber, anything lower red; "lower" mirrors it.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> DefaultThresholds = new Dictionary<string, string>
+    {
+        ["attendance_pct"] = "{\"direction\": \"higher\", \"green\": 95, \"amber\": 90}",
+        ["late_pct"] = "{\"direction\": \"lower\", \"green\": 5, \"amber\": 10}",
+        ["attrition_pct"] = "{\"direction\": \"lower\", \"green\": 3, \"amber\": 5}",
+        ["operators_per_line"] = "{\"direction\": \"higher\", \"green\": 25, \"amber\": 20}",
+        ["lines_below_operator_count"] = "{\"direction\": \"lower\", \"green\": 0, \"amber\": 3}",
+        ["headcount_without_grade_mapping"] = "{\"direction\": \"lower\", \"green\": 0, \"amber\": 25}",
+        ["ot_over_4h"] = "{\"direction\": \"lower\", \"green\": 0, \"amber\": 20}",
+    };
+
+    /// <summary>green, amber or red for a value under thresholds (null when none are set or they are malformed).</summary>
+    public static string? StateOf(double? value, System.Text.Json.JsonElement? thresholds)
+    {
+        if (value is null || thresholds is not { ValueKind: System.Text.Json.JsonValueKind.Object } t) return null;
+        if (!t.TryGetProperty("direction", out var d) || d.ValueKind != System.Text.Json.JsonValueKind.String) return null;
+        if (!t.TryGetProperty("green", out var g) || !g.TryGetDouble(out var green)) return null;
+        if (!t.TryGetProperty("amber", out var a) || !a.TryGetDouble(out var amber)) return null;
+        var v = value.Value;
+        return d.GetString() == "lower"
+            ? v <= green ? "green" : v <= amber ? "amber" : "red"
+            : v >= green ? "green" : v >= amber ? "amber" : "red";
+    }
+
+    /// <summary>Why thresholds are not usable, or null: direction higher or lower, green and amber numbers in order.</summary>
+    public static string? ThresholdProblem(System.Text.Json.JsonElement t)
+    {
+        if (t.ValueKind != System.Text.Json.JsonValueKind.Object) return "Thresholds are an object.";
+        if (t.TryGetProperty("cleared", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.True) return null;
+        var dir = t.TryGetProperty("direction", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String ? d.GetString() : null;
+        if (dir is not ("higher" or "lower")) return "direction is higher or lower.";
+        if (!t.TryGetProperty("green", out var g) || !g.TryGetDouble(out var green)) return "green is a number.";
+        if (!t.TryGetProperty("amber", out var a) || !a.TryGetDouble(out var amber)) return "amber is a number.";
+        if (dir == "higher" ? amber > green : amber < green) return dir == "higher" ? "amber must not be above green when higher is better." : "amber must not be below green when lower is better.";
+        return null;
+    }
+
     public static MxKpi? Find(string? key) => key is not null && ByKey.TryGetValue(key, out var k) ? k : null;
 
     /// <summary>The middle value; the mean of the two middle ones for an even count.</summary>
