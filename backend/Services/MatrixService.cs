@@ -33,9 +33,16 @@ public partial class MatrixService : IMatrixService
     private readonly AccessPolicy _access;
     private readonly IMemoryCache _cache;
     private readonly ILogger<MatrixService> _log;
+    private readonly ChatService _chat;
+    private readonly MatrixModel _models;
+    private readonly IHttpClientFactory _http;
 
-    public MatrixService(IMatrixRepository repo, TemplateMatcher matcher, AccessPolicy access, IMemoryCache cache, ILogger<MatrixService> log)
+    public MatrixService(IMatrixRepository repo, TemplateMatcher matcher, AccessPolicy access, IMemoryCache cache, ILogger<MatrixService> log,
+        ChatService chat, MatrixModel models, IHttpClientFactory http)
     {
+        _http = http;
+        _chat = chat;
+        _models = models;
         _repo = repo;
         _matcher = matcher;
         _access = access;

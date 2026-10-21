@@ -54,6 +54,19 @@ public interface IMatrixRepository
 
     Task<MxReportCard?> GetCardAsync(int datasetId, CancellationToken ct = default);
 
+    // ---- Ask: conversations of Kind "matrix", always the asker's own ----
+    Task<Conversation?> GetConversationAsync(int id, int userId, CancellationToken ct = default);
+    Task<Conversation> AddConversationAsync(Conversation conversation, CancellationToken ct = default);
+    Task<List<Conversation>> ListConversationsAsync(int userId, string? scope, CancellationToken ct = default);
+    Task DeleteConversationAsync(Conversation conversation, CancellationToken ct = default);
+    Task<List<Message>> MessagesAsync(int conversationId, CancellationToken ct = default);
+    Task AddMessageAsync(Message message, CancellationToken ct = default);
+
+    Task<MxSummary?> GetSummaryAsync(int datasetId, string language, CancellationToken ct = default);
+
+    /// <summary>Keeps one summary per dataset and language: the new one replaces the old.</summary>
+    Task SaveSummaryAsync(MxSummary summary, CancellationToken ct = default);
+
     /// <summary>Distinct trimmed, lower-cased values of a column (the designation lookup).</summary>
     Task<HashSet<string>> DistinctAsync(MxDataset dataset, string key, CancellationToken ct = default);
 

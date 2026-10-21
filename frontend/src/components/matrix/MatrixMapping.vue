@@ -125,7 +125,7 @@ const sensClass = (s) => ({
       </p>
 
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[640px] text-sm">
+        <table class="w-full min-w-160 text-sm">
           <thead class="bg-muted/50 text-xs text-muted-foreground">
             <tr>
               <th class="px-3 py-2 text-left font-medium">কলাম Column</th>

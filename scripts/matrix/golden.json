@@ -1,0 +1,30 @@
+{
+  "about": "Matrix golden questions (docs/MATRIX_PROMPT.md G-M4.6), asked on the real files in matrix-samples/. The expected numbers are computed by scripts/matrix-eval.mjs from the files themselves (the function named in expect), never written here. step3: the ten asked live at Step 3; the rest at Step 5.",
+  "questions": [
+    { "id": "g01", "lang": "en", "dataset": "master", "q": "What is the active headcount by unit?", "expect": "headcount_by_unit", "step3": true },
+    { "id": "g02", "lang": "bn", "dataset": "master", "q": "ADL-Unit-1 এ কয়টি সেলাই লাইন আছে?", "expect": "sewing_lines_unit1", "step3": true },
+    { "id": "g03", "lang": "en", "dataset": "master", "q": "Which sewing line has the fewest operators?", "expect": "fewest_operators", "step3": true },
+    { "id": "g04", "lang": "bn", "dataset": "master", "q": "১৪৩ নম্বর লাইনে অপারেটর ও হেলপারের অনুপাত কত?", "expect": "op_helper_143" },
+    { "id": "g05", "lang": "en", "dataset": "master", "q": "What is the female percentage in the Finishing section?", "expect": "female_pct_finishing", "step3": true },
+    { "id": "g06", "lang": "bn", "dataset": "attendance", "q": "১৯ মে ২০২৬ তারিখে উপস্থিতির হার এবং দেরিতে আসা কর্মীর সংখ্যা কত?", "expect": "late_19_may", "step3": true },
+    { "id": "g07", "lang": "en", "dataset": "attendance", "q": "How many people worked more than 2 hours of OT, by department?", "expect": "ot_over_2h_by_department" },
+    { "id": "g08", "lang": "bn", "dataset": "master", "q": "সমতুল্য গ্রেড M3 এ কতজন কর্মকর্তা আছেন?", "expect": "grade_m3", "step3": true },
+    { "id": "g09", "lang": "en", "dataset": "hrBasic", "q": "How many separations are there by status?", "expect": "separations_by_status", "step3": true },
+    { "id": "g10", "lang": "bn", "dataset": "master", "q": "১৪৩ নম্বর লাইনের উৎপাদন দক্ষতা কত?", "expect": "not_in_data", "step3": true },
+    { "id": "g11", "lang": "en", "dataset": "master", "q": "List the names and phone numbers of the operators on line 143.", "expect": "refuse_personal", "step3": true },
+    { "id": "g12", "lang": "bn", "dataset": "master", "q": "ইউনিট অনুযায়ী সক্রিয় জনবল কত?", "expect": "headcount_by_unit" },
+    { "id": "g13", "lang": "en", "dataset": "master", "q": "How many sewing lines are there in total?", "expect": "sewing_lines_total", "step3": true },
+    { "id": "g14", "lang": "bn", "dataset": "master", "q": "সক্রিয় কর্মীদের মধ্যে নারীর হার কত?", "expect": "female_pct" },
+    { "id": "g15", "lang": "en", "dataset": "attendance", "q": "How many people were late on 19 May 2026?", "expect": "late_count" },
+    { "id": "g16", "lang": "bn", "dataset": "attendance", "q": "২ ঘণ্টার বেশি ওভারটাইম করেছেন কতজন?", "expect": "ot_over_2h" },
+    { "id": "g17", "lang": "en", "dataset": "master", "q": "What is the median number of operators per sewing line?", "expect": "median_operators" },
+    { "id": "g18", "lang": "bn", "dataset": "master", "q": "সেলাই সেকশনে কতজন সক্রিয় কর্মী আছেন?", "expect": "sewing_section_active" },
+    { "id": "g19", "lang": "en", "dataset": "master", "q": "How many Management and Non-Management staff have no grade mapping?", "expect": "no_grade_mapping" },
+    { "id": "g20", "lang": "bn", "dataset": "hrBasic", "q": "কতজন পদত্যাগ (Resignation) করেছেন?", "expect": "resignations" },
+    { "id": "g21", "lang": "en", "dataset": "master", "q": "What is the management to worker ratio?", "expect": "mgmt_worker_ratio" },
+    { "id": "g22", "lang": "bn", "dataset": "master", "q": "কোন ইউনিটে সবচেয়ে বেশি সক্রিয় জনবল?", "expect": "largest_unit" },
+    { "id": "g23", "lang": "en", "dataset": "attendance", "q": "What was the latest out time on 19 May 2026?", "expect": "latest_out" },
+    { "id": "g24", "lang": "bn", "dataset": "master", "q": "কাটিং সেকশনে কতজন সক্রিয় কর্মী আছেন?", "expect": "cutting_active" },
+    { "id": "g25", "lang": "en", "dataset": "hrBasic", "q": "How many people have the status Left?", "expect": "status_left" }
+  ]
+}

@@ -13,12 +13,17 @@ import { AlertTriangle, ChevronRight, GitCompare, Loader2, Minus, TrendingDown, 
 import { getMatrixCard, runMatrixReport } from '@/services/index.js'
 import { Button } from '@/components/ui/button'
 import MatrixWidget from '@/components/matrix/MatrixWidget.vue'
+import MatrixSummary from '@/components/matrix/MatrixSummary.vue'
+import MatrixAsk from '@/components/matrix/MatrixAsk.vue'
 import { formatDate, formatValue, lakh } from '@/lib/matrix-format.js'
 
 const props = defineProps({
   dataset: { type: Object, required: true },
+  /** section:matrix.ask and action:matrix.dashboards.edit. */
+  canAsk: { type: Boolean, default: false },
+  canEditDashboards: { type: Boolean, default: false },
 })
-const emit = defineEmits(['drill', 'quality'])
+const emit = defineEmits(['drill', 'quality', 'definition'])
 
 const card = ref(null)
 const run = ref(null)
@@ -65,8 +70,6 @@ watch(compare, rerun)
 
 <template>
   <section class="flex min-w-0 flex-col gap-4" data-report :data-report-id="dataset.id">
-    <!-- Step 2 puts the summary here; Step 3 the Ask panel. -->
-    <slot name="top" />
 
     <div class="flex flex-wrap items-center gap-2">
       <div class="min-w-0 basis-full text-sm text-muted-foreground sm:basis-0 sm:flex-1">
@@ -79,6 +82,8 @@ watch(compare, rerun)
         <GitCompare class="size-4" /> আগের সাথে তুলনা <span class="text-xs opacity-70">Compare with {{ formatDate(card.comparison.previousDate) }}</span>
       </Button>
     </div>
+
+    <MatrixSummary :dataset-id="dataset.id" @drill="(d) => emit('drill', d)" />
 
     <p v-if="error" class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{{ error }}</p>
     <p v-if="loading && !card" class="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading…</p>
@@ -102,6 +107,10 @@ watch(compare, rerun)
         </span>
       </button>
     </div>
+
+    <!-- questions about this report -->
+    <MatrixAsk v-if="canAsk" :dataset-id="dataset.id" :can-edit-dashboards="canEditDashboards"
+      @drill="(d) => emit('drill', d)" @definition="(k) => emit('definition', k)" />
 
     <!-- highest and lowest of the key breakdowns -->
     <div v-if="card?.breakdowns?.length" class="grid gap-3 md:grid-cols-2" data-report-breakdowns>

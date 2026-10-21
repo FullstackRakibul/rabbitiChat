@@ -36,11 +36,15 @@ public sealed class HrFormulaStream
     public const int MaxFormulaChars = 300;
 
     private readonly StringBuilder _held = new();
+    private readonly Func<decimal, string>? _display;
     private bool _inFormula;
     private int _offset;   // characters already handed out
     private readonly List<HrFormula> _formulas = new();
 
     public IReadOnlyList<HrFormula> Formulas => _formulas;
+
+    /// <param name="display">How a result reads; omitted, as ৳ (HR). Matrix shows counts and percentages plainly.</param>
+    public HrFormulaStream(Func<decimal, string>? display = null) => _display = display;
 
     /// <summary>Takes the next piece of the model's stream; returns what can be sent now.</summary>
     public List<HrFormulaPiece> Push(string text)
@@ -133,6 +137,7 @@ public sealed class HrFormulaStream
         var (value, display, error) = cutOff
             ? (null, CouldNotCalculate, "The formula was not closed with ]].")
             : HrFormulas.EvaluateInline(expression);
+        if (_display is not null && value is decimal v) display = _display(v);
         var formula = new HrFormula(expression, value, display, error, _offset);
         _formulas.Add(formula);
         output.Add(new HrFormulaPiece(display, formula));

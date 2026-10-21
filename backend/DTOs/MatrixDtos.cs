@@ -206,7 +206,8 @@ public sealed record MxCardItem(string Key, string Label, string LabelBn, double
 
 public sealed record MxCardEntry(string Label, double? Value, string Unit, string? Cite);
 
-public sealed record MxCardBreakdown(string Key, string Label, string LabelBn, List<MxCardEntry> Top, List<MxCardEntry> Bottom);
+/// <param name="Groups">How many groups the whole breakdown has; Top and Bottom are its three highest and lowest.</param>
+public sealed record MxCardBreakdown(string Key, string Label, string LabelBn, List<MxCardEntry> Top, List<MxCardEntry> Bottom, int Groups = 0);
 
 public sealed record MxCardChange(string Key, string Label, double? Before, double? After, double? Change);
 
@@ -261,3 +262,31 @@ public sealed record MxDashboardRun(int Id, string Name, List<MxWidgetResult> Wi
 
 /// <summary>A file to send: its name, media type and bytes.</summary>
 public sealed record MxExportFile(string FileName, string ContentType, byte[] Bytes, List<string> Headers);
+
+// ---- Summary (§3.8) ----
+
+/// <summary>One labelled statement of a report card ([C3]): its card key, its text, and the token that opens its rows.</summary>
+public sealed record MxCardLabel(string Label, string Key, string Text, string? Cite);
+
+public sealed record MxSummaryFormula(int Offset, int Length, string Expression, string Display, bool Ok, string? Error);
+
+/// <summary>
+/// A dataset's summary in one language, with what the checks found: numbers no card line
+/// gives (Unverified), points citing no card line (UncitedPoints, 1-based), labels the card
+/// does not have (UnknownCitations). Stale: the card was made again after it.
+/// </summary>
+public sealed record MxSummaryDto(int DatasetId, string Language, string Text, string Model, int Points,
+    List<MxSummaryFormula> Formulas, List<decimal> Unverified, List<int> UncitedPoints, List<string> UnknownCitations,
+    List<MxCardLabel> Labels, DateTime CardCreatedAtUtc, bool Stale, DateTime CreatedAtUtc);
+
+public sealed record MxSummaryInput(string? Language, string? Model);
+
+// ---- Ask (§3.9) ----
+
+/// <param name="DatasetId">The dataset the question is about (its Report page's Ask).</param>
+public sealed record MxAskInput(int? ConversationId, string? Message, int? DatasetId, string? Model);
+
+public sealed record MxConversationDto(int Id, string Title, string? Scope, DateTime CreatedAt, int Messages);
+
+/// <summary>A message of a Matrix conversation; Meta is what the Data used panel, the chips and the charts need.</summary>
+public sealed record MxMessageDto(int Id, string Role, string Content, System.Text.Json.JsonElement? Meta, DateTime CreatedAt);

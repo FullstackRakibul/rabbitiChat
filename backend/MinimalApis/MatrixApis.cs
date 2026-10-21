@@ -18,6 +18,11 @@
 //   POST /api/matrix/kpis/{key}/run             { dataset?, previous?, against?, params? }           section:matrix.dashboards
 //   GET  /api/matrix/datasets/{id}/card         the report card                                      section:matrix.dashboards
 //   POST /api/matrix/datasets/{id}/report       { filters, compare } → the Report page's charts      section:matrix.dashboards
+//   GET  /api/matrix/datasets/{id}/summary      ?lang=bn|en — the saved summary                     section:matrix.dashboards
+//   POST /api/matrix/datasets/{id}/summary      { language, model? } — written from the card, checked section:matrix.dashboards
+//   POST /api/matrix/chat                       { message, datasetId, conversationId? } → NDJSON  section:matrix.ask
+//   GET  /api/matrix/conversations              ?dataset= — this person's Ask conversations          section:matrix.ask
+//   GET/DELETE /api/matrix/conversations/{id}   its messages (with what each answer used) / delete   section:matrix.ask
 //   GET  /api/matrix/dashboards                 the dashboards the caller may see                    section:matrix.dashboards
 //   GET  /api/matrix/dashboards/{id}            one, with its layout                                 section:matrix.dashboards
 //   POST /api/matrix/dashboards/{id}/run        { filters, compare } → every widget's numbers        section:matrix.dashboards
@@ -124,6 +129,40 @@ namespace RabbitIC.Api.MinimalApis
                 await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
                     : Map(await svc.RunReportAsync(await User(ctx, db), id, input ?? new MxDashboardRunInput(null), ct)));
 
+            g.MapGet("/datasets/{id:int}/summary", async (int id, string? lang, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.SummaryAsync(await User(ctx, db), id, lang ?? "bn", ct)));
+
+            g.MapPost("/datasets/{id:int}/summary", async (int id, MxSummaryInput? input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.WriteSummaryAsync(await User(ctx, db), id, input ?? new MxSummaryInput(null, null), ct)));
+
+            // ---- Ask (§3.9): streamed NDJSON frames — status, context, content, formula, unverified, done ----
+
+            g.MapPost("/chat", async (MxAskInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc) =>
+            {
+                var ct = ctx.RequestAborted;
+                if (await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused) { await refused.Result.ExecuteAsync(ctx); return; }
+                var sink = new AskSink(ctx);
+                var r = await svc.AskAsync(await User(ctx, db), input, sink, ct);
+                if (r.Outcome != MxOutcome.Ok && !sink.Started) await Error(r.Outcome, r.Error).ExecuteAsync(ctx);
+            });
+
+            g.MapGet("/conversations", async (int? dataset, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused ? refused.Result
+                    : Results.Ok(new { conversations = await svc.ListConversationsAsync(await User(ctx, db), dataset, ct) }));
+
+            g.MapGet("/conversations/{id:int}", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused ? refused.Result
+                    : Map(await svc.ConversationAsync(await User(ctx, db), id, ct)));
+
+            g.MapDelete("/conversations/{id:int}", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+            {
+                if (await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused) return refused.Result;
+                var r = await svc.DeleteConversationAsync(await User(ctx, db), id, ct);
+                return r.Outcome == MxOutcome.Ok ? Results.NoContent() : Error(r.Outcome, r.Error);
+            });
+
             g.MapGet("/catalog", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixData, ct) is { } refused ? refused.Result
                     : Results.Ok(new { fields = svc.Catalog() }));
@@ -174,6 +213,25 @@ namespace RabbitIC.Api.MinimalApis
         }
 
         private sealed record Refusal(IResult Result);
+
+        /// <summary>An Ask answer's stream: headers go out with the first frame, once the question is accepted.</summary>
+        private sealed class AskSink(HttpContext ctx) : IMxAskSink
+        {
+            private ChatStreamWriter? _writer;
+            public bool Started => _writer is not null;
+
+            public Task StartAsync(int conversationId)
+            {
+                ctx.Response.Headers["X-Conversation-Id"] = conversationId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                ctx.Response.ContentType = "application/x-ndjson; charset=utf-8";
+                _writer = new ChatStreamWriter(ctx.Response, ctx.RequestAborted);
+                return Task.CompletedTask;
+            }
+
+            public Task StatusAsync(string text) => _writer!.FrameAsync(new { type = "status", text });
+            public Task FrameAsync(object frame) => _writer!.FrameAsync(frame);
+            public Task ContentAsync(string text) => _writer!.ContentAsync(text);
+        }
 
         /// <summary>401 without a session; 403 naming the permission when AccessPolicy says no.</summary>
         private static async Task<Refusal?> Caller(HttpContext ctx, AppDbContext db, AccessPolicy access, string key, CancellationToken ct)

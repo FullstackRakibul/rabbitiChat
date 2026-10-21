@@ -6,7 +6,7 @@
  * action:matrix.kpis.edit; the server checks that again and refuses thresholds
  * out of order.
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { Loader2, Pencil, Save, X } from '@lucide/vue'
 import { getMatrixCatalog, listMatrixKpis, updateMatrixKpi } from '@/services/index.js'
 import { Badge } from '@/components/ui/badge'
@@ -16,12 +16,15 @@ const props = defineProps({
   canKpis: { type: Boolean, default: false },      // section:matrix.dashboards (the KPI list)
   canFields: { type: Boolean, default: false },    // section:matrix.data (the catalog)
   canEditKpis: { type: Boolean, default: false },  // action:matrix.kpis.edit
+  /** A KPI to bring into view and mark: a [KPI: …] citation opened it. */
+  focus: { type: String, default: '' },
 })
 
 const kpis = ref([])
 const fields = ref([])
 const error = ref('')
 const editing = ref('')
+const focused = ref('')
 const saving = ref(false)
 const form = reactive({ direction: 'higher', green: '', amber: '' })
 
@@ -69,6 +72,13 @@ onMounted(async () => {
     ])
     kpis.value = k.kpis
     fields.value = f.fields
+    if (props.focus) {
+      // A citation names a KPI by key or by its English name.
+      const hit = kpis.value.find((x) => x.key === props.focus || x.nameEn.toLowerCase() === props.focus.toLowerCase())
+      focused.value = hit?.key ?? ''
+      await nextTick()
+      document.querySelector(`[data-kpi="${focused.value}"]`)?.scrollIntoView({ block: 'center' })
+    }
   } catch (e) {
     error.value = e.message
   }
@@ -84,7 +94,7 @@ onMounted(async () => {
       <div v-for="[area, list] in byArea" :key="area" class="border-b last:border-b-0">
         <h4 class="bg-muted/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ AREAS[area][0] }} · {{ AREAS[area][1] }}</h4>
         <ul class="divide-y">
-          <li v-for="k in list" :key="k.key" class="flex flex-col gap-1 p-3 text-sm" :data-kpi="k.key">
+          <li v-for="k in list" :key="k.key" class="flex flex-col gap-1 p-3 text-sm" :class="focused === k.key ? 'bg-accent ring-2 ring-ring ring-inset' : ''" :data-kpi="k.key" :data-focused="focused === k.key ? '' : undefined">
             <div class="flex flex-wrap items-baseline gap-x-2">
               <span class="font-medium">{{ k.nameBn }}</span>
               <span class="text-xs text-muted-foreground">{{ k.nameEn }}</span>

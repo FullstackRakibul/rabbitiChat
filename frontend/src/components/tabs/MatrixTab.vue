@@ -50,6 +50,7 @@ const canUpload = computed(() => props.actions.includes('action:matrix.upload'))
 const canFix = computed(() => props.actions.includes('action:matrix.fix'))
 const canEditDashboards = computed(() => props.actions.includes('action:matrix.dashboards.edit'))
 const canEditKpis = computed(() => props.actions.includes('action:matrix.kpis.edit'))
+const canAsk = computed(() => props.sections.includes('section:matrix.ask'))
 
 const datasets = ref([])
 const uploads = ref([])
@@ -246,7 +247,8 @@ onMounted(async () => {
       </ul>
     </section>
 
-    <MatrixDefinitions v-else-if="view === 'definitions'" :can-kpis="canDashboards" :can-fields="canData" :can-edit-kpis="canEditKpis" />
+    <MatrixDefinitions v-else-if="view === 'definitions'" :can-kpis="canDashboards" :can-fields="canData" :can-edit-kpis="canEditKpis"
+      :focus="String(route.query.kpi ?? '')" />
 
     <p v-else-if="!canData" class="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
       The Data section needs the “Data” permission of Matrix. Ask an administrator.
@@ -293,7 +295,8 @@ onMounted(async () => {
           </nav>
         </div>
 
-        <MatrixReport v-if="datasetTab === 'report'" :dataset="openDataset" @drill="drill" @quality="openTab('quality')" />
+        <MatrixReport v-if="datasetTab === 'report'" :dataset="openDataset" :can-ask="canAsk" :can-edit-dashboards="canEditDashboards"
+          @drill="drill" @quality="openTab('quality')" @definition="(k) => go({ section: 'definitions', kpi: k })" />
 
         <MatrixQuality v-else-if="datasetTab === 'quality'" :dataset="openDataset" :can-fix="canFix"
           @show="show" @close="go({})" @fixed="refresh" />

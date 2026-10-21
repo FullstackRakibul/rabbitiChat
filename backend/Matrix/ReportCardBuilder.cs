@@ -17,7 +17,7 @@ namespace RabbitIC.Api.Matrix;
 public static class ReportCardBuilder
 {
     /// <summary>Cards made by an older builder are made again when read (CardAsync).</summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     /// <summary>A per-line KPI shown as one tile: its median, citing every row it counts (the KPI named here).</summary>
     private static readonly Dictionary<string, string> MedianCites = new() { ["operators_per_line"] = "sewing_operators" };
@@ -72,7 +72,7 @@ public static class ReportCardBuilder
                 new MxCardEntry(Label(r.GroupBy, x.GetValueOrDefault(r.GroupBy ?? "")), (double)x["value"]!, r.Unit, x.GetValueOrDefault("_cite") as string)).ToList();
             breakdowns.Add(new MxCardBreakdown(key, r.NameEn, r.NameBn,
                 entries.OrderByDescending(e => e.Value).Take(3).ToList(),
-                entries.Count > 3 ? entries.OrderBy(e => e.Value).Take(3).ToList() : new List<MxCardEntry>()));
+                entries.Count > 3 ? entries.OrderBy(e => e.Value).Take(3).ToList() : new List<MxCardEntry>(), entries.Count));
         }
 
         // The snapshot before this one, of the same kind and layout.
@@ -99,22 +99,50 @@ public static class ReportCardBuilder
     private static string Label(string? field, object? value) => value is null ? "(none)"
         : field == "line_no" ? $"LINE - {value}" : Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
 
-    /// <summary>The card as text, its items numbered [C1], [C2] … — the form a summary is written from.</summary>
+    /// <summary>
+    /// Every statement of the card with its label, [C1], [C2] … in the order Render writes them:
+    /// the items, the breakdowns' highest and lowest entries, the changes since the previous
+    /// snapshot, and the open quality issues. A summary point cites these labels; the page
+    /// opens a label's rows through its citation token.
+    /// </summary>
+    public static List<MxCardLabel> Labels(MxReportCardDto card)
+    {
+        var list = new List<MxCardLabel>();
+        void Add(string key, string text, string? cite) => list.Add(new MxCardLabel($"C{list.Count + 1}", key, text, cite));
+        foreach (var i in card.Items)
+            Add(i.Key, $"{i.Label} ({i.LabelBn}): {i.Text ?? Fmt(i.Value)} {i.Unit}{(i.Detail is null ? "" : $" ({i.Detail})")}", i.Cite);
+        foreach (var b in card.Breakdowns)
+        {
+            foreach (var e in b.Top) Add(b.Key, $"{e.Label} {Fmt(e.Value)}", e.Cite);
+            foreach (var e in b.Bottom) Add(b.Key, $"{e.Label} {Fmt(e.Value)}", e.Cite);
+        }
+        if (card.Comparison is { } c)
+            foreach (var x in c.Items)
+                Add(x.Key, $"{x.Label} {Fmt(x.Before)} → {Fmt(x.After)} ({(x.Change >= 0 ? "+" : "")}{Fmt(x.Change)})",
+                    card.Items.FirstOrDefault(i => i.Key == x.Key)?.Cite);
+        foreach (var q in card.Quality) Add("quality", $"{q.Check} {q.Count} ({q.Severity})", null);
+        return list;
+    }
+
+    /// <summary>The card as text, every statement labelled [C1], [C2] … — the form a summary is written from.</summary>
     public static string Render(MxReportCardDto card)
     {
+        var labels = Labels(card);
+        var n = 0;
+        string Next() => $"[{labels[n++].Label}] {labels[n - 1].Text}";
         var sb = new StringBuilder();
         sb.AppendLine($"Report card — {card.Kind}, {card.Name}, report date {card.ReportDate ?? "unknown"}");
         if (card.Scope.Count > 0) sb.AppendLine($"Scope: {string.Join(", ", card.Scope)}");
-        var n = 0;
-        foreach (var i in card.Items) sb.AppendLine($"[C{++n}] {i.Label} ({i.LabelBn}): {i.Text ?? Fmt(i.Value)} {i.Unit}{(i.Detail is null ? "" : $" ({i.Detail})")}");
+        foreach (var _ in card.Items) sb.AppendLine(Next());
         foreach (var b in card.Breakdowns)
         {
-            sb.AppendLine($"{b.Label} ({b.LabelBn}) — highest: {string.Join("; ", b.Top.Select(e => $"[C{++n}] {e.Label} {Fmt(e.Value)}"))}");
-            if (b.Bottom.Count > 0) sb.AppendLine($"  lowest: {string.Join("; ", b.Bottom.Select(e => $"[C{++n}] {e.Label} {Fmt(e.Value)}"))}");
+            // "of 8": the card lists part of the breakdown, and says so.
+            sb.AppendLine($"{b.Label} ({b.LabelBn}) — {b.Groups} groups; highest {b.Top.Count}: {string.Join("; ", b.Top.Select(_ => Next()))}");
+            if (b.Bottom.Count > 0) sb.AppendLine($"  lowest {b.Bottom.Count}: {string.Join("; ", b.Bottom.Select(_ => Next()))}");
         }
         if (card.Comparison is { } c)
-            sb.AppendLine($"Against the previous snapshot ({c.PreviousDate}): {string.Join("; ", c.Items.Select(x => $"{x.Label} {Fmt(x.Before)} → {Fmt(x.After)} ({(x.Change >= 0 ? "+" : "")}{Fmt(x.Change)})"))}");
-        if (card.Quality.Count > 0) sb.AppendLine($"Open quality issues: {string.Join("; ", card.Quality.Select(q => $"{q.Check} {q.Count}"))}");
+            sb.AppendLine($"Against the previous snapshot ({c.PreviousDate}): {string.Join("; ", c.Items.Select(_ => Next()))}");
+        if (card.Quality.Count > 0) sb.AppendLine($"Open quality issues: {string.Join("; ", card.Quality.Select(_ => Next()))}");
         return sb.ToString();
     }
 

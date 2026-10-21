@@ -14,12 +14,21 @@ public sealed record MxResult<T>(MxOutcome Outcome, T? Value = default, string? 
     public static MxResult<T> Fail(MxOutcome outcome, string error) => new(outcome, default, error);
 }
 
+/// <summary>Where an Ask answer streams to: the endpoint's NDJSON writer. Start comes once the question is accepted.</summary>
+public interface IMxAskSink
+{
+    Task StartAsync(int conversationId);
+    Task StatusAsync(string text);
+    Task FrameAsync(object frame);
+    Task ContentAsync(string text);
+}
+
 /// <summary>A file as received: its name and bytes. The bytes never reach the disk.</summary>
 public sealed record MxIncomingFile(string FileName, byte[] Bytes);
 
 public interface IMatrixService
 {
-    public const long MaxUploadBytes = 20L * 1024 * 1024;   // the limit Documents and the HR library use
+    public const long MaxUploadBytes = 50L * 1024 * 1024;   // the limit Documents and the HR library use
 
     Task<MxResult<MxUploadsDto>> UploadAsync(User user, IReadOnlyList<MxIncomingFile> files, CancellationToken ct = default);
     Task<List<MxUploadDto>> ListUploadsAsync(CancellationToken ct = default);
@@ -60,6 +69,23 @@ public interface IMatrixService
 
     /// <summary>Every widget's numbers for the caller, with the dashboard's filters, and what ran to make them.</summary>
     Task<MxResult<MxDashboardRun>> RunDashboardAsync(User user, int id, MxDashboardRunInput input, CancellationToken ct = default);
+
+    /// <summary>The saved summary of a dataset in a language ("bn" or "en"); NotFound when none has been written.</summary>
+    Task<MxResult<MxSummaryDto>> SummaryAsync(User user, int datasetId, string language, CancellationToken ct = default);
+
+    /// <summary>Has the model write the summary from the report card, checks it, saves it.</summary>
+    Task<MxResult<MxSummaryDto>> WriteSummaryAsync(User user, int datasetId, MxSummaryInput input, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ask (§3.9): plan → queries → a streamed, checked answer, saved in a "matrix" conversation.
+    /// Fails before anything streams (bad question, no dataset, no model); after Start every
+    /// outcome — a refusal, "I couldn't form a query" — is an answer.
+    /// </summary>
+    Task<MxResult<int>> AskAsync(User user, MxAskInput input, IMxAskSink sink, CancellationToken ct = default);
+
+    Task<List<MxConversationDto>> ListConversationsAsync(User user, int? datasetId, CancellationToken ct = default);
+    Task<MxResult<List<MxMessageDto>>> ConversationAsync(User user, int id, CancellationToken ct = default);
+    Task<MxResult<bool>> DeleteConversationAsync(User user, int id, CancellationToken ct = default);
 
     /// <summary>A dataset's Report page charts: its kind's automatic charts, run on this dataset (tiles come from the card).</summary>
     Task<MxResult<MxDashboardRun>> RunReportAsync(User user, int datasetId, MxDashboardRunInput input, CancellationToken ct = default);

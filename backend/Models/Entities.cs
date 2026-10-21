@@ -37,10 +37,14 @@ public class Conversation
 
 	/// <summary>
 	/// Null for a normal chat; "hr" for a conversation of the HR Assistant
-	/// (docs/HR_MODULE_PROMPT.md §3.3). HR conversations are listed only in their
+	/// (docs/HR_MODULE_PROMPT.md §3.3); "matrix" for Matrix's Ask
+	/// (docs/MATRIX_PROMPT.md §3.9). Such conversations are listed only in their
 	/// own tab and never in the main sidebar.
 	/// </summary>
 	public string? Kind { get; set; }
+
+	/// <summary>Matrix only: what the conversation is about, as "dataset:&lt;id&gt;"; null for the whole module.</summary>
+	public string? Scope { get; set; }
 
 	public DateTime CreatedAt { get; set; } = DateTime.Now;
 
@@ -130,6 +134,13 @@ public class Message
 	/// not verify, so a reopened HR conversation shows the same panel.
 	/// </summary>
 	public string? HrMetaJson { get; set; }
+
+	/// <summary>
+	/// Matrix answers only: the plan, the queries run (in plain words, with their datasets
+	/// and row counts), the result rows and their citation tokens, the formulas and what
+	/// the checks found — so a reopened answer shows the same Data used panel and chips.
+	/// </summary>
+	public string? MetaJson { get; set; }
 
 	public DateTime CreatedAt { get; set; } = DateTime.Now;
 

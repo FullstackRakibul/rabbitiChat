@@ -17,7 +17,7 @@ namespace RabbitIC.Api.Matrix;
 
 public sealed record MxTemplateColumn(int Index, string Header, string? Field, string Sensitivity);
 
-public sealed class TemplateMatcher(IHttpClientFactory http, IConfiguration config, ModelPolicy modelPolicy, ILogger<TemplateMatcher> log)
+public sealed class TemplateMatcher(IHttpClientFactory http, MatrixModel models, ILogger<TemplateMatcher> log)
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -52,10 +52,6 @@ public sealed class TemplateMatcher(IHttpClientFactory http, IConfiguration conf
         return new string(s.Select(ch => char.IsDigit(ch) ? '9' : char.IsUpper(ch) ? 'X' : char.IsLetter(ch) ? 'x' : ch).ToArray());
     }
 
-    private string? ConfiguredModel =>
-        Blank(config["Matrix:Model"]) ?? Blank(config["Extraction:DefaultModel"]) ?? Blank(config["Ollama:DefaultModel"]);
-
-    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     private static readonly object Schema = new
     {
@@ -108,10 +104,8 @@ public sealed class TemplateMatcher(IHttpClientFactory http, IConfiguration conf
             .Take(60)
             .ToList();
 
-        var model = ConfiguredModel ?? await modelPolicy.DefaultForAsync(user, ct);
-        if (model is null) return "No model is configured for Matrix, so unmatched columns have no suggestion.";
-        var allowed = await modelPolicy.CheckAsync(user, model, ModelPolicy.LocalSource, ct: ct);
-        if (!allowed.Allowed) return allowed.Error;
+        var (model, refused) = await models.ResolveAsync(user, null, ct);
+        if (model is null) return refused == "No model is configured for Matrix." ? "No model is configured for Matrix, so unmatched columns have no suggestion." : refused;
 
         var catalog = string.Join("\n", FieldCatalog.All.Where(f => !f.Derived).Select(f => $"{f.Key} — {f.En} ({f.Group})"));
         var messages = new List<SchemaJsonMessage>
@@ -121,7 +115,7 @@ public sealed class TemplateMatcher(IHttpClientFactory http, IConfiguration conf
             new("user", $"Field catalog:\n{catalog}\n\nColumns:\n{JsonSerializer.Serialize(asked, Json)}"),
         };
 
-        var numCtx = int.TryParse(config["Extraction:NumCtx"], out var n) && n > 0 ? n : 16384;
+        var numCtx = models.NumCtx;
         var first = await SchemaJsonChat.CallAsync(http, model, Schema, messages, numCtx, ct);
         var (answer, problems) = Read(first.Content, asked.Select(a => a.header).ToHashSet(StringComparer.OrdinalIgnoreCase));
         if (problems.Count > 0 && first.Content is not null)

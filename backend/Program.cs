@@ -181,6 +181,7 @@ builder.Services.AddScoped<RabbitIC.Api.Rbac.AccessPolicy>();
 
 // ম্যাট্রিক্স · Matrix (docs/MATRIX_PROMPT.md): repository → matcher → service, one scope per request.
 builder.Services.AddScoped<RabbitIC.Api.Repositories.IMatrixRepository, RabbitIC.Api.Repositories.MatrixRepository>();
+builder.Services.AddScoped<RabbitIC.Api.Matrix.MatrixModel>();
 builder.Services.AddScoped<RabbitIC.Api.Matrix.TemplateMatcher>();
 builder.Services.AddScoped<RabbitIC.Api.Services.IMatrixService, RabbitIC.Api.Services.MatrixService>();
 

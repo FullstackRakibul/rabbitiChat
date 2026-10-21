@@ -36,6 +36,33 @@ public static class HrNumberCheck
             .ToList();
     }
 
+    /// <summary>
+    /// The exact check (Matrix): every number of the reply, small ones too, must be a number a
+    /// source gives — or a calculated one — at the precision the reply writes it ("5.9" is
+    /// 5.92 written to one place; "6" is not 5.92). No tolerance of 1.
+    /// </summary>
+    public static IReadOnlyList<decimal> UnverifiedExact(string reply, IEnumerable<string> sources, IEnumerable<decimal> calculated)
+    {
+        var known = sources.SelectMany(Numbers).Concat(calculated).ToList();
+        return Written(reply)
+            .Where(w => !known.Any(k => k == w.Value || Math.Round(k, w.Places, MidpointRounding.AwayFromZero) == w.Value))
+            .Select(w => w.Value)
+            .Distinct()
+            .ToList();
+    }
+
+    /// <summary>Every number in the text with the decimal places it is written to.</summary>
+    private static IEnumerable<(decimal Value, int Places)> Written(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) yield break;
+        foreach (Match m in Amount.Matches(Normalise(text)))
+        {
+            var s = m.Value.Replace(",", "");
+            if (decimal.TryParse(s, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var v))
+                yield return (v, s.Contains('.') ? s.Length - s.IndexOf('.') - 1 : 0);
+        }
+    }
+
     /// <summary>Every number in the text, digits normalised and separators removed.</summary>
     public static IEnumerable<decimal> Numbers(string? text)
     {

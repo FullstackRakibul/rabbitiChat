@@ -5,7 +5,9 @@
 //   node scripts/matrix-eval.mjs --phase M1 --live     also the live gates on matrix-samples/ (counts only)
 //   node scripts/matrix-eval.mjs --only G-M1.6         one gate
 //   node scripts/matrix-eval.mjs --no-build            reuse the last eval build
-//   node scripts/matrix-eval.mjs --shots <dir>         where G-M1.9 and G-M3 write their screenshots
+//   node scripts/matrix-eval.mjs --shots <dir>         where G-M1.9, G-M3 and G-M4 write their screenshots
+//   node scripts/matrix-eval.mjs --model <name>        the real model the LIVE M4 checks use (default gemma4:12b)
+//   node scripts/matrix-eval.mjs --golden all          every golden question (default: the ten of Step 3)
 //
 // Environment: MATRIX_EVAL_ADMIN_USER, MATRIX_EVAL_ADMIN_SECRET (the seeded
 // administrator; never written here).
@@ -34,6 +36,8 @@ const EVAL_ROOT = path.join(os.tmpdir(), 'matrix-eval')
 const FIXTURES = path.join(EVAL_ROOT, 'fixtures')
 const SAMPLES = path.join(REPO, 'matrix-samples')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+/** The settings every start of the eval API gets — a restart must not drop them (the fake's model). */
+const API_ENV = { Ollama__DefaultModel: 'fake-ok', Extraction__DefaultModel: 'fake-ok', Matrix__Model: 'fake-ok' }
 
 const REAL = {
   master: 'ADL-MASTER_FILE-HRM-Extended.xlsx',
@@ -80,7 +84,7 @@ const asAdmin = (method, p, body) => as(ctx.admin, method, p, body)
 
 async function restart() {
   await ctx.api.stop()
-  ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port })
+  ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port, env: API_ENV })
 }
 
 /** Upload one or more files as multipart; returns the parsed body. */
@@ -1688,6 +1692,514 @@ check('G-M3.6', 'M3', 'LIVE Manpower overview and Line board on the real master,
   return ok(pass, `${out.join(' · ')} · 12 screenshots in ${ctx.args.shots} (live-*.png)`)
 }, { live: true })
 
+// ═══════════════════════════════ Phase M4 ═══════════════════════════════
+//
+// The fake model writes what a careful model would — and, when a check plants it,
+// what a careless one would — so each check proves the code catches it. The live
+// checks restart the API against the real Ollama (--model, default gemma4:12b).
+
+const BN = '০১২৩৪৫৬৭৮৯'
+const toBnDigits = (s) => String(s).replace(/\d/g, (d) => BN[Number(d)])
+
+/** The fake's summary, from the card lines it was sent. ctx.summaryMode plants a fault. */
+function fakeSummary(body) {
+  const user = body.messages.at(-1).content
+  const bn = /Write the summary in Bengali/.test(user)
+  const lines = [...user.matchAll(/\[(C\d+)\] ([^\n;]+)/g)].map((m) => ({ label: m[1], text: m[2].trim() }))
+  const points = lines.slice(0, 6).map((l) => `- ${bn ? `রিপোর্টে আছে: ${toBnDigits(l.text)}` : `The card says: ${l.text}`} [${l.label}]`)
+  // A difference, as a formula: the model never does the arithmetic.
+  const nums = lines.map((l) => ({ ...l, n: Number(/:\s*([\d.]+)/.exec(l.text)?.[1]) })).filter((l) => Number.isFinite(l.n))
+  if (nums.length >= 2) points.push(`- ${bn ? 'পার্থক্য' : 'The difference is'} [[= ${nums[0].n} - ${nums[1].n} ]] [${nums[0].label}][${nums[1].label}]`)
+  const mode = ctx.summaryMode ?? 'faithful'
+  if (mode === 'invented') points.push('- About 98765 people left last month [C1]')
+  if (mode === 'uncited') points.push('- The factory is doing well.')
+  if (mode === 'unknown') points.push('- See the line that does not exist [C99]')
+  while (points.length < 5) points.push(`- ${bn ? 'রিপোর্ট কার্ড দেখুন' : 'See the report card'} [${lines[0]?.label ?? 'C1'}]`)
+  return { words: [points.join('\n')] }
+}
+
+/** Every request the fake received, as text — to look for what must never reach a model. */
+const fakeBodies = (from = 0) => ctx.fake.requests.slice(from).filter((r) => r.path === '/api/chat').map((r) => JSON.stringify(r.body))
+
+/** Names and IDs of the fixtures' people: none may appear in anything sent to a model. */
+function personalStrings() {
+  const M = sheetObjects('fx-master.xlsx', 'HRM')
+  const H = sheetObjects('fx-hr-basic.xlsx', 'Sheet1')
+  const A = sheetObjects('fx-attendance.xlsx', 'rptDailyAttDetailsReport_Factor', 3)
+  const names = new Set([...M.flatMap((r) => [r.Name, r.NameBan]), ...H.map((r) => r.NAME), ...A.map((r) => r.Name)].filter((x) => x && String(x).trim().length > 4).map((x) => String(x).trim()))
+  const ids = new Set([...M.map((r) => r.EmpID), ...H.map((r) => r.EmpCode), ...A.map((r) => r['Emp ID'])].filter((x) => x && /^\d{6}$/.test(String(x))).map(String))
+  return { names, ids }
+}
+
+function leaks(bodies) {
+  const { names, ids } = personalStrings()
+  const found = []
+  for (const b of bodies) {
+    for (const n of names) if (b.includes(n)) { found.push(`name ${n.slice(0, 2)}…`); break }
+    for (const id of ids) if (new RegExp(`(?<!\\d)${id}(?!\\d)`).test(b)) { found.push('an employee ID'); break }
+  }
+  return found
+}
+
+// ---- G-M4.1 Summary ----
+
+check('G-M4.1', 'M4', 'a summary for each fixture kind, Bengali and English: every number traced to the card, every point citing a card line; sent at temperature 0 with thinking off', async () => {
+  const S = await m3Setup()
+  const mp = (await sql("select Id from MxDatasets where ReportKind = 'manpower' order by Id desc limit 1"))[0].Id
+  const lookup = (await sql("select Id from MxDatasets where ReportKind = 'designation-lookup' order by Id desc limit 1"))[0].Id
+  ctx.summaryMode = 'faithful'
+  const from = ctx.fake.requests.length
+  const out = []
+  let pass = true
+  for (const [name, id] of [['master', S.master], ['attendance', S.att2], ['separation list', S.hr], ['manpower', mp], ['designation lookup', lookup]]) {
+    for (const lang of ['bn', 'en']) {
+      const r = await asAdmin('POST', `/api/matrix/datasets/${id}/summary`, { language: lang })
+      const s = r.json
+      const good = r.status === 200 && s.language === lang && s.points >= 5 && s.points <= 8 && s.unverified.length === 0 && s.uncitedPoints.length === 0
+        && s.unknownCitations.length === 0 && s.formulas.every((f) => f.ok) && (lang === 'en' || /[০-৯]/.test(s.text))
+      pass &&= good
+      if (lang === 'en' || !good) out.push(`${name} ${lang}: ${r.status} ${s?.points} points, ${s?.formulas?.length} formula(s), unverified ${s?.unverified?.length}, uncited ${s?.uncitedPoints?.length}, unknown ${s?.unknownCitations?.length}${good ? '' : ' ✗ ' + (s?.text ?? r.text).slice(0, 200)}`)
+    }
+  }
+  const sent = ctx.fake.requests.slice(from).filter((q) => q.path === '/api/chat').map((q) => q.body)
+  const why = sent.map((b, i) => [i, [b.options?.temperature === 0 ? null : `temperature ${b.options?.temperature}`, b.think === false ? null : `think ${b.think}`,
+    /report card/i.test(b.messages?.[0]?.content ?? '') ? null : `system "${(b.messages?.[0]?.content ?? '').slice(0, 40)}"`,
+    /^Report card —/m.test(b.messages?.at(-1)?.content ?? '') ? null : 'no card'].filter(Boolean)]).filter(([, w]) => w.length)
+  const settings = why.length === 0
+  if (!settings) out.push(`requests not as expected: ${why.map(([i, w]) => `#${i} ${w.join(', ')}`).join('; ')}`)
+  const saved = (await asAdmin('GET', `/api/matrix/datasets/${S.master}/summary?lang=en`)).json
+  pass &&= settings && sent.length === 10 && saved?.points >= 5 && !saved.stale
+  return ok(pass, `${out.join(' · ')} · ${sent.length} model calls, temperature 0 and thinking off with the card as the message ${settings} · the saved English summary reads back, not stale ${saved && !saved.stale}`)
+})
+
+check('G-M4.1', 'M4', 'the checks catch a careless model: an invented number, a point citing nothing, a label the card does not have; a formula is worked out by code', async () => {
+  const S = await m3Setup()
+  const results = {}
+  for (const mode of ['invented', 'uncited', 'unknown']) {
+    ctx.summaryMode = mode
+    results[mode] = (await asAdmin('POST', `/api/matrix/datasets/${S.master}/summary`, { language: 'en' })).json
+  }
+  ctx.summaryMode = 'faithful'
+  const good = (await asAdmin('POST', `/api/matrix/datasets/${S.master}/summary`, { language: 'en' })).json
+  const f = good.formulas[0]
+  const card = (await asAdmin('GET', `/api/matrix/datasets/${S.master}/card`)).json
+  const [a, b] = card.items.filter((i) => typeof i.value === 'number').map((i) => i.value)
+  return ok(results.invented.unverified.includes(98765) && results.uncited.uncitedPoints.length === 1 && results.unknown.unknownCitations.includes('C99')
+      && f?.ok && Number(f.expression.split('-')[0]) === a && good.text.includes(f.display) && Math.abs(Number(f.display.replace(/,/g, '')) - (a - b)) < 0.01,
+    `invented number flagged ${JSON.stringify(results.invented.unverified)} · uncited point ${JSON.stringify(results.uncited.uncitedPoints)} · unknown label ${JSON.stringify(results.unknown.unknownCitations)} · formula "${f?.expression}" → ${f?.display} (independent ${a - b})`)
+})
+
+check('G-M4.1', 'M4', 'in the browser: the summary heads the Report page, the language toggles, a [C…] chip opens exactly its rows (screenshots)', async () => {
+  const S = await m3Setup()
+  ctx.summaryMode = 'faithful'
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 1400, `/matrix?dataset=${S.att2}`)
+    await p.waitFor('[data-summary-text] [data-cite]', 30000)
+    const first = await p.eval(`({ lang: document.querySelector('[data-summary]').getAttribute('data-summary-lang'), points: document.querySelectorAll('[data-summary-text] li').length,
+      top: !!(document.querySelector('[data-summary]').compareDocumentPosition(document.querySelector('[data-report-tiles]')) & Node.DOCUMENT_POSITION_FOLLOWING) })`)
+    await p.shot(path.join(ctx.args.shots, 'summary-bn-light-1280.png'))
+    await p.click('[data-summary-lang-button="en"]')
+    await p.waitFor('[data-summary][data-summary-lang="en"] [data-summary-text] [data-cite]', 30000)
+    await p.shot(path.join(ctx.args.shots, 'summary-en-light-1280.png'))
+    // The first chip of a counted card line: its rows in the viewer.
+    const s = (await asAdmin('GET', `/api/matrix/datasets/${S.att2}/summary?lang=en`)).json
+    const card = (await asAdmin('GET', `/api/matrix/datasets/${S.att2}/card`)).json
+    const people = card.items.filter((i) => i.unit === 'people' && i.cite).map((i) => i.key)
+    const line = s.labels.find((l) => people.includes(l.key) && s.text.includes(`[${l.label}]`) && card.items.some((i) => i.key === l.key))
+    const value = card.items.find((i) => i.key === line.key).value
+    await p.click(`[data-summary-text] [data-cite="${line.label}"]`)
+    await p.waitFor('[data-matrix-viewer]', 15000)
+    await sleep(800)
+    const total = await p.eval('Number(document.querySelector("[data-matrix-viewer]").getAttribute("data-total"))')
+    await p.setTheme('dark')
+    await p.session(ctx.admin, 'dark', 360, 1600, `/matrix?dataset=${S.att2}`)
+    await p.waitFor('[data-summary-text] [data-cite]', 30000)
+    await p.shot(path.join(ctx.args.shots, 'summary-en-dark-360.png'))
+    return ok(first.lang === 'bn' && first.points >= 5 && first.top && total === value,
+      `first shown in ${first.lang} with ${first.points} points, above the tiles ${first.top} · English after the toggle · chip [${line.label}] (${line.key} ${value}) opened ${total} rows`)
+  } finally { await browser.close() }
+})
+
+// ---- Ask: the fake planner and answerer ----
+
+/** The fake's plan for a question; "BROKEN once" / "BROKEN twice" plant an invalid query. */
+function fakePlan(body) {
+  const first = body.messages.find((m) => m.role === 'user')?.content ?? ''
+  const q = /^Question: (.*)$/m.exec(first)?.[1] ?? ''
+  const id = /Dataset in scope: "(\d+)"/.exec(body.messages[0].content)?.[1]
+  const repairing = body.messages.length > 2
+  const active = ['status', 'in', ['Active']]
+  const broken = { kind: 'queries', queries: [{ dataset: id, group_by: ['shoe_size'], measures: [['count', '*', 'n']] }] }
+  let plan
+  if (/BROKEN twice/i.test(q)) plan = broken
+  else if (/BROKEN once/i.test(q) && !repairing) plan = broken
+  else if (/payroll/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: id, filter: [active], group_by: ['unit'], measures: [['sum', 'gross', 'payroll']] }] }
+  else if (/headcount by unit|BROKEN once/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: id, filter: [active], group_by: ['unit'], measures: [['count', '*', 'headcount']] }] }
+  else if (/attrition/i.test(q)) plan = { kind: 'definition', definition: 'attrition_pct' }
+  else if (/efficiency/i.test(q)) plan = { kind: 'need', need: 'Production efficiency is not in these datasets.' }
+  else if (/names/i.test(q)) plan = { kind: 'need', need: "People's names are not available." }
+  else plan = { kind: 'answer_from_card' }
+  return { words: [JSON.stringify(plan)] }
+}
+
+/** The fake's answer: the result rows it was given, each cited; or the KPI; or a card line. */
+function fakeAnswer(body) {
+  const user = body.messages.at(-1).content
+  const rows = [...user.matchAll(/^(R\d+): (.*)$/gm)].slice(0, 6)
+  const kpi = /^\[KPI: ([^\]]+)\] ([^\n]*)$/m.exec(user)
+  let lines
+  if (rows.length) lines = rows.map(([, l, t]) => `- ${t} [${l}]`)
+  else if (kpi) lines = [`${kpi[1]}: ${kpi[2].split(' Computed by')[0]} [KPI: ${kpi[1]}]`]
+  else { const c = /^\[(C\d+)\] (.*)$/m.exec(user); lines = [`From the report card: ${c?.[2]} [${c?.[1]}]`] }
+  if (ctx.answerMode === 'unknown-row') lines.push('- And one more [R99]')
+  return { words: lines.join('\n').match(/\S+\s*/g), gap: ctx.answerGap ?? 0 }
+}
+
+/** One question through POST /api/matrix/chat, its NDJSON frames read whole. */
+async function ask(user, body) {
+  const res = await fetch(`${ctx.api.url}/api/matrix/chat`, {
+    method: 'POST', headers: { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  const frames = res.headers.get('content-type')?.includes('ndjson') ? text.split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
+  return {
+    status: res.status, text, frames, conversationId: Number(res.headers.get('X-Conversation-Id')) || null,
+    content: frames.filter((f) => f.type === 'content').map((f) => f.text).join(''),
+    context: frames.find((f) => f.type === 'context'), checks: frames.find((f) => f.type === 'unverified'), done: frames.find((f) => f.type === 'done'),
+    statuses: frames.filter((f) => f.type === 'status').map((f) => f.text),
+  }
+}
+const planRequests = (from) => ctx.fake.requests.slice(from).filter((r) => r.path === '/api/chat' && r.body?.format?.properties?.kind)
+const answerRequests = (from) => ctx.fake.requests.slice(from).filter((r) => r.path === '/api/chat' && /^You answer a manager's question/.test(r.body?.messages?.[0]?.content ?? ''))
+
+// ---- G-M4.2 Plan ----
+
+check('G-M4.2', 'M4', 'the plan: the plan schema as format, temperature 0, thinking off; an invalid query gets one repair round with the validator\'s words; still invalid → "I couldn\'t form a query for that" and the reason', async () => {
+  const S = await m3Setup()
+  let from = ctx.fake.requests.length
+  const good = await ask(ctx.admin, { message: 'What is the headcount by unit?', datasetId: S.master })
+  const p = planRequests(from)[0]?.body
+  const shape = p && JSON.stringify(p.format.properties.kind.enum) === JSON.stringify(['answer_from_card', 'queries', 'definition', 'need'])
+    && p.options?.temperature === 0 && p.think === false && /^You turn a manager's question/.test(p.messages[0].content)
+  from = ctx.fake.requests.length
+  const once = await ask(ctx.admin, { message: 'BROKEN once: what is the headcount by unit?', datasetId: S.master })
+  const repairs = planRequests(from)
+  const repairMsg = repairs[1]?.body?.messages?.at(-1)?.content ?? ''
+  from = ctx.fake.requests.length
+  const twice = await ask(ctx.admin, { message: 'BROKEN twice: count something', datasetId: S.master })
+  const twicePlans = planRequests(from).length, twiceAnswers = answerRequests(from).length
+  return ok(good.status === 200 && good.context?.results?.[0]?.rows?.length > 0 && shape
+      && repairs.length === 2 && /not valid/.test(repairMsg) && /shoe_size/.test(repairMsg) && once.context?.repaired === true && once.context?.results?.[0]?.rows?.length > 0
+      && twicePlans === 2 && twiceAnswers === 0 && twice.content.startsWith("I couldn't form a query for that") && /shoe_size/.test(twice.content),
+    `plan call: schema format, temperature 0, thinking off ${shape} · one invalid query: ${repairs.length} plan calls, the second carries "${repairMsg.split('\n')[1]?.slice(0, 90)}", answered with ${once.context?.results?.[0]?.rows?.length} rows · still invalid: ${twicePlans} plan calls, ${twiceAnswers} answer calls, said "${twice.content.slice(0, 120)}"`)
+})
+
+// ---- G-M4.4 Citations ----
+
+check('G-M4.4', 'M4', '[R1] citations map to result rows and each reopens exactly its rows; a [KPI: …] names its definition; a citation of a row that was not returned is "unknown source"', async () => {
+  const S = await m3Setup()
+  const r = await ask(ctx.admin, { message: 'What is the headcount by unit?', datasetId: S.master })
+  const rows = r.context.results[0].rows
+  const cited = [...r.content.matchAll(/\[(R\d+)\]/g)].map((m) => m[1])
+  const reopened = []
+  for (const row of rows) {
+    const t = (await asAdmin('GET', `/api/matrix/datasets/${S.master}/rows?limit=1&only=true&highlight=${encodeURIComponent(row.cite)}`)).json?.total
+    reopened.push([row.label, row.values.headcount, t])
+  }
+  const active = activeMaster()
+  const independent = countBy(active, (x) => x.UnitName)
+  const sameAsFiles = rows.every((x) => independent[x.values.unit ?? 'null'] === x.values.headcount)
+  const def = await ask(ctx.admin, { message: 'What is attrition and how is it computed?', datasetId: S.master })
+  ctx.answerMode = 'unknown-row'
+  const unknown = await ask(ctx.admin, { message: 'What is the headcount by unit?', datasetId: S.master })
+  ctx.answerMode = null
+  return ok(cited.length === rows.length && cited.every((c) => rows.some((x) => x.label === c)) && reopened.every(([, v, t]) => v === t) && sameAsFiles
+      && r.checks.citations.length === 0 && r.checks.amounts.length === 0
+      && def.context.kind === 'definition' && def.context.kpi === 'attrition_pct' && /\[KPI: Attrition %\]/.test(def.content) && def.checks.citations.length === 0
+      && unknown.checks.citations.includes('R99'),
+    `${rows.length} rows ${cited.join(' ')} cited · each reopens its own rows ${reopened.map(([l, v, t]) => `${l} ${v}→${t}`).join(', ')} · equal to the files ${sameAsFiles} · `
+    + `definition: plan ${def.context.kind} ${def.context.kpi}, "${def.content.slice(0, 80)}…" · R99 marked unknown ${JSON.stringify(unknown.checks.citations)}`)
+})
+
+// ---- G-M4.5 Permissions in chat ----
+
+check('G-M4.5', 'M4', 'payroll asked without view-salary is refused, naming the permission (no answer call); with it, the payroll is computed', async () => {
+  const S = await m3Setup()
+  const u = await users()
+  let from = ctx.fake.requests.length
+  const sys = await ask(u.sys, { message: 'What is the gross payroll by unit?', datasetId: S.master })
+  const answersForSys = answerRequests(from).length
+  const admin = await ask(ctx.admin, { message: 'What is the gross payroll by unit?', datasetId: S.master })
+  const rows = admin.context?.results?.[0]?.rows ?? []
+  const want = {}
+  for (const x of activeMaster()) want[x.UnitName ?? 'null'] = (want[x.UnitName ?? 'null'] ?? 0) + Number(x.GrossSalary)
+  const equal = rows.length > 0 && rows.every((x) => Math.abs(want[x.values.unit ?? 'null'] - x.values.payroll) < 0.01)
+  const gen = await ask(u.gen, { message: 'What is the gross payroll by unit?', datasetId: S.master })
+  return ok(sys.status === 200 && /view-salary/.test(sys.content) && !sys.context && answersForSys === 0 && equal && gen.status === 403,
+    `System: "${sys.content.slice(0, 140)}" (no rows, ${answersForSys} answer calls) · admin: ${rows.length} units, payroll equal to the files ${equal} · General (no Ask section) ${gen.status}`)
+})
+
+// ---- G-M4.7 The Ask panel ----
+
+check('G-M4.7', 'M4', 'Ask on the Report page: the status line within 1 s, the answer streamed, chips that open rows, a chart with "Add to dashboard", the Data used panel, saved and reopened (screenshots)', async () => {
+  const S = await m3Setup()
+  const shots = ctx.args.shots
+  ctx.answerGap = 120
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 1800, `/matrix?dataset=${S.master}`)
+    await p.waitFor('[data-ask] [data-ask-input]', 20000)
+    // Watch for the status line and the first word from the moment of sending.
+    await p.eval(`(() => { window.__ask = { sent: 0, status: 0, words: 0, chunks: 0 }; let last = '';
+      new MutationObserver(() => { const now = performance.now(); const a = window.__ask;
+        if (!a.status && document.querySelector('[data-ask-status]')) a.status = now;
+        const t = document.querySelector('[data-ask-answer]:last-of-type [data-ask-text]')?.textContent ?? '';
+        if (t && !a.words) a.words = now; if (t !== last) { a.chunks++; last = t } }).observe(document.body, { subtree: true, childList: true, characterData: true }) })(); 0`)
+    await p.type('[data-ask-input]', 'What is the headcount by unit?')
+    await p.eval('window.__ask.sent = performance.now(); document.querySelector("[data-ask-send]").click(); 0')
+    await p.waitFor('[data-ask-answer] [data-data-used]', 30000)
+    const timing = await p.eval('({ status: window.__ask.status - window.__ask.sent, words: window.__ask.words - window.__ask.sent, chunks: window.__ask.chunks })')
+    await sleep(800)
+    const ui = await p.eval(`({ chips: [...document.querySelectorAll('[data-ask-text] [data-cite]')].map((e) => e.getAttribute('data-cite')),
+      chart: !!document.querySelector('[data-ask-chart] [data-matrix-chart]'), add: !!document.querySelector('[data-add-to-dashboard]'),
+      used: document.querySelector('[data-data-used-query]')?.textContent?.trim() ?? '' })`)
+    await p.eval('document.querySelector("[data-data-used]").open = true; 0')
+    await p.shot(path.join(shots, 'ask-light-1280.png'))
+    await p.click('[data-add-to-dashboard]')
+    await p.waitFor('[data-ask-notice]', 10000)
+    const mine = (await asAdmin('GET', '/api/matrix/dashboards')).json.dashboards.find((d) => d.name === 'আমার চার্ট · My charts')
+    const added = mine && (await asAdmin('GET', `/api/matrix/dashboards/${mine.id}`)).json.layout.widgets.some((w) => w.query?.group_by?.[0] === 'unit')
+    // A chip: its unit's rows in the viewer.
+    const first = (await asAdmin('POST', '/api/matrix/query', { query: { dataset: String(S.master), filter: [['status', 'in', ['Active']]], group_by: ['unit'], measures: [['count', '*', 'headcount']] } })).json.rows[0]
+    await p.click('[data-ask-text] [data-cite="R1"]')
+    await p.waitFor('[data-matrix-viewer]', 15000)
+    await sleep(800)
+    const total = await p.eval('Number(document.querySelector("[data-matrix-viewer]").getAttribute("data-total"))')
+    // Saved: back on the Report page, the conversation reopens with its chips and panel.
+    await p.session(ctx.admin, 'dark', 1280, 1800, `/matrix?dataset=${S.master}`)
+    await p.waitFor('[data-ask-conversations]', 20000)
+    await p.eval(`(() => { const s = document.querySelector('[data-ask-conversations]'); s.value = s.options[1].value; s.dispatchEvent(new Event('change', { bubbles: true })) })(); 0`)
+    await p.waitFor('[data-ask-text] [data-cite="R1"]', 15000)
+    const reopened = await p.eval('!!document.querySelector("[data-data-used]") && !!document.querySelector("[data-ask-chart] [data-matrix-chart]")')
+    await sleep(800)
+    await p.shot(path.join(shots, 'ask-dark-1280.png'))
+    await p.session(ctx.admin, 'light', 360, 2400, `/matrix?dataset=${S.master}`)
+    await p.waitFor('[data-ask-conversations]', 20000)
+    await p.eval(`(() => { const s = document.querySelector('[data-ask-conversations]'); s.value = s.options[1].value; s.dispatchEvent(new Event('change', { bubbles: true })) })(); 0`)
+    await p.waitFor('[data-ask-text] [data-cite="R1"]', 15000)
+    await sleep(800)
+    const overflow = await p.eval('document.documentElement.scrollWidth > window.innerWidth')
+    await p.shot(path.join(shots, 'ask-light-360.png'))
+    return ok(timing.status > 0 && timing.status < 1000 && timing.words > timing.status && timing.chunks > 3 && ui.chips.includes('R1') && ui.chart && ui.add && /headcount/.test(ui.used)
+        && added && total === first.headcount && reopened && !overflow,
+      `status line after ${Math.round(timing.status)} ms, first word after ${Math.round(timing.words)} ms, the text grew in ${timing.chunks} steps · chips ${ui.chips.join(' ')} · chart ${ui.chart}, Add to dashboard ${ui.add} → added to "My charts" ${!!added} · `
+      + `Data used: "${ui.used.slice(0, 120)}" · [R1] opened ${total} rows (the group has ${first.headcount}) · reopened with chips, chart and panel ${reopened} · 360px sideways scroll ${overflow}`)
+  } finally { ctx.answerGap = 0; await browser.close() }
+})
+
+// ---- G-M4.6 Golden questions (live, the real model) ----
+
+/** A real file's sheet as objects by header (matrix-samples/; never printed). */
+function realObjects(file, sheetName, headerRow = 1) {
+  const sheet = readWorkbook(path.join(SAMPLES, file)).find((s) => s.name === sheetName)
+  const cols = new Map(), rows = new Map()
+  for (const [ref, v] of sheet.cells) {
+    const m = /^([A-Z]+)(\d+)$/.exec(ref)
+    const r = Number(m[2])
+    if (r === headerRow) cols.set(m[1], v)
+    else if (r > headerRow) { if (!rows.has(r)) rows.set(r, {}); rows.get(r)[m[1]] = v }
+  }
+  return [...rows.values()].map((cells) => Object.fromEntries([...cols].map(([l, h]) => [String(h).trim(), cells[l] ?? null])))
+}
+
+/** What each golden question's answer must say, computed here from the real files. */
+function goldenExpect() {
+  if (ctx.golden) return ctx.golden
+  const M = realObjects(REAL.master, 'HRM'), A = realObjects(REAL.attendance, 'rptDailyAttDetailsReport_Factor', 3)
+  const H = realObjects(REAL.hrBasic, 'Sheet1'), D = realObjects(REAL.designation, 'Sheet1')
+  const t = (v) => String(v ?? '').trim()
+  const active = M.filter((r) => t(r.EmpStatusName) === 'Active')
+  const sewing = active.filter((r) => t(r.SectionName) === 'Sewing' && lineOf(r.WingName) !== null)
+  const ops = {}
+  for (const r of sewing) ops[lineOf(r.WingName)] = (ops[lineOf(r.WingName)] ?? 0) + (/operator/i.test(t(r.DesignationName)) ? 1 : 0)
+  const fewest = Math.min(...Object.values(ops))
+  const grade = new Map(D.map((r) => [t(r.DesignationName).toLowerCase(), t(r.EquivalencyGradeName)]))
+  const staff = active.filter((r) => ['Management', 'Non-Management'].includes(t(r.EmpTypeName)))
+  const pct = (a, b) => round2((100 * a) / b)
+  const units = countBy(active.filter((r) => t(r.UnitName)), (r) => t(r.UnitName))
+  const fin = active.filter((r) => t(r.SectionName) === 'Finishing')
+  const seps = countBy(H.filter((r) => t(r.EmpStatusName) && t(r.EmpStatusName) !== 'Active'), (r) => t(r.EmpStatusName))
+  const workers = active.filter((r) => ['Schedule-A', 'Schedule-B'].includes(t(r.EmpTypeName))).length
+  const otByDept = countBy(A.filter((r) => Number(r['OT Hours']) > 2), (r) => t(r.Department))
+  ctx.golden = {
+    headcount_by_unit: { numbers: Object.values(units) },
+    sewing_lines_unit1: { numbers: [new Set(sewing.filter((r) => t(r.UnitName) === 'ADL-Unit-1').map((r) => lineOf(r.WingName))).size] },
+    fewest_operators: { numbers: [fewest], anyOf: Object.entries(ops).filter(([, n]) => n === fewest).map(([l]) => Number(l)) },
+    op_helper_143: { numbers: [ops[143] ?? 0] },
+    female_pct_finishing: { numbers: [pct(fin.filter((r) => t(r.GenderName ?? r.Gender) === 'Female').length, fin.length)] },
+    // Attendance % cannot be computed for this file (no ID is in the master): the late % (C4) given as the rate is wrong.
+    late_19_may: { numbers: [A.filter((r) => t(r.Status) === 'LT').length], notRate: pct(A.filter((r) => t(r.Status) === 'LT').length, A.filter((r) => ['P', 'LT'].includes(t(r.Status))).length) },
+    ot_over_2h_by_department: { numbers: Object.values(otByDept) },
+    grade_m3: { numbers: [staff.filter((r) => grade.get(t(r.DesignationName).toLowerCase()) === 'M3').length] },
+    separations_by_status: { numbers: Object.values(seps) },
+    not_in_data: { need: true },
+    refuse_personal: { refuse: true },
+    sewing_lines_total: { numbers: [new Set(sewing.map((r) => lineOf(r.WingName))).size] },
+    female_pct: { numbers: [pct(active.filter((r) => t(r.GenderName ?? r.Gender) === 'Female').length, active.length)] },
+    late_count: { numbers: [A.filter((r) => t(r.Status) === 'LT').length] },
+    ot_over_2h: { numbers: [A.filter((r) => Number(r['OT Hours']) > 2).length] },
+    median_operators: { numbers: [median(Object.values(ops))] },
+    sewing_section_active: { numbers: [active.filter((r) => t(r.SectionName) === 'Sewing').length] },
+    no_grade_mapping: { numbers: [staff.filter((r) => !grade.has(t(r.DesignationName).toLowerCase())).length] },
+    resignations: { numbers: [seps.Resignation ?? 0] },
+    mgmt_worker_ratio: { numbers: [Math.round((staff.length / workers) * 100) / 100] },
+    largest_unit: { numbers: [Math.max(...Object.values(units))] },
+    latest_out: { text: [A.map((r) => t(r['Out Time'])).filter(Boolean).sort().at(-1)?.replace(/\s*[AP]M$/i, '')] },
+    cutting_active: { numbers: [active.filter((r) => t(r.SectionName) === 'Cutting').length] },
+    status_left: { numbers: [seps.Left ?? 0] },
+  }
+  return ctx.golden
+}
+
+/** The numbers an answer states (Bengali digits read, separators dropped, citations left out). */
+const answerNumbers = (s) => [...String(s).replace(/\[(?:R|C)\d+\]/g, ' ').replace(/[০-৯]/g, (c) => String(c.charCodeAt(0) - 0x09e6)).replace(/(\d),(\d)/g, '$1$2')
+  .matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]))
+const says = (nums, want) => nums.some((n) => n === want || Math.abs(n - want) < 0.051 || (want % 1 !== 0 && Math.abs(n - Math.round(want)) < 0.001 && false))
+
+function judge(g, want, r) {
+  const nums = answerNumbers(r.content)
+  const declined = !r.context?.results?.some((x) => x.rows?.length) && /need|refus|can't|cannot|not (?:in|available)|নেই|যাবে না|পাওয়া যায়নি|উত্তর নেই/i.test(r.content + JSON.stringify(r.context ?? {}))
+  if (want.need) return declined || r.context?.kind === 'need' || /cannot answer|নেই/.test(r.content)
+  if (want.refuse) return !r.context?.results?.some((x) => x.rows?.length && x.groupBy?.some((gb) => /name|phone|mobile/.test(gb))) && (declined || /cannot|can't|not available|নাম/i.test(r.content))
+  if (want.text) return want.text.every((s) => r.content.includes(s))
+  if (want.notRate !== undefined && says(nums, want.notRate) && /উপস্থিতির হার|attendance (?:rate|%)/i.test(r.content)) return false
+  const needed = want.anyOf ? [...want.numbers, null] : want.numbers
+  return needed.every((w) => w === null ? want.anyOf.some((l) => nums.includes(l)) : says(nums, w))
+}
+
+check('G-M4.6', 'M4', 'LIVE golden questions (Step 3: ten) with the real model on the real files: answers, correctness against independent numbers, unverified numbers, time to first word (no personal data)', async () => {
+  const ds = (await asAdmin('GET', '/api/matrix/datasets')).json?.datasets ?? []
+  const real = ds.filter((d) => !d.fileName.startsWith('fx-'))
+  const ids = {
+    master: real.find((d) => d.fileName === REAL.master && d.sheet === 'HRM')?.id,
+    attendance: real.find((d) => d.fileName === REAL.attendance)?.id,
+    hrBasic: real.find((d) => d.fileName === REAL.hrBasic)?.id,
+  }
+  if (!ids.master || !ids.attendance || !ids.hrBasic) return ok(false, 'the live imports are missing (run with --live)')
+  await useRealModel()
+  const golden = JSON.parse(read('scripts/matrix/golden.json')).questions.filter((g) => ctx.args.golden === 'all' || g.step3)
+  const expect = goldenExpect()
+  const from = ctx.fake?.requests?.length ?? 0
+  const out = []
+  let right = 0, unverified = 0, firstWords = []
+  for (const g of golden) {
+    const r = await ask(ctx.admin, { message: g.q, datasetId: ids[g.dataset] })
+    const good = r.status === 200 && judge(g, expect[g.expect], r)
+    if (good) right++
+    unverified += r.checks?.amounts?.length ?? 0
+    if (r.done?.firstWordMs) firstWords.push(r.done.firstWordMs)
+    out.push(`${g.id} [${g.lang}] ${good ? 'RIGHT' : 'WRONG'} · plan ${r.context?.kind ?? (r.content.startsWith("I couldn't") ? 'could not plan' : 'refusal/need')}${r.context?.repaired ? ' (repaired)' : ''} · first word ${((r.done?.firstWordMs ?? 0) / 1000).toFixed(1)} s · unverified ${JSON.stringify(r.checks?.amounts ?? [])}`
+      + `${r.checks?.citations?.length ? ` · unknown ${JSON.stringify(r.checks.citations)}` : ''}\n    Q: ${g.q}\n    A: ${r.content.replace(/\n/g, ' ⏎ ').slice(0, 600)}\n    expected: ${JSON.stringify(expect[g.expect])}`)
+  }
+  // No name of the real files' people in any answer (compared, never printed).
+  const names = new Set(realObjects(REAL.master, 'HRM').map((r) => String(r.Name ?? '').trim()).filter((n) => n.length > 4))
+  const answers = out.join('\n')
+  const leaked = [...names].some((n) => answers.includes(n))
+  const fw = firstWords.sort((a, b) => a - b)
+  return ok(right >= Math.ceil(golden.length * 0.84) && unverified === 0 && !leaked,
+    `${ctx.args.model}: ${right}/${golden.length} right · unverified numbers ${unverified} · personal data in answers ${leaked} · first word median ${((fw[Math.floor(fw.length / 2)] ?? 0) / 1000).toFixed(1)} s, max ${((fw.at(-1) ?? 0) / 1000).toFixed(1)} s\n${out.join('\n')}`)
+}, { live: true })
+
+check('G-M4.7', 'M4', 'LIVE the Report page with the real model\'s summary and an Ask conversation, on the real master and attendance: light and dark, desktop and 360 px (personal data blurred)', async () => {
+  const ds = (await asAdmin('GET', '/api/matrix/datasets')).json?.datasets ?? []
+  const real = ds.filter((d) => !d.fileName.startsWith('fx-'))
+  const sets = [['master', real.find((d) => d.fileName === REAL.master && d.sheet === 'HRM')?.id], ['attendance', real.find((d) => d.fileName === REAL.attendance)?.id]]
+  if (sets.some(([, id]) => !id)) return ok(false, 'the live imports are missing (run with --live)')
+  await useRealModel()
+  const out = []
+  let pass = true
+  // The page shows the saved summary: have the real model write it first (an earlier check's fake one may be saved).
+  for (const [, id] of sets) for (const language of ['bn', 'en']) await asAdmin('POST', `/api/matrix/datasets/${id}/summary`, { language })
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    for (const [name, id] of sets) {
+      const convs =(await asAdmin('GET', `/api/matrix/conversations?dataset=${id}`)).json?.conversations ?? []
+      const p = await browser.page()
+      for (const theme of ['light', 'dark']) {
+        for (const width of [1280, 360]) {
+          await p.session(ctx.admin, theme, width, width === 360 ? 7000 : 3200, `/matrix?dataset=${id}`)
+          await p.waitFor('[data-summary-text]', 120000)
+          if (convs.length) {
+            await p.eval(`(() => { const s = document.querySelector('[data-ask-conversations]'); s.value = s.options[1].value; s.dispatchEvent(new Event('change', { bubbles: true })) })(); 0`)
+            await p.waitFor('[data-ask-text]', 20000)
+          }
+          await sleep(2500)
+          await p.blur('[data-personal]')
+          await p.shot(path.join(ctx.args.shots, `live-ask-${name}-${theme}-${width}.png`))
+          if (width === 360 && await p.eval('document.documentElement.scrollWidth > window.innerWidth')) { pass = false; out.push(`${name} ${theme} 360px scrolls sideways`) }
+        }
+      }
+      out.push(`${name}: summary shown, ${convs.length} saved conversation(s), the first opened`)
+    }
+  } finally { await browser.close() }
+  return ok(pass, `${out.join(' · ')} · 8 screenshots in ${ctx.args.shots} (live-ask-*.png)`)
+}, { live: true })
+
+// ---- G-M4.3 No personal data to the model (after the summary and chat checks) ----
+
+check('G-M4.3', 'M4', 'no name or employee ID of the fixtures reached the model in any request: summaries, plans and answers', async () => {
+  if (!fakeBodies().length) {
+    // Run alone: give the model something to have received first.
+    const S = await m3Setup()
+    ctx.summaryMode = 'faithful'
+    for (const id of [S.master, S.att2, S.hr]) await asAdmin('POST', `/api/matrix/datasets/${id}/summary`, { language: 'en' })
+  }
+  const bodies = fakeBodies()
+  const found = leaks(bodies)
+  const { names, ids } = personalStrings()
+  return ok(found.length === 0 && bodies.length > 0, `${bodies.length} model requests scanned for ${names.size} names and ${ids.size} IDs · found ${found.length ? found.join(', ') : 'none'}`)
+})
+
+// ---- live: the real model ----
+
+/** Restarts the API against the real Ollama with the model to test (live checks only). */
+async function useRealModel() {
+  if (ctx.realModel) return
+  const settings = read('backend/appsettings.json').split(/\r?\n/).filter((l) => !l.trim().startsWith('//')).join('\n').replace(/,(\s*[}\]])/g, '$1')
+  const url = process.env.MATRIX_EVAL_OLLAMA_URL ?? JSON.parse(settings).Ollama.Url
+  await ctx.api.stop()
+  ctx.api = await startApi({ fakeUrl: url, runDir: ctx.api.runDir, port: ctx.api.port,
+    env: { Matrix__Model: ctx.args.model, Extraction__DefaultModel: ctx.args.model, Ollama__DefaultModel: ctx.args.model } })
+  ctx.admin = await login(process.env.MATRIX_EVAL_ADMIN_USER, process.env.MATRIX_EVAL_ADMIN_SECRET)
+  ctx.realModel = true
+}
+
+check('G-M4.1', 'M4', 'LIVE the summary of the real master and attendance with the real model, Bengali and English (aggregates only)', async () => {
+  const ds = (await asAdmin('GET', '/api/matrix/datasets')).json?.datasets ?? []
+  const real = ds.filter((d) => !d.fileName.startsWith('fx-'))
+  const master = real.find((d) => d.fileName === REAL.master && d.sheet === 'HRM')?.id
+  const att = real.find((d) => d.fileName === REAL.attendance)?.id
+  if (!master || !att) return ok(false, 'the live master and attendance imports are missing (run with --live)')
+  await useRealModel()
+  const out = []
+  let pass = true
+  for (const [name, id] of [['master', master], ['attendance', att]]) {
+    for (const lang of ['en', 'bn']) {
+      const t0 = Date.now()
+      const r = await asAdmin('POST', `/api/matrix/datasets/${id}/summary`, { language: lang })
+      const s = r.json
+      const secs = ((Date.now() - t0) / 1000).toFixed(1)
+      const good = r.status === 200 && s.unverified.length === 0 && s.unknownCitations.length === 0
+      pass &&= r.status === 200
+      out.push(`${name} ${lang} (${s?.model}, ${secs} s): ${s?.points} points, unverified ${JSON.stringify(s?.unverified)}, uncited ${JSON.stringify(s?.uncitedPoints)}, unknown ${JSON.stringify(s?.unknownCitations)}${good ? '' : ' ⚠'}\n${(s?.text ?? r.text).replace(/\n/g, ' ⏎ ')}`)
+    }
+  }
+  return ok(pass, '\n' + out.join('\n'))
+}, { live: true })
+
 // ─────────────────────────────── users ───────────────────────────────
 
 /**
@@ -1711,7 +2223,7 @@ async function users() {
   for (const key of ['tab:matrix', 'section:matrix.data', 'section:matrix.dashboards'])
     db.prepare("insert into UserPermissionOverrides (UserId, Key, Effect, UpdatedAtUtc) values (?, ?, 'allow', ?)").run(u.limited.id, key, new Date().toISOString())
   db.close()
-  ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port })
+  ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir: ctx.api.runDir, port: ctx.api.port, env: API_ENV })
   ctx.users = u
   return u
 }
@@ -1719,13 +2231,15 @@ async function users() {
 // ─────────────────────────────── runner ───────────────────────────────
 
 function parseArgs(argv) {
-  const a = { phase: 'M1', only: null, build: true, live: false, shots: path.join(EVAL_ROOT, 'shots') }
+  const a = { phase: 'M1', only: null, build: true, live: false, shots: path.join(EVAL_ROOT, 'shots'), model: 'gemma4:12b' }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--phase') a.phase = argv[++i]
     else if (argv[i] === '--only') a.only = argv[++i]
     else if (argv[i] === '--no-build') a.build = false
     else if (argv[i] === '--live') a.live = true
     else if (argv[i] === '--shots') a.shots = path.resolve(argv[++i])
+    else if (argv[i] === '--model') a.model = argv[++i]
+    else if (argv[i] === '--golden') a.golden = argv[++i]
   }
   return a
 }
@@ -1740,6 +2254,10 @@ function syncWebRoot() {
 /** The model's answer to a mapping-suggestion request: every header it is asked about, mapped or "none". */
 function scriptFake(fake) {
   fake.setChatScript((body) => {
+    const system = body?.messages?.[0]?.content ?? ''
+    if (/^You write the summary/.test(system)) return fakeSummary(body)
+    if (body?.format?.properties?.kind) return fakePlan(body)
+    if (/^You answer a manager's question/.test(system)) return fakeAnswer(body)
     const schema = JSON.stringify(body?.format ?? {})
     if (!schema.includes('suggestions')) return null
     const ask = JSON.stringify(body.messages ?? [])
@@ -1771,7 +2289,7 @@ async function main() {
   scriptFake(ctx.fake)
   let failed = 0
   try {
-    ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir, env: { Ollama__DefaultModel: 'fake-ok', Extraction__DefaultModel: 'fake-ok', Matrix__Model: 'fake-ok' } })
+    ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir, env: API_ENV })
     ctx.admin = await login(process.env.MATRIX_EVAL_ADMIN_USER, process.env.MATRIX_EVAL_ADMIN_SECRET)
     console.log(`fake ${ctx.fake.url} · api ${ctx.api.url} · db ${ctx.api.dbPath}${args.live ? ' · LIVE: counts only' : ''}\n`)
     console.log('id | check | result | detail')

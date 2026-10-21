@@ -151,3 +151,64 @@ export function getMatrixCard(datasetId) {
 export function runMatrixReport(datasetId, { compare = false } = {}) {
   return http.post(`/matrix/datasets/${datasetId}/report`, { filters: null, compare })
 }
+
+// ---- The summary (§3.8) ----
+
+/** The saved summary in a language ("bn" | "en"); rejects with 404 when none has been written. */
+export function getMatrixSummary(datasetId, lang) {
+  return http.get(`/matrix/datasets/${datasetId}/summary?lang=${lang}`)
+}
+
+/** Has the model write the summary from the report card; the server checks and saves it. */
+export function writeMatrixSummary(datasetId, lang, model) {
+  return http.post(`/matrix/datasets/${datasetId}/summary`, { language: lang, model: model || null })
+}
+
+// ---- Ask (§3.9) ----
+
+/**
+ * Ask about a dataset; the answer streams. Frames: `status` (the line shown until the
+ * first word), `context` (the plan, the queries run and their labelled rows — the Data
+ * used panel), `content`, `formula`, `unverified` (numbers, formulas and citations the
+ * checks could not trace), `error`, `done` (timings). Resolves with the conversation id.
+ */
+export async function streamMatrixChat({ conversationId, message, datasetId, model }, handlers, signal) {
+  let buffer = ''
+  const consume = (line) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    let frame
+    try { frame = JSON.parse(trimmed) } catch { return }
+    switch (frame.type) {
+      case 'status': handlers.onStatus?.(frame.text ?? ''); break
+      case 'context': handlers.onContext?.(frame); break
+      case 'content': handlers.onContent?.(frame.text ?? ''); break
+      case 'formula': handlers.onFormula?.(frame); break
+      case 'unverified': handlers.onUnverified?.(frame); break
+      case 'error': handlers.onError?.(frame.message ?? 'The model failed.'); break
+      case 'done': handlers.onDone?.(frame); break
+    }
+  }
+  const res = await http.stream('/matrix/chat', { conversationId: conversationId ?? null, message, datasetId, model: model ?? null }, (chunk) => {
+    buffer += chunk
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    lines.forEach(consume)
+  }, signal)
+  consume(buffer)
+  return Number(res.headers.get('X-Conversation-Id')) || conversationId
+}
+
+/** This person's Ask conversations about a dataset: { conversations: [{ id, title, scope, createdAt, messages }] }. */
+export function listMatrixConversations(datasetId) {
+  return http.get(`/matrix/conversations${datasetId ? `?dataset=${datasetId}` : ''}`)
+}
+
+/** A conversation's messages: [{ id, role, content, meta, createdAt }]. */
+export function getMatrixConversation(id) {
+  return http.get(`/matrix/conversations/${id}`)
+}
+
+export function deleteMatrixConversation(id) {
+  return http.del(`/matrix/conversations/${id}`)
+}

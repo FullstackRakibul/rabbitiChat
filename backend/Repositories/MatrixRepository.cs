@@ -230,6 +230,47 @@ public class MatrixRepository : IMatrixRepository
         await _db.SaveChangesAsync(ct);
     }
 
+    public Task<Conversation?> GetConversationAsync(int id, int userId, CancellationToken ct = default) =>
+        _db.Conversations.FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId && c.Kind == MatrixChat.ConversationKind, ct);
+
+    public async Task<Conversation> AddConversationAsync(Conversation conversation, CancellationToken ct = default)
+    {
+        _db.Conversations.Add(conversation);
+        await _db.SaveChangesAsync(ct);
+        return conversation;
+    }
+
+    public Task<List<Conversation>> ListConversationsAsync(int userId, string? scope, CancellationToken ct = default) =>
+        _db.Conversations.AsNoTracking().Include(c => c.Messages)
+            .Where(c => c.UserId == userId && c.Kind == MatrixChat.ConversationKind && (scope == null || c.Scope == scope))
+            .OrderByDescending(c => c.Id).Take(100).ToListAsync(ct);
+
+    public async Task DeleteConversationAsync(Conversation conversation, CancellationToken ct = default)
+    {
+        _db.Messages.RemoveRange(await _db.Messages.Where(m => m.ConversationId == conversation.Id).ToListAsync(ct));
+        _db.Conversations.Remove(conversation);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public Task<List<Message>> MessagesAsync(int conversationId, CancellationToken ct = default) =>
+        _db.Messages.AsNoTracking().Where(m => m.ConversationId == conversationId).OrderBy(m => m.Id).ToListAsync(ct);
+
+    public async Task AddMessageAsync(Message message, CancellationToken ct = default)
+    {
+        _db.Messages.Add(message);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public Task<MxSummary?> GetSummaryAsync(int datasetId, string language, CancellationToken ct = default) =>
+        _db.MxSummaries.AsNoTracking().Where(s => s.DatasetId == datasetId && s.Language == language).OrderByDescending(s => s.Id).FirstOrDefaultAsync(ct);
+
+    public async Task SaveSummaryAsync(MxSummary summary, CancellationToken ct = default)
+    {
+        _db.MxSummaries.RemoveRange(await _db.MxSummaries.Where(s => s.DatasetId == summary.DatasetId && s.Language == summary.Language).ToListAsync(ct));
+        _db.MxSummaries.Add(summary);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public Task<MxReportCard?> GetCardAsync(int datasetId, CancellationToken ct = default) =>
         _db.MxReportCards.AsNoTracking().Where(c => c.DatasetId == datasetId).OrderByDescending(c => c.Id).FirstOrDefaultAsync(ct);
 

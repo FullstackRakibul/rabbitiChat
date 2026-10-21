@@ -184,6 +184,11 @@ const lineRows = computed(() => (r.value?.rows ?? []))
         </table>
       </div>
 
+      <!-- a breakdown with nothing in it says so, rather than drawing empty axes -->
+      <p v-else-if="type !== 'gauge' && !r.rows?.length && !r.trend?.length" class="text-xs text-muted-foreground" data-w-empty>
+        কোনো সারি মেলেনি <span class="opacity-70">No rows matched</span><span v-if="r.detail" class="opacity-70"> — {{ r.detail }}</span>
+      </p>
+
       <!-- charts -->
       <MatrixChart v-else ref="chartRef" :type="type" :rows="r.rows" :group-by="groupBy" :measures="measures"
         :trend="r.trend" :compare-rows="compareMode ? r.compare?.rows ?? null : null"

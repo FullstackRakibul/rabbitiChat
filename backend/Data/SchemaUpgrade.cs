@@ -39,6 +39,8 @@ public static class SchemaUpgrade
         EnsureRbacSchema(db);
         EnsureAccessSchema(db);
         EnsureTablesFromModel(db, "Mx");
+        AddColumnIfMissing(db, "Conversations", "Scope", @"ALTER TABLE ""Conversations"" ADD COLUMN ""Scope"" TEXT NULL;");
+        AddColumnIfMissing(db, "Messages", "MetaJson", @"ALTER TABLE ""Messages"" ADD COLUMN ""MetaJson"" TEXT NULL;");
         EnsureRoleModelPolicyTable(db);
         EnsureIeltsTables(db);
         EnsureOddityTables(db);

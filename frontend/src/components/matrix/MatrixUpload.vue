@@ -53,7 +53,7 @@ function onDrop(e) {
       <Loader2 v-if="busy" class="size-6 animate-spin text-muted-foreground" aria-hidden="true" />
       <Upload v-else class="size-6 text-muted-foreground" aria-hidden="true" />
       <span class="text-sm font-medium">ফাইল এখানে ছাড়ুন <span class="font-normal text-muted-foreground">Drop Excel or CSV files</span></span>
-      <span class="text-xs text-muted-foreground">Manpower lists, master files, daily attendance, designation lists · up to 20 MB each</span>
+      <span class="text-xs text-muted-foreground">Manpower lists, master files, daily attendance, designation lists · up to 50 MB each</span>
       <input ref="input" type="file" accept=".xlsx,.xlsm,.csv" multiple class="sr-only" data-matrix-upload @change="send($event.target.files)" />
     </label>
     <p v-else class="text-sm text-muted-foreground">Uploading needs the “Upload and import files” permission.</p>
