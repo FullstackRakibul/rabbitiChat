@@ -16,12 +16,17 @@ namespace RabbitIC.Api.Matrix;
 
 public static class ReportCardBuilder
 {
+    /// <summary>Cards made by an older builder are made again when read (CardAsync).</summary>
+    public const int Version = 2;
+
+    /// <summary>A per-line KPI shown as one tile: its median, citing every row it counts (the KPI named here).</summary>
+    private static readonly Dictionary<string, string> MedianCites = new() { ["operators_per_line"] = "sewing_operators" };
     private sealed record Plan(string[] Items, string[] Breakdowns);
 
     private static Plan PlanFor(string kind) => kind switch
     {
         MxReportKind.Master or MxReportKind.Manpower => new(
-            new[] { "active_headcount", "female_pct", "sewing_lines_total", "mgmt_worker_ratio", "headcount_without_grade_mapping" },
+            new[] { "active_headcount", "sewing_lines_total", "operators_per_line", "female_pct", "mgmt_worker_ratio", "headcount_without_grade_mapping" },
             new[] { "headcount_by_unit", "headcount_by_section", "operators_per_line", "headcount_by_designation" }),
         MxReportKind.AttendanceDaily => new(
             new[] { "rows_total", "att_present", "att_late", "late_pct", "ot_over_2h", "ot_over_4h", "ot_total", "earliest_in", "latest_out" },
@@ -45,10 +50,19 @@ public static class ReportCardBuilder
             catch (MxQueryError) { return null; }
         }
 
+        // A per-line KPI's value is its median line.
+        static double? ValueOf(MxKpiResult r) => r.Value ?? r.Summary?.Median;
+
         var items = new List<MxCardItem>();
         foreach (var key in plan.Items)
-            if (await Try(key, d) is { } r && (r.Value is not null || r.Text is not null))
+        {
+            if (await Try(key, d) is not { } r || (ValueOf(r) is null && r.Text is null)) continue;
+            if (r.Summary is { } s && MedianCites.TryGetValue(key, out var citeKey))
+                items.Add(new MxCardItem(key, $"{r.NameEn} (median)", $"{r.NameBn} (মধ্যমা)", s.Median, null, "per line",
+                    (await Try(citeKey, d))?.Cite, $"lowest {Fmt(s.Min)}, highest {Fmt(s.Max)}, over {s.Count} lines"));
+            else
                 items.Add(new MxCardItem(key, r.NameEn, r.NameBn, r.Value, r.Text, r.Unit, r.Cite));
+        }
 
         var breakdowns = new List<MxCardBreakdown>();
         foreach (var key in plan.Breakdowns)
@@ -68,7 +82,7 @@ public static class ReportCardBuilder
         {
             var changes = new List<MxCardChange>();
             foreach (var item in items.Where(i => i.Value is not null))
-                if (await Try(item.Key, previous) is { Value: { } before })
+                if (await Try(item.Key, previous) is { } pr && ValueOf(pr) is { } before)
                     changes.Add(new MxCardChange(item.Key, item.Label, before, item.Value, Math.Round(item.Value!.Value - before, 2)));
             comparison = new MxCardComparison(previous.Id, previous.ReportDate, changes);
         }
@@ -78,7 +92,7 @@ public static class ReportCardBuilder
             scope.AddRange(units.Rows.Select(x => x.GetValueOrDefault("unit")?.ToString()).Where(u => u is not null).Select(u => u!).Take(20));
 
         var quality = issues.Where(i => i.State == MxQualityIssue.Open).Select(i => new MxCardIssue(i.Check, i.Severity, i.Count)).ToList();
-        var card = new MxReportCardDto(d.Id, d.ReportKind, d.Name, d.ReportDate, scope, items, breakdowns, comparison, quality, 0, DateTime.UtcNow);
+        var card = new MxReportCardDto(d.Id, d.ReportKind, d.Name, d.ReportDate, scope, items, breakdowns, comparison, quality, 0, DateTime.UtcNow, Version);
         return card with { Tokens = PoPromptBuilder.EstimateTokens(Render(card)) };
     }
 
@@ -92,7 +106,7 @@ public static class ReportCardBuilder
         sb.AppendLine($"Report card — {card.Kind}, {card.Name}, report date {card.ReportDate ?? "unknown"}");
         if (card.Scope.Count > 0) sb.AppendLine($"Scope: {string.Join(", ", card.Scope)}");
         var n = 0;
-        foreach (var i in card.Items) sb.AppendLine($"[C{++n}] {i.Label} ({i.LabelBn}): {i.Text ?? Fmt(i.Value)} {i.Unit}");
+        foreach (var i in card.Items) sb.AppendLine($"[C{++n}] {i.Label} ({i.LabelBn}): {i.Text ?? Fmt(i.Value)} {i.Unit}{(i.Detail is null ? "" : $" ({i.Detail})")}");
         foreach (var b in card.Breakdowns)
         {
             sb.AppendLine($"{b.Label} ({b.LabelBn}) — highest: {string.Join("; ", b.Top.Select(e => $"[C{++n}] {e.Label} {Fmt(e.Value)}"))}");

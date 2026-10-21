@@ -206,15 +206,30 @@ public partial class MatrixService
         var (scope, error) = ScopeOf(input.Filters);
         if (error is not null) return MxResult<MxDashboardRun>.Fail(MxOutcome.Invalid, error);
 
+        var widgets = (Layout(dash)["widgets"] as JsonArray ?? new JsonArray()).OfType<JsonObject>().ToList();
+        return MxResult<MxDashboardRun>.Success(await RunWidgetsAsync(user, dash.Id, dash.Name, widgets, scope, input, ct));
+    }
+
+    /// <summary>A dataset's Report page: the automatic charts of its kind, run on this dataset.</summary>
+    public async Task<MxResult<MxDashboardRun>> RunReportAsync(User user, int datasetId, MxDashboardRunInput input, CancellationToken ct = default)
+    {
+        var d = await _repo.GetDatasetAsync(datasetId, ct);
+        if (d is null) return MxResult<MxDashboardRun>.Fail(MxOutcome.NotFound, "No such dataset.");
+        var (scope, error) = ScopeOf(input.Filters);
+        if (error is not null) return MxResult<MxDashboardRun>.Fail(MxOutcome.Invalid, error);
+        return MxResult<MxDashboardRun>.Success(await RunWidgetsAsync(user, d.Id, d.Name, DashboardLibrary.ReportWidgets(d), scope, input, ct));
+    }
+
+    private async Task<MxDashboardRun> RunWidgetsAsync(User user, int id, string name, List<JsonObject> widgets, List<MxScopeFilter> scope,
+        MxDashboardRunInput input, CancellationToken ct)
+    {
         var ctx = await QueryContextAsync(user, ct);
         var defs = (await _repo.ListKpiDefinitionsAsync(ct)).ToDictionary(k => k.Key);
-        var layout = Layout(dash);
-        var widgets = (layout["widgets"] as JsonArray ?? new JsonArray()).OfType<JsonObject>().ToList();
         var used = new Dictionary<int, MxQueryDataset>();
         var results = new List<MxWidgetResult>();
         foreach (var w in widgets)
             results.Add(await RunWidgetAsync(ctx, w, scope, input, defs, used, ct));
-        return MxResult<MxDashboardRun>.Success(new MxDashboardRun(dash.Id, dash.Name, results, await FilterOptionsAsync(ctx, widgets, ct), used.Values.ToList()));
+        return new MxDashboardRun(id, name, results, await FilterOptionsAsync(ctx, widgets, ct), used.Values.ToList()) { Layout = widgets.Select(w => JsonSerializer.SerializeToElement(w)).ToList() };
     }
 
     private static JsonElement? ThresholdsOf(Dictionary<string, MxKpiDefinition> defs, string? key)

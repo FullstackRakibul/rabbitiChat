@@ -201,7 +201,8 @@ public sealed record MxKpiResult(string Key, string NameEn, string NameBn, strin
 
 // ---- Report cards (§3.8) ----
 
-public sealed record MxCardItem(string Key, string Label, string LabelBn, double? Value, string? Text, string Unit, string? Cite);
+/// <param name="Detail">More of the item in words, such as a median's lowest and highest line.</param>
+public sealed record MxCardItem(string Key, string Label, string LabelBn, double? Value, string? Text, string Unit, string? Cite, string? Detail = null);
 
 public sealed record MxCardEntry(string Label, double? Value, string Unit, string? Cite);
 
@@ -215,7 +216,7 @@ public sealed record MxCardIssue(string Check, string Severity, int Count);
 
 public sealed record MxReportCardDto(int DatasetId, string Kind, string Name, string? ReportDate, List<string> Scope,
     List<MxCardItem> Items, List<MxCardBreakdown> Breakdowns, MxCardComparison? Comparison, List<MxCardIssue> Quality,
-    int Tokens, DateTime CreatedAtUtc);
+    int Tokens, DateTime CreatedAtUtc, int Version = 0);
 
 // ---- Dashboards (§3.8) ----
 
@@ -252,7 +253,11 @@ public sealed record MxWidgetResult(
     int? DatasetId, string? ReportDate, string? Error);
 
 public sealed record MxDashboardRun(int Id, string Name, List<MxWidgetResult> Widgets,
-    Dictionary<string, List<object>> FilterOptions, List<MxQueryDataset> Datasets);
+    Dictionary<string, List<object>> FilterOptions, List<MxQueryDataset> Datasets)
+{
+    /// <summary>The widgets that ran (their place on the grid): the Report page has no saved layout of its own.</summary>
+    public List<System.Text.Json.JsonElement> Layout { get; init; } = new();
+}
 
 /// <summary>A file to send: its name, media type and bytes.</summary>
 public sealed record MxExportFile(string FileName, string ContentType, byte[] Bytes, List<string> Headers);

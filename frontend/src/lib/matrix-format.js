@@ -54,3 +54,14 @@ export function formatBytes(n) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
+
+/** A value as its unit reads: 12,34,567 people; 5.92%; 1.35 (a ratio); ৳ 12,000. Text passes through. */
+export function formatValue(v, unit) {
+  if (v === null || v === undefined) return '—'
+  if (typeof v === 'string') return v
+  if (unit === '%') return `${lakh(Math.round(v * 100) / 100)}%`
+  if (unit === 'ratio') return Number(v).toFixed(2)
+  if (unit === 'hours') return `${lakh(Math.round(v * 100) / 100)} h`
+  if (unit === 'tk') return `৳ ${lakh(Math.round(v))}`
+  return lakh(Math.round(v * 100) / 100)
+}

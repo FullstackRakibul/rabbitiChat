@@ -192,6 +192,47 @@ public static partial class DashboardLibrary
         return added;
     }
 
+    // ───────────────────────── the Report page ─────────────────────────
+
+    /// <summary>
+    /// The charts of a dataset's Report page: the automatic dashboards of its kind, without
+    /// their tiles (the report card gives those) and pointed at this dataset rather than the
+    /// current one of its kind. Widgets about another kind stay on the dashboards.
+    /// </summary>
+    public static List<JsonObject> ReportWidgets(MxDataset d)
+    {
+        var list = new List<JsonObject>();
+        var top = 0;
+        var own = d.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        foreach (var auto in AutoFor(d.ReportKind).Where(a => a != MxDashboardAuto.DataQuality))
+        {
+            var prefix = auto switch
+            {
+                MxDashboardAuto.ManpowerOverview => "mo", MxDashboardAuto.LineBoard => "lb", MxDashboardAuto.AttendanceToday => "at", _ => "js",
+            };
+            var widgets = AutoLayout(auto, Array.Empty<string>())["widgets"]!.AsArray().OfType<JsonObject>()
+                .Select(w => w.DeepClone().AsObject()).Where(w => w["type"]?.ToString() != "kpi").ToList();
+            foreach (var w in widgets)
+            {
+                if (w["dataset"]?.ToString() == $"current:{d.ReportKind}") w["dataset"] = own;
+                if (w["query"] is JsonObject q && q["dataset"]?.ToString() == $"current:{d.ReportKind}") q["dataset"] = own;
+            }
+            widgets = widgets.Where(w => (w["dataset"] ?? w["query"]?["dataset"])?.ToString() == own).ToList();
+            if (widgets.Count == 0) continue;
+            var minY = widgets.Min(w => w["y"]!.GetValue<int>());
+            var bottom = top;
+            foreach (var w in widgets.OrderBy(w => w["y"]!.GetValue<int>()).ThenBy(w => w["x"]!.GetValue<int>()))
+            {
+                w["id"] = $"{prefix}-{w["id"]}";
+                w["y"] = w["y"]!.GetValue<int>() - minY + top;
+                bottom = Math.Max(bottom, w["y"]!.GetValue<int>() + w["h"]!.GetValue<int>());
+                list.Add(w);
+            }
+            top = bottom;
+        }
+        return list;
+    }
+
     // ───────────────────────── validation ─────────────────────────
 
     [GeneratedRegex(@"^[A-Za-z0-9_-]{1,40}$")]

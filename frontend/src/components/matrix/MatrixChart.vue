@@ -38,6 +38,8 @@ const props = defineProps({
   target: { type: Number, default: null },
   /** (field, value) → label shown for a group value. */
   labelOf: { type: Function, default: (_f, v) => (v === null || v === undefined ? '(none)' : String(v)) },
+  /** The gauge's value as the KPI's unit reads (a ratio to two places). */
+  format: { type: Function, default: (v) => lakh(v) },
   measureLabel: { type: Function, default: (m) => m },
   title: { type: String, default: '' },
 })
@@ -100,7 +102,7 @@ function build() {
       progress: { show: true, width: 12, itemStyle: { color: stateColour(props.state) ?? colors[0] } },
       axisLine: { lineStyle: { width: 12, color: [[1, token('--muted')]] } },
       axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false },
-      detail: { valueAnimation: true, fontSize: 22, color: fg, offsetCenter: [0, '10%'], formatter: (x) => lakh(x) },
+      detail: { valueAnimation: true, fontSize: 22, color: fg, offsetCenter: [0, '10%'], formatter: (x) => props.format(x) },
       data: [{ value: v }],
     }] }
   }

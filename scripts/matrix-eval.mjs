@@ -530,7 +530,7 @@ check('G-M1.9', 'M1', 'the viewer opens 8,500 rows virtualised and a highlight t
   const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
   try {
     const p = await browser.page()
-    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dataset=${master.id}`)
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dataset=${master.id}&tab=data`)
     try { await p.waitFor('[data-matrix-viewer] [data-row]', 15000) } catch (e) {
       await p.shot(path.join(shots, 'failure-viewer.png'))
       const grid = await p.eval(`JSON.stringify((() => { const g = document.querySelector('[data-matrix-grid]'); return g ? { h: g.clientHeight, w: g.clientWidth, kids: g.firstElementChild?.childElementCount, html: g.outerHTML.slice(0, 300) } : 'no grid' })())`)
@@ -1413,8 +1413,8 @@ check('G-M3.7', 'M3', 'no hard-coded colours in Matrix code; chart colours are t
 
 // ---- G-M3.8–9 Secrets: none in committed config, none read from appsettings ----
 
-check('G-M3.8', 'M3', 'no key-, token- or password-looking value in any committed config file (the scanner proven on planted samples)', async () => {
-  const { files, findings } = scanRepo(REPO)
+check('G-M3.8', 'M3', 'no key-, token- or password-looking value in any committed (or staged) config file (the scanner proven on planted samples)', async () => {
+  const { files, findings, unstaged } = scanRepo(REPO)
   // Planted samples, built here so no real-looking secret is written into this file.
   const fake = (prefix, n) => prefix + 'Ab3'.repeat(Math.ceil(n / 3)).slice(0, n)
   const positives = [
@@ -1429,7 +1429,7 @@ check('G-M3.8', 'M3', 'no key-, token- or password-looking value in any committe
   const caught = positives.filter((s) => scanText(s).length > 0).length
   const quiet = negatives.filter((s) => scanText(s).length === 0).length
   return ok(findings.length === 0 && caught === positives.length && quiet === negatives.length && files.some((f) => f.endsWith('appsettings.json')),
-    `${files.length} committed config files scanned (${files.join(', ')}) · findings ${findings.length ? findings.map((f) => `${f.file}:${f.line} ${f.key ?? ''} (${f.rule})`).join(' | ') : 'none'} · scanner: ${caught}/${positives.length} planted secrets caught, ${quiet}/${negatives.length} placeholders left alone`)
+    `${files.length} committed config files scanned as git holds them (${files.join(', ')}) · findings ${findings.length ? findings.map((f) => `${f.file}:${f.line} ${f.key ?? ''} (${f.rule})`).join(' | ') : 'none'} · scanner: ${caught}/${positives.length} planted secrets caught, ${quiet}/${negatives.length} placeholders left alone${unstaged.length ? ` · NOT STAGED, keep it so: a secret-looking value in the local copy of ${unstaged.join(', ')}` : ''}`)
 })
 
 check('G-M3.9', 'M3', 'a key put in appsettings.json is never read (search reports not_configured, the log names the key, not the value); the environment\'s key is', async () => {
@@ -1521,6 +1521,128 @@ check('G-M3.12', 'M3', 'Definitions lists every KPI with its formula in words an
       `${shown.kpis}/${kpis.length} KPIs, ${shown.words} with their formula in words · ${shown.fields}/${fields.length} fields · admin edit controls ${shown.edit}, saved through the page ${JSON.stringify(saved)} · System (no kpis.edit) edit controls ${sysEdit}`)
   } finally { await browser.close() }
 })
+
+// ---- G-M3.13–15 The Report page (a dataset opens on its report, the table is the Data tab) ----
+
+check('G-M3.13', 'M3', 'an import through the page lands on the Report: its tiles are the report card\'s, and each opens exactly its rows (screenshots)', async () => {
+  await m3Setup()
+  const shots = ctx.args.shots
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, '/matrix')
+    // Choose the file in the upload box, as a person would; its layout is known, so it imports at once.
+    await p.setFiles('[data-matrix-upload]', [path.join(FIXTURES, 'fx-attendance-2.xlsx')])
+    await p.waitFor('[data-report] [data-card-item]', 30000)
+    const id = Number(new URL(await p.eval('location.href')).searchParams.get('dataset'))
+    const tab = await p.eval('document.querySelector("[data-dataset-tab][aria-current=page]")?.getAttribute("data-dataset-tab")')
+    await sleep(800)
+    await p.shot(path.join(shots, 'report-attendance-light-1280.png'))
+    const card = (await asAdmin('GET', `/api/matrix/datasets/${id}/card`)).json
+    const tiles = await p.eval(`[...document.querySelectorAll('[data-card-item]')].map((e) => [e.getAttribute('data-card-item'), e.getAttribute('data-value')])`)
+    const sameTiles = JSON.stringify(tiles) === JSON.stringify(card.items.map((i) => [i.key, i.value === null ? null : String(i.value)]))
+    // Each counted tile opens the viewer on exactly as many rows as it says.
+    const opened = []
+    for (const item of card.items.filter((i) => i.unit === 'people' && i.cite).slice(0, 4)) {
+      await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dataset=${id}`)
+      await p.click(`[data-card-item="${item.key}"]`)
+      await p.waitFor('[data-matrix-viewer]', 15000)
+      await sleep(800)
+      opened.push([item.key, item.value, await p.eval('Number(document.querySelector("[data-matrix-viewer]").getAttribute("data-total"))')])
+    }
+    // Compare with previous: this snapshot has one before it (the earlier 20 May import).
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dataset=${id}`)
+    await p.waitFor('[data-report-compare]', 15000)
+    await p.click('[data-report-compare]')
+    await p.waitFor('[data-card-change]', 10000)
+    const changes = await p.eval('document.querySelectorAll("[data-card-change]").length')
+    await p.shot(path.join(shots, 'report-attendance-compare-light-1280.png'))
+    await p.click('[data-dataset-tab="data"]')
+    await p.waitFor('[data-matrix-viewer]', 15000)
+    const dataTab = await p.eval('!!document.querySelector("[data-matrix-viewer]")')
+    return ok(id > 0 && tab === 'report' && sameTiles && opened.length > 0 && opened.every(([, v, n]) => v === n) && changes === card.comparison?.items?.length && dataTab,
+      `uploaded in the page → dataset ${id}, tab ${tab} · tiles equal the card ${sameTiles} (${tiles.map(([k, v]) => `${k} ${v}`).join(', ')}) · `
+      + `opened: ${opened.map(([k, v, n]) => `${k} ${v} → ${n} rows`).join(', ')} · compare with ${card.comparison?.previousDate}: ${changes} changes shown · Data tab shows the viewer ${dataTab}`)
+  } finally { await browser.close() }
+})
+
+check('G-M3.14', 'M3', 'the Report\'s charts are its kind\'s automatic charts on that dataset, each equal to its own run; operators per line is a tile; compare only when there is a previous snapshot', async () => {
+  const S = await m3Setup()
+  const out = []
+  let pass = true
+  for (const [name, id, kinds] of [['master', S.master, ['mo-', 'lb-']], ['attendance', S.att2, ['at-']], ['separation list', S.hr, ['js-']]]) {
+    const run = (await asAdmin('POST', `/api/matrix/datasets/${id}/report`, { compare: true })).json
+    const card = (await asAdmin('GET', `/api/matrix/datasets/${id}/card`)).json
+    let equal = 0
+    const bad = []
+    for (const w of run?.widgets ?? []) {
+      if (w.error) { bad.push(`${w.id}: ${w.error}`); continue }
+      const again = w.kpi ? (await runKpi(ctx.admin, w.kpi, w.input)).json : (await asAdmin('POST', '/api/matrix/query', { query: w.query })).json
+      if (plainRows(again?.rows) === plainRows(w.rows) && (!w.kpi || again?.value === w.value) && w.datasetId === id) equal++
+      else bad.push(`${w.id} differs or is not on dataset ${id}`)
+    }
+    const prefixes = kinds.every((k) => run.widgets.some((w) => w.id.startsWith(k))) && run.widgets.every((w) => w.type !== 'kpi')
+    const good = run.widgets.length > 0 && equal === run.widgets.length && prefixes
+    pass &&= good
+    out.push(`${name}: ${equal}/${run.widgets.length} charts equal their own run on dataset ${id}${bad.length ? ` (${bad.slice(0, 3).join('; ')})` : ''}, previous snapshot ${card.comparison ? card.comparison.previousDate : 'none'}`)
+  }
+  // Operators per line among the master's tiles: the median line, written again here.
+  const ops = {}
+  for (const r of activeMaster().filter((x) => x.SectionName === 'Sewing' && lineOf(x.WingName) !== null))
+    ops[lineOf(r.WingName)] = (ops[lineOf(r.WingName)] ?? 0) + (/operator/i.test(r.DesignationName ?? '') ? 1 : 0)
+  const masterCard = (await asAdmin('GET', `/api/matrix/datasets/${S.master}/card`)).json
+  const tile = masterCard.items.find((i) => i.key === 'operators_per_line')
+  const operators = Object.values(ops).reduce((a, b) => a + b, 0)
+  const reopened = (await asAdmin('GET', `/api/matrix/datasets/${S.master}/rows?limit=1&highlight=${encodeURIComponent(tile?.cite ?? '')}`)).json?.total
+  // The separation list is a single snapshot: no comparison, no button.
+  const hrCard = (await asAdmin('GET', `/api/matrix/datasets/${S.hr}/card`)).json
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  let hrButton
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dataset=${S.hr}`)
+    await p.waitFor('[data-report] [data-card-item]', 20000)
+    hrButton = await p.eval('!!document.querySelector("[data-report-compare]")')
+    await p.session(ctx.admin, 'light', 1280, 2000, `/matrix?dataset=${S.master}`)
+    await p.waitFor('[data-report] [data-chart-ready]', 20000)
+    await sleep(1000)
+    await p.shot(path.join(ctx.args.shots, 'report-master-light-1280.png'))
+  } finally { await browser.close() }
+  pass &&= tile?.value === median(Object.values(ops)) && reopened === operators && !hrCard.comparison && hrButton === false
+  return ok(pass, `${out.join(' · ')} · master tile "${tile?.label}" ${tile?.value} (independent median ${median(Object.values(ops))}; ${tile?.detail}), it opens ${reopened} rows = every sewing operator (${operators}) · separation list: no comparison, compare button shown ${hrButton}`)
+})
+
+check('G-M3.15', 'M3', 'LIVE the Report page of the real master and the real attendance: light and dark, desktop and 360 px (counts only)', async () => {
+  const ds = (await asAdmin('GET', '/api/matrix/datasets')).json?.datasets ?? []
+  const real = ds.filter((d) => !d.fileName.startsWith('fx-'))
+  const master = real.find((d) => d.fileName === REAL.master && d.sheet === 'HRM')?.id
+  const att = real.find((d) => d.fileName === REAL.attendance)?.id
+  if (!master || !att) return ok(false, 'the live master and attendance imports are missing (run with --live)')
+  const out = []
+  let pass = true
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  try {
+    for (const [name, id] of [['master', master], ['attendance', att]]) {
+      const card = (await asAdmin('GET', `/api/matrix/datasets/${id}/card`)).json
+      const run = (await asAdmin('POST', `/api/matrix/datasets/${id}/report`, {})).json
+      const names = run.widgets.some((w) => (w.rows ?? []).some((r) => 'name' in r || 'name_bn' in r))
+      pass &&= card.items.length > 0 && run.widgets.length > 0 && !names
+      out.push(`${name}: ${card.items.map((i) => `${i.key} ${i.text ?? i.value}`).join(', ')} · ${run.widgets.length} charts, ${run.widgets.filter((w) => w.error).length} without a result · names in any result ${names}`)
+      const p = await browser.page()
+      for (const theme of ['light', 'dark']) {
+        for (const width of [1280, 360]) {
+          await p.session(ctx.admin, theme, width, width === 360 ? 6000 : 2600, `/matrix?dataset=${id}`)
+          await p.waitFor('[data-report] [data-card-item]', 20000)
+          await sleep(2000)
+          await p.blur('[data-personal]')
+          await p.shot(path.join(ctx.args.shots, `live-report-${name}-${theme}-${width}.png`))
+          if (width === 360 && await p.eval('document.documentElement.scrollWidth > window.innerWidth')) { pass = false; out.push(`${name} ${theme} 360px scrolls sideways`) }
+        }
+      }
+    }
+  } finally { await browser.close() }
+  return ok(pass, `${out.join(' ‖ ')} · 8 screenshots in ${ctx.args.shots} (live-report-*.png)`)
+}, { live: true })
 
 // ---- G-M3.6 Live screenshots (counts only; personal data blurred) ----
 

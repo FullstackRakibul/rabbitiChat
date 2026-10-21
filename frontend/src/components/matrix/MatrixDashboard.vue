@@ -256,24 +256,3 @@ onBeforeUnmount(() => {
   </section>
   </Teleport>
 </template>
-
-<style scoped>
-.mx-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-auto-rows: 4.25rem;
-  gap: 0.75rem;
-}
-.mx-cell {
-  grid-column: var(--x) / span var(--w);
-  grid-row: var(--y) / span var(--h);
-}
-/* A phone: one column, the widgets in reading order (the list is sorted by y, then x). */
-@media (max-width: 639px) {
-  .mx-grid { grid-template-columns: minmax(0, 1fr); }
-  .mx-cell { grid-column: 1 / -1; grid-row: auto / span var(--h); }
-}
-@media print {
-  .mx-grid { gap: 0.5rem; }
-}
-</style>

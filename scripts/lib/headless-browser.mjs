@@ -138,6 +138,14 @@ export async function launchBrowser({ base, profileRoot }) {
           const { data } = await s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: full })
           fs.writeFileSync(file, Buffer.from(data, 'base64'))
         },
+        /** Puts files into a file input, as choosing them in the dialog would (fires its change event). */
+        async setFiles(selector, files) {
+          await p.waitFor(selector)
+          const { root } = await s('DOM.getDocument', { depth: 0 })
+          const { nodeId } = await s('DOM.querySelector', { nodeId: root.nodeId, selector })
+          await s('DOM.setFileInputFiles', { nodeId, files })
+          await sleep(300)
+        },
         /** A real mouse click at page coordinates (canvas charts take no element clicks). */
         async mouseClick(x, y) {
           for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased'])

@@ -2,13 +2,15 @@
 /**
  * ম্যাট্রিক্স · Matrix — RMG manpower and attendance data from Excel (docs/MATRIX_PROMPT.md).
  *
- * Sections: Data (upload → profile and mapping → import → quality → the dataset
- * viewer), Dashboards (automatic and edited ones) and Definitions (KPIs and
- * fields). Ask arrives in M4.
+ * Sections: Data (upload → profile and mapping → import → a dataset's page),
+ * Dashboards (automatic and edited ones) and Definitions (KPIs and fields).
+ *
+ * A dataset's page has three tabs: রিপোর্ট Report (the report card's tiles and the
+ * automatic charts — where an import lands), ডেটা Data (the viewer) and মান Quality.
  *
  * Which views the user gets comes from the server (/api/me/access: sections and
  * actions); the server checks every route again. The view is in the URL —
- * ?upload=, ?dataset= (with &highlight=), ?quality=, ?section=dashboards,
+ * ?upload=, ?dataset= (with &tab=data|quality, or &highlight= for the viewer), ?quality=, ?section=dashboards,
  * ?dashboard= (with &print=1), ?section=definitions — so a citation, a drill-down
  * or an issue's "Show" is a link, and back works.
  */
@@ -31,6 +33,7 @@ import { formatBytes, formatDate } from '@/lib/matrix-format.js'
 
 // ECharts comes with the dashboards only, so the rest of the app does not load it.
 const MatrixDashboard = defineAsyncComponent(() => import('@/components/matrix/MatrixDashboard.vue'))
+const MatrixReport = defineAsyncComponent(() => import('@/components/matrix/MatrixReport.vue'))
 
 const props = defineProps({
   /** The user's section keys and action keys, as /api/me/access gave them. */
@@ -63,10 +66,20 @@ const view = computed(() => {
   if (route.query.section === 'dashboards') return 'dashboards'
   if (route.query.section === 'definitions') return 'definitions'
   if (route.query.upload) return 'mapping'
-  if (route.query.quality) return 'quality'
-  if (route.query.dataset) return 'viewer'
+  if (route.query.dataset || route.query.quality) return 'dataset'
   return 'home'
 })
+/** The dataset page's tab: Report unless the URL asks for the rows (a highlight) or Quality. */
+const datasetTab = computed(() => {
+  if (route.query.quality || route.query.tab === 'quality') return 'quality'
+  if (route.query.highlight || route.query.tab === 'data' || !canDashboards.value) return 'data'
+  return 'report'
+})
+const DATASET_TABS = computed(() => [
+  ['report', 'রিপোর্ট', 'Report', canDashboards.value],
+  ['data', 'ডেটা', 'Data', true],
+  ['quality', 'মান', 'Quality', true],
+].filter((x) => x[3]))
 const section = computed(() => (['dashboard', 'dashboards'].includes(view.value) ? 'dashboards' : view.value === 'definitions' ? 'definitions' : 'data'))
 const printing = computed(() => view.value === 'dashboard' && !!route.query.print)
 const SECTIONS = computed(() => [
@@ -102,6 +115,10 @@ async function newDashboard() {
   } catch (e) { error.value = e.message }
 }
 
+function openTab(tab) {
+  go(tab === 'report' ? { dataset: openDataset.value.id } : { dataset: openDataset.value.id, tab })
+}
+
 /** A drill-down: the dataset viewer, with the clicked group's rows highlighted. */
 function drill({ datasetId, cite }) {
   if (datasetId && cite) go({ dataset: datasetId, highlight: cite })
@@ -133,18 +150,22 @@ async function onUploaded(list) {
   notice.value = ''
   busy.value = true
   const needMapping = []
+  let firstImported = null
   try {
     for (const u of list) {
       const selected = u.profile.sheets.flatMap((s) => s.tables).filter((t) => t.selected)
       if (selected.length && selected.every((t) => t.template)) {
         const res = await importMatrixUpload(u.id)
         notice.value = `${u.fileName}: ${res.message}.`
+        firstImported ??= res.datasets?.[0]?.id ?? null
       } else needMapping.push(u)
     }
     await refresh()
     if (needMapping.length) {
       openUpload.value = { id: needMapping[0].id, fileName: needMapping[0].fileName, reportDate: needMapping[0].reportDate, profile: needMapping[0].profile }
       go({ upload: needMapping[0].id })
+    } else if (firstImported) {
+      go({ dataset: firstImported })
     }
   } catch (e) {
     error.value = e.message
@@ -157,7 +178,7 @@ async function onImported(res) {
   notice.value = res.message + '.'
   await refresh()
   const first = res.datasets[0]
-  go(first ? { quality: first.id } : {})
+  go(first ? { dataset: first.id } : {})
 }
 
 function show(issue) {
@@ -260,12 +281,26 @@ onMounted(async () => {
       <MatrixMapping v-else-if="view === 'mapping' && openUpload" :upload="openUpload" :catalog="catalog"
         @imported="onImported" @close="go({})" />
 
-      <MatrixQuality v-else-if="view === 'quality' && openDataset" :dataset="openDataset" :can-fix="canFix"
-        @show="show" @close="go({})" @fixed="refresh" />
+      <section v-else-if="view === 'dataset' && openDataset" class="flex min-w-0 flex-col gap-3" data-dataset-page :data-dataset-id="openDataset.id">
+        <div class="flex flex-wrap items-end gap-x-4 gap-y-2 border-b">
+          <h3 class="min-w-0 flex-1 truncate pb-2 font-semibold">{{ openDataset.name }}</h3>
+          <nav class="flex gap-1" aria-label="Dataset">
+            <button v-for="[key, bn, en] in DATASET_TABS" :key="key" type="button" :data-dataset-tab="key"
+              :aria-current="datasetTab === key ? 'page' : undefined"
+              class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
+              :class="datasetTab === key ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="openTab(key)">{{ bn }} <span class="text-xs opacity-70">{{ en }}</span></button>
+          </nav>
+        </div>
 
-      <MatrixViewer v-else-if="view === 'viewer' && openDataset" :dataset="openDataset"
-        :highlight="String(route.query.highlight ?? '')"
-        @close="go({})" @clear-highlight="go({ dataset: openDataset.id })" />
+        <MatrixReport v-if="datasetTab === 'report'" :dataset="openDataset" @drill="drill" @quality="openTab('quality')" />
+
+        <MatrixQuality v-else-if="datasetTab === 'quality'" :dataset="openDataset" :can-fix="canFix"
+          @show="show" @close="go({})" @fixed="refresh" />
+
+        <MatrixViewer v-else :dataset="openDataset" :highlight="String(route.query.highlight ?? '')"
+          @close="go({})" @clear-highlight="openTab('data')" />
+      </section>
     </template>
   </div>
 </template>

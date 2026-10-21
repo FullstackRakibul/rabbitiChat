@@ -12,7 +12,7 @@
 import { computed, ref } from 'vue'
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ImageDown, Minus, MoveHorizontal, MoveVertical, Plus, Trash2, TrendingDown, TrendingUp } from '@lucide/vue'
 import MatrixChart from '@/components/matrix/MatrixChart.vue'
-import { formatDate, lakh } from '@/lib/matrix-format.js'
+import { formatDate, formatValue, lakh } from '@/lib/matrix-format.js'
 import { saveBlob } from '@/services/index.js'
 
 const props = defineProps({
@@ -55,16 +55,8 @@ function labelOf(field, v) {
   return String(v)
 }
 
-/** A value as the unit reads: 12,34,567 people; 5.92%; 1.35 (a ratio). */
-function show(v, unit = r.value?.unit) {
-  if (v === null || v === undefined) return '—'
-  if (typeof v === 'string') return v
-  if (unit === '%') return `${lakh(Math.round(v * 100) / 100)}%`
-  if (unit === 'ratio') return Number(v).toFixed(2)
-  if (unit === 'hours') return `${lakh(Math.round(v * 100) / 100)} h`
-  if (unit === 'tk') return `৳ ${lakh(Math.round(v))}`
-  return lakh(Math.round(v * 100) / 100)
-}
+/** A value as the unit reads (matrix-format.js). */
+const show = (v, unit = r.value?.unit) => formatValue(v, unit)
 
 const change = computed(() => r.value?.compare?.change ?? null)
 const ignored = computed(() => (r.value?.filtersIgnored ?? []).map((k) => FILTER_NAMES[k] ?? k))
@@ -197,7 +189,7 @@ const lineRows = computed(() => (r.value?.rows ?? []))
         :trend="r.trend" :compare-rows="compareMode ? r.compare?.rows ?? null : null"
         :compare-label="r.compare?.previousDate ? formatDate(r.compare.previousDate) : ''"
         :value="r.value" :state="r.state" :target="widget.options?.target ?? null"
-        :label-of="labelOf" :measure-label="measureLabel" :title="titleEn" @drill="onChartDrill" />
+        :label-of="labelOf" :measure-label="measureLabel" :format="(v) => show(v)" :title="titleEn" @drill="onChartDrill" />
     </div>
 
     <p v-if="r && !r.error && ignored.length" class="border-t px-3 py-1 text-[11px] text-muted-foreground" data-w-ignored>

@@ -66,14 +66,24 @@ export function scanText(text) {
   return out.filter((f) => { const k = `${f.line}|${f.rule}`; if (seen.has(k)) return false; seen.add(k); return true })
 }
 
-/** Every finding in the repository's tracked config files (working-tree contents). */
+/**
+ * Every finding in the repository's tracked config files, as git holds them (the
+ * index: what is committed, plus anything staged to be) — a local, unstaged edit
+ * is not in the repository. Also returns the files whose working copy differs
+ * from the index and holds a finding, so a key waiting to be staged is named.
+ */
 export function scanRepo(repo) {
   const files = trackedConfigFiles(repo)
-  const findings = []
+  const findings = [], unstaged = []
   for (const f of files) {
+    const r = spawnSync('git', ['show', `:${f}`], { cwd: repo, encoding: 'utf8' })
+    if (r.status !== 0) continue
+    for (const x of scanText(r.stdout)) findings.push({ file: f, ...x })
     const full = path.join(repo, f)
-    if (!fs.existsSync(full)) continue
-    for (const x of scanText(fs.readFileSync(full, 'utf8'))) findings.push({ file: f, ...x })
+    if (fs.existsSync(full)) {
+      const local = fs.readFileSync(full, 'utf8')
+      if (local !== r.stdout && scanText(local).length > scanText(r.stdout).length) unstaged.push(f)
+    }
   }
-  return { files, findings }
+  return { files, findings, unstaged }
 }

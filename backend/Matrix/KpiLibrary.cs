@@ -78,6 +78,8 @@ public static class KpiLibrary
             ActiveOnly: true, GroupField: "unit", Kinds: People),
         new MxKpi("sewing_lines_total", "lines", "Sewing lines", "সেলাই লাইন", "Distinct sewing line numbers among active people.", "lines", MxKpiShape.Value,
             $"{{\"dataset\": \"{{d}}\", \"filter\": [{Sewing}], \"measures\": [[\"count_distinct\", \"line_no\", \"value\"]]}}", ActiveOnly: true, Kinds: People),
+        new MxKpi("sewing_operators", "lines", "Sewing operators", "সেলাই অপারেটর", "Active people of the sewing lines whose designation contains “Operator”.", "people", MxKpiShape.Value,
+            $"{{\"dataset\": \"{{d}}\", \"filter\": [{Sewing}], \"measures\": [[\"count_if\", [\"designation\", \"contains\", \"Operator\"], \"value\"]]}}", ActiveOnly: true, Kinds: People),
         PerLine("operators_per_line", "Operators per line", "লাইনপ্রতি অপারেটর", "Active people whose designation contains “Operator”, per sewing line; with the lowest, median and highest line.",
             "[\"count_if\", [\"designation\", \"contains\", \"Operator\"], \"value\"]"),
         PerLine("helpers_per_line", "Helpers per line", "লাইনপ্রতি হেলপার", "Active people whose designation contains “Helper”, per sewing line.",

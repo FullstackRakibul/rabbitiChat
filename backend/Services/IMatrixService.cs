@@ -61,6 +61,9 @@ public interface IMatrixService
     /// <summary>Every widget's numbers for the caller, with the dashboard's filters, and what ran to make them.</summary>
     Task<MxResult<MxDashboardRun>> RunDashboardAsync(User user, int id, MxDashboardRunInput input, CancellationToken ct = default);
 
+    /// <summary>A dataset's Report page charts: its kind's automatic charts, run on this dataset (tiles come from the card).</summary>
+    Task<MxResult<MxDashboardRun>> RunReportAsync(User user, int datasetId, MxDashboardRunInput input, CancellationToken ct = default);
+
     /// <summary>A dataset as xlsx or csv (no sensitive columns; personal and salary only when permitted), or a dashboard layout as json.</summary>
     Task<MxResult<MxExportFile>> ExportAsync(User user, string kind, int id, CancellationToken ct = default);
 }

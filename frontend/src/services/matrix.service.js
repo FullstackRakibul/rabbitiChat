@@ -139,3 +139,15 @@ export function saveBlob(blobOrUrl, name) {
   a.remove()
   if (typeof blobOrUrl !== 'string') setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
+
+// ---- The Report page ----
+
+/** The dataset's report card: { items, breakdowns, comparison, quality, scope, … } (made at import). */
+export function getMatrixCard(datasetId) {
+  return http.get(`/matrix/datasets/${datasetId}/card`)
+}
+
+/** The Report page's charts: its kind's automatic charts on this dataset. Returns { widgets, layout, … }. */
+export function runMatrixReport(datasetId, { compare = false } = {}) {
+  return http.post(`/matrix/datasets/${datasetId}/report`, { filters: null, compare })
+}

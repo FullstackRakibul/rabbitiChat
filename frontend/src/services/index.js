@@ -4,7 +4,7 @@ export {
   uploadMatrixFiles, listMatrixUploads, getMatrixProfile, importMatrixUpload, listMatrixTemplates, updateMatrixTemplate,
   listMatrixDatasets, getMatrixDataset, getMatrixRows, getMatrixQuality, fixMatrixIssue, getMatrixCatalog,
   listMatrixDashboards, getMatrixDashboard, runMatrixDashboard, createMatrixDashboard, saveMatrixDashboard, deleteMatrixDashboard,
-  listMatrixKpis, updateMatrixKpi, downloadMatrixExport, saveBlob,
+  listMatrixKpis, updateMatrixKpi, downloadMatrixExport, saveBlob, getMatrixCard, runMatrixReport,
 } from './matrix.service.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'

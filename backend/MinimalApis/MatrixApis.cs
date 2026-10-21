@@ -17,6 +17,7 @@
 //   PUT  /api/matrix/kpis/{key}                 names, formula words, thresholds                     action:matrix.kpis.edit
 //   POST /api/matrix/kpis/{key}/run             { dataset?, previous?, against?, params? }           section:matrix.dashboards
 //   GET  /api/matrix/datasets/{id}/card         the report card                                      section:matrix.dashboards
+//   POST /api/matrix/datasets/{id}/report       { filters, compare } → the Report page's charts      section:matrix.dashboards
 //   GET  /api/matrix/dashboards                 the dashboards the caller may see                    section:matrix.dashboards
 //   GET  /api/matrix/dashboards/{id}            one, with its layout                                 section:matrix.dashboards
 //   POST /api/matrix/dashboards/{id}/run        { filters, compare } → every widget's numbers        section:matrix.dashboards
@@ -118,6 +119,10 @@ namespace RabbitIC.Api.MinimalApis
 
             g.MapGet("/datasets/{id:int}/card", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result : Map(await svc.CardAsync(await User(ctx, db), id, ct)));
+
+            g.MapPost("/datasets/{id:int}/report", async (int id, MxDashboardRunInput? input, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixDashboards, ct) is { } refused ? refused.Result
+                    : Map(await svc.RunReportAsync(await User(ctx, db), id, input ?? new MxDashboardRunInput(null), ct)));
 
             g.MapGet("/catalog", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixData, ct) is { } refused ? refused.Result

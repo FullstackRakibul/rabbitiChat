@@ -719,8 +719,9 @@ public partial class MatrixService : IMatrixService
     {
         var d = await _repo.GetDatasetAsync(datasetId, ct);
         if (d is null) return MxResult<MxReportCardDto>.Fail(MxOutcome.NotFound, "No such dataset.");
-        if (await _repo.GetCardAsync(datasetId, ct) is { } stored)
-            return MxResult<MxReportCardDto>.Success(JsonSerializer.Deserialize<MxReportCardDto>(stored.Json, Json)!);
+        if (await _repo.GetCardAsync(datasetId, ct) is { } stored
+            && JsonSerializer.Deserialize<MxReportCardDto>(stored.Json, Json) is { Version: >= ReportCardBuilder.Version } card)
+            return MxResult<MxReportCardDto>.Success(card);
         return MxResult<MxReportCardDto>.Success(await BuildCardAsync(user, d, ct));
     }
 
