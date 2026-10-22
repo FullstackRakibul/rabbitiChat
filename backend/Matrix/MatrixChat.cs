@@ -156,11 +156,20 @@ public static partial class MatrixChat
         return sb.ToString();
     }
 
-    [GeneratedRegex(@"\b(by|per|each|every|all|breakdown|list)\b|অনুযায়ী|প্রতিটি|প্রত্যেক|সব|তালিকা", RegexOptions.IgnoreCase)]
+    // "by status", "per line", "each unit", "a breakdown" — not "all" or "list", which name totals and files ("the separation list").
+    [GeneratedRegex(@"\b(by|per|each|every|breakdown)\b|অনুযায়ী|প্রতিটি|প্রত্যেক", RegexOptions.IgnoreCase)]
     private static partial Regex Breakdown();
 
     /// <summary>True when the question asks for a breakdown or a list rather than one number.</summary>
     public static bool AsksBreakdown(string question) => Breakdown().IsMatch(question);
+
+    public const string GroupByMessage =
+        "This question asks for a breakdown, but the query counts everything as one number. Group it by the field the question names "
+        + "(group_by), so that every group is a row. Return the plan with the same JSON shape.";
+
+    /// <summary>True when every query of a plan gives one number (no group_by).</summary>
+    public static bool Ungrouped(MxPlan plan) => plan.Kind == "queries" && plan.Queries.Count > 0
+        && plan.Queries.All(q => !q.TryGetProperty("group_by", out var g) || g.ValueKind != JsonValueKind.Array || g.GetArrayLength() == 0);
 
     public const string FullBreakdownMessage =
         "This question asks for a breakdown, and the report card holds only part of its breakdowns (the top and bottom three). "

@@ -1829,11 +1829,21 @@ function fakePlan(body) {
   const first = body.messages.find((m) => m.role === 'user')?.content ?? ''
   const q = /^Question: (.*)$/m.exec(first)?.[1] ?? ''
   const id = /Dataset in scope: "(\d+)"/.exec(body.messages[0].content)?.[1]
+  const across = /about all the current datasets/.test(body.messages[0].content)
   const repairing = body.messages.length > 2
   const active = ['status', 'in', ['Active']]
   const broken = { kind: 'queries', queries: [{ dataset: id, group_by: ['shoe_size'], measures: [['count', '*', 'n']] }] }
   let plan
-  if (/BROKEN twice/i.test(q)) plan = broken
+  if (across && /equivalency grade/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: 'current:master', join: [{ dataset: 'current:designation-lookup', on: 'designation' }],
+    filter: [active, ['emp_type', 'in', ['Management', 'Non-Management']]], group_by: ['designation-lookup.equivalency_grade'], measures: [['count', '*', 'staff']] }] }
+  else if (across && /separations .*separation list/i.test(q)) plan = { kind: 'queries', queries: [
+    { dataset: 'current:master', filter: [active], measures: [['count', '*', 'active']] },
+    { dataset: 'current:separation-list', filter: [['status', 'not_null'], ['status', 'not_in', ['Active']]], measures: [['count', '*', 'separations']] }] }
+  else if (across && /report card/i.test(q)) plan = { kind: 'answer_from_card' }
+  else if (/UNGROUPED/.test(q)) plan = { kind: 'queries', queries: [repairing && /group_by/.test(body.messages.at(-1).content)
+    ? { dataset: id, filter: [active], group_by: ['section'], measures: [['count', '*', 'people']] }
+    : { dataset: id, filter: [active], measures: [['count', '*', 'people']] }] }
+  else if (/BROKEN twice/i.test(q)) plan = broken
   else if (/BROKEN once/i.test(q) && !repairing) plan = broken
   else if (/payroll/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: id, filter: [active], group_by: ['unit'], measures: [['sum', 'gross', 'payroll']] }] }
   else if (/headcount by unit|BROKEN once/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: id, filter: [active], group_by: ['unit'], measures: [['count', '*', 'headcount']] }] }
@@ -2134,9 +2144,13 @@ check('G-M4.6', 'M4', 'LIVE golden questions (Step 3: ten) with the real model o
     hrBasic: real.find((d) => d.fileName === REAL.hrBasic)?.id,
   }
   if (!ids.master || !ids.attendance || !ids.hrBasic) return ok(false, 'the live imports are missing (run with --live)')
-  await useRealModel()
   const golden = JSON.parse(read('scripts/matrix/golden.json')).questions.filter((g) => ctx.args.golden === 'all' || g.step3)
   const expect = goldenExpect()
+  const models = ctx.args.models ?? [ctx.args.model]
+  const reports = []
+  let gate = false
+  for (const model of models) {
+  await useRealModel(model)
   const out = []
   // Each dataset warmed just before its first question, as opening its Report page does (the model caches one prompt at a time).
   const warmed = []
@@ -2161,8 +2175,23 @@ check('G-M4.6', 'M4', 'LIVE golden questions (Step 3: ten) with the real model o
   const answers = out.join('\n')
   const leaked = [...names].some((n) => answers.includes(n))
   const fw = firstWords.sort((a, b) => a - b)
-  return ok(right >= Math.ceil(golden.length * 0.84) && unverified === 0 && !leaked,
-    `${ctx.args.model}: ${right}/${golden.length} right · warm-ups: ${warmed.join(', ')} · unverified numbers ${unverified} · personal data in answers ${leaked} · first word median ${((fw[Math.floor(fw.length / 2)] ?? 0) / 1000).toFixed(1)} s, max ${((fw.at(-1) ?? 0) / 1000).toFixed(1)} s\n${out.join('\n')}`)
+  // Across every current dataset (the Ask section): the planner picks the datasets; scored apart from the 25.
+  const across = ctx.args.golden === 'all' ? JSON.parse(read('scripts/matrix/golden.json')).across ?? [] : []
+  let acrossRight = 0
+  await asAdmin('POST', '/api/matrix/ask/warm', {})
+  for (const g of across) {
+    const r = await ask(ctx.admin, { message: g.q })
+    const good = r.status === 200 && judge(g, expect[g.expect], r)
+    if (good) acrossRight++
+    unverified += r.checks?.amounts?.length ?? 0
+    out.push(`${g.id} [${g.lang}, across] ${good ? 'RIGHT' : 'WRONG'} · plan ${r.context?.kind ?? 'could not plan'} on ${(r.context?.results ?? []).map((x) => x.datasets?.map((d) => d.kind).join('+')).join(', ') || '—'} · first word ${((r.done?.firstWordMs ?? 0) / 1000).toFixed(1)} s · unverified ${JSON.stringify(r.checks?.amounts ?? [])}\n    Q: ${g.q}\n    A: ${r.content.replace(/\n/g, ' ⏎ ').slice(0, 600)}`)
+  }
+  if (across.length) out.unshift(`across every current dataset: ${acrossRight}/${across.length} right`)
+  const leakedAny = leaked || [...names].some((n) => out.join('\n').includes(n))
+  if (model === models[0]) gate = right >= Math.ceil(golden.length * 0.84) && unverified === 0 && !leakedAny
+  reports.push(`${model}: ${right}/${golden.length} right · warm-ups: ${warmed.join(', ')} · unverified numbers ${unverified} · personal data in answers ${leakedAny} · first word median ${((fw[Math.floor(fw.length / 2)] ?? 0) / 1000).toFixed(1)} s, max ${((fw.at(-1) ?? 0) / 1000).toFixed(1)} s\n${out.join('\n')}`)
+  }
+  return ok(gate, reports.join('\n\n'))
 }, { live: true })
 
 check('G-M4.7', 'M4', 'LIVE the Report page with the real model\'s summary and an Ask conversation, on the real master and attendance: light and dark, desktop and 360 px (personal data blurred)', async () => {
@@ -2269,7 +2298,8 @@ check('G-M4.12', 'M4', 'warm-up: one request with the plan\'s own system message
   await ask(ctx.admin, { message: 'What is the headcount by unit?', datasetId: S.master })
   const plan = planRequests(from)[0]?.body
   const warm = warmReqs[0]?.body
-  const same = !!warm && !!plan && warm.messages.length === 1 && warm.messages[0].role === 'system' && warm.messages[0].content === plan.messages[0].content
+  // The system message the plan call starts with, then a one-character user turn (some chat templates refuse a system message alone).
+  const same = !!warm && !!plan && warm.messages.length === 2 && warm.messages[0].role === 'system' && warm.messages[0].content === plan.messages[0].content && warm.messages[1].role === 'user'
     && warm.model === plan.model && warm.options.num_ctx === plan.options.num_ctx && warm.keep_alive === plan.keep_alive && warm.keep_alive > 0 && warm.think === false
   // Opening a Report page warms its dataset.
   const before = ctx.fake.requests.length
@@ -2286,6 +2316,83 @@ check('G-M4.12', 'M4', 'warm-up: one request with the plan\'s own system message
       && /Dataset in scope: "\d+" — separation-list/.test(fromPage[0].body.messages[0].content),
     `first warm-up ${w1?.warmed} (${w1?.ms} ms, ${w1?.model}), second within 10 minutes ${w2?.warmed} ("${w2?.reason}") · ${warmReqs.length} request to the model: num_predict 1, `
     + `its system message identical to the plan call's, same model, num_ctx ${warm?.options?.num_ctx} and keep_alive ${warm?.keep_alive} ${same} · opening the separation list's Report page sent ${fromPage.length} warm-up`)
+})
+
+// ---- G-M4.13 Ask across every current dataset (the Ask section) ----
+
+check('G-M4.13', 'M4', 'Ask across every current dataset: the planner sees each kind\'s current dataset; a join and a two-dataset question give the files\' numbers, each chip on its own dataset; no card to answer from; its own conversations and warm-up', async () => {
+  const S = await m3Setup()
+  let from = ctx.fake.requests.length
+  const grades = await ask(ctx.admin, { message: 'How many active staff are there in each equivalency grade?' })
+  const prompt = planRequests(from)[0]?.body?.messages?.[0]?.content ?? ''
+  const rows = grades.context?.results?.[0]?.rows ?? []
+  // Written again: the current lookup's grade for each active Management / Non-Management person's designation.
+  const lookupId = (await sql("select Id from MxDatasets where ReportKind = 'designation-lookup' and IsCurrent = 1 order by Id desc limit 1"))[0].Id
+  const grade = new Map(sheetObjects(await fileOf(lookupId), 'Sheet1').map((r) => [String(r.DesignationName ?? '').trim().toLowerCase(), String(r.EquivalencyGradeName ?? '').trim()]))
+  const staff = activeMaster().filter((r) => ['Management', 'Non-Management'].includes(r.EmpTypeName))
+  const want = countBy(staff, (r) => grade.get(String(r.DesignationName ?? '').trim().toLowerCase()) || null)
+  const got = Object.fromEntries(rows.map((x) => [String(x.values['designation-lookup.equivalency_grade'] ?? 'null'), x.values.staff]))
+  const joinOk = sameMap(want, got)
+
+  const two = await ask(ctx.admin, { message: 'How many active people are in the master, and how many separations are in the separation list?' })
+  const sets = (two.context?.results ?? []).map((r) => r.datasets?.[0]?.kind)
+  const reopen = []
+  for (const r of two.context?.results ?? []) {
+    const row = r.rows[0]
+    const t = (await asAdmin('GET', `/api/matrix/datasets/${r.datasets[0].id}/rows?limit=1&only=true&highlight=${encodeURIComponent(row.cite)}`)).json?.total
+    reopen.push([r.datasets[0].kind, Object.values(row.values)[0], t])
+  }
+  const H = sheetObjects('fx-hr-basic.xlsx', 'Sheet1')
+  const twoOk = sets.join() === 'master,separation-list' && reopen.every(([, v, t]) => v === t)
+    && reopen[0]?.[1] === activeMaster().length && reopen[1]?.[1] === H.filter((x) => x.EmpStatusName && x.EmpStatusName !== 'Active').length
+
+  from = ctx.fake.requests.length
+  const card = await ask(ctx.admin, { message: 'What does the report card say?' })
+  const told = planRequests(from)[1]?.body?.messages?.at(-1)?.content ?? ''
+
+  const mine = (await asAdmin('GET', '/api/matrix/conversations')).json?.conversations ?? []
+  const scoped = (await asAdmin('GET', `/api/matrix/conversations?dataset=${S.master}`)).json?.conversations ?? []
+  const listed = mine.some((c) => c.id === grades.conversationId) && !scoped.some((c) => c.id === grades.conversationId) && mine.every((c) => c.scope === null)
+
+  // The Ask section: the panel, and its warm-up of the all-datasets prompt.
+  const before = ctx.fake.requests.length
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  let section
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 1400, '/matrix?section=ask')
+    await p.waitFor('[data-ask-section] [data-ask-input], [data-ask] [data-ask-input]', 20000)
+    await sleep(1500)
+    section = ctx.fake.requests.slice(before).filter((q) => q.path === '/api/chat' && q.body?.options?.num_predict === 1)
+    await p.eval(`(() => { const s = document.querySelector('[data-ask-conversations]'); s.value = '${grades.conversationId}'; s.dispatchEvent(new Event('change', { bubbles: true })) })(); 0`)
+    await p.waitFor('[data-ask-text] [data-cite]', 15000)
+    await sleep(800)
+    await p.shot(path.join(ctx.args.shots, 'ask-section-light-1280.png'))
+  } finally { await browser.close() }
+  const sectionWarm = section.length === 1 && /about all the current datasets/.test(section[0].body.messages[0].content)
+  return ok(/This conversation is about all the current datasets/.test(prompt) && /Dataset "current:master"/.test(prompt) && /Dataset "current:separation-list"/.test(prompt)
+      && joinOk && twoOk && card.content.startsWith("I couldn't form a query for that") && /no report card here/.test(told) && listed && sectionWarm,
+    `the planner reads every current dataset ${/Dataset "current:master"/.test(prompt)} · staff by equivalency grade through the join equal to the files ${joinOk} (${rows.length} grades) · `
+    + `two datasets in one question: ${sets.join(' + ')}, each chip reopens its own rows ${reopen.map(([k, v, t]) => `${k} ${v}→${t}`).join(', ')} · `
+    + `"answer from the card" with no card: replanned, then "${card.content.slice(0, 70)}…" · the section lists its own conversations only ${listed} · opening it warmed the all-datasets prompt ${sectionWarm}`)
+})
+
+// ---- G-M4.14 Guards for a weaker plan: a field on another dataset; a breakdown counted as one number ----
+
+check('G-M4.14', 'M4', 'the validator says where an unknown field lives and how to join it; a breakdown question planned as one number is planned again, grouped', async () => {
+  const S = await m3Setup()
+  const bad = await asAdmin('POST', '/api/matrix/query', { query: { dataset: String(S.master), group_by: ['equivalency_grade'], measures: [['count', '*', 'n']] } })
+  const hint = bad.json?.error ?? ''
+  const from = ctx.fake.requests.length
+  const r = await ask(ctx.admin, { message: 'UNGROUPED: how many people are there by section?', datasetId: S.master })
+  const plans = planRequests(from)
+  const told = plans[1]?.body?.messages?.at(-1)?.content ?? ''
+  const rows = r.context?.results?.[0]?.rows ?? []
+  const want = countBy(activeMaster(), (x) => x.SectionName)
+  const got = Object.fromEntries(rows.map((x) => [String(x.values.section), x.values.people]))
+  return ok(bad.status === 400 && /current designation-lookup dataset has it/.test(hint) && /designation-lookup\.equivalency_grade/.test(hint) && /"on": "designation"/.test(hint)
+      && plans.length === 2 && /group_by/.test(told) && r.context?.repaired === true && sameMap(want, got),
+    `unknown field: "${hint}" · a breakdown planned as one number: ${plans.length} plan calls, told "${told.slice(0, 90)}…", then ${rows.length} sections equal to the file ${sameMap(want, got)}`)
 })
 
 // ---- G-M4.3 No personal data to the model (after the summary and chat checks) ----
@@ -2306,15 +2413,15 @@ check('G-M4.3', 'M4', 'no name or employee ID of the fixtures reached the model 
 // ---- live: the real model ----
 
 /** Restarts the API against the real Ollama with the model to test (live checks only). */
-async function useRealModel() {
-  if (ctx.realModel) return
+async function useRealModel(model = ctx.args.model) {
+  if (ctx.realModel === model) return
   const settings = read('backend/appsettings.json').split(/\r?\n/).filter((l) => !l.trim().startsWith('//')).join('\n').replace(/,(\s*[}\]])/g, '$1')
   const url = process.env.MATRIX_EVAL_OLLAMA_URL ?? JSON.parse(settings).Ollama.Url
   await ctx.api.stop()
   ctx.api = await startApi({ fakeUrl: url, runDir: ctx.api.runDir, port: ctx.api.port,
-    env: { Matrix__Model: ctx.args.model, Extraction__DefaultModel: ctx.args.model, Ollama__DefaultModel: ctx.args.model } })
+    env: { Matrix__Model: model, Extraction__DefaultModel: model, Ollama__DefaultModel: model } })
   ctx.admin = await login(process.env.MATRIX_EVAL_ADMIN_USER, process.env.MATRIX_EVAL_ADMIN_SECRET)
-  ctx.realModel = true
+  ctx.realModel = model
 }
 
 check('G-M4.1', 'M4', 'LIVE the summary of the real master and attendance with the real model, Bengali and English (aggregates only)', async () => {
@@ -2380,6 +2487,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--shots') a.shots = path.resolve(argv[++i])
     else if (argv[i] === '--model') a.model = argv[++i]
     else if (argv[i] === '--golden') a.golden = argv[++i]
+    else if (argv[i] === '--models') a.models = argv[++i].split(',').map((s) => s.trim()).filter(Boolean)
   }
   return a
 }

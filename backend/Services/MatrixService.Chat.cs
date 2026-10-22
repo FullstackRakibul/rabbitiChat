@@ -79,13 +79,15 @@ public partial class MatrixService
         var fullBreakdown = forbidden is null && errors.Count == 0 && plan?.Kind == "answer_from_card"
             && card is not null && MatrixChat.AsksBreakdown(question) && card.Breakdowns.Any(ReportCardBuilder.PartOf)
             && MatrixChat.AskedUnavailable(question, unavailable).Count == 0;
-        if (forbidden is null && (errors.Count > 0 || fullBreakdown))
+        // A breakdown asked for, planned as one number: plan again, grouped.
+        var ungrouped = forbidden is null && errors.Count == 0 && !fullBreakdown && plan is not null && MatrixChat.AsksBreakdown(question) && MatrixChat.Ungrouped(plan);
+        if (forbidden is null && (errors.Count > 0 || fullBreakdown || ungrouped))
         {
             // One repair round, with the validator's own words (or the reason a query is needed).
             repaired = true;
-            meta["replannedFor"] = fullBreakdown ? "full breakdown" : "invalid query";
+            meta["replannedFor"] = fullBreakdown ? "full breakdown" : ungrouped ? "breakdown without group_by" : "invalid query";
             messages.Add(new("assistant", first.Content ?? ""));
-            messages.Add(new("user", fullBreakdown ? MatrixChat.FullBreakdownMessage : MatrixChat.RepairMessage(errors)));
+            messages.Add(new("user", fullBreakdown ? MatrixChat.FullBreakdownMessage : ungrouped ? MatrixChat.GroupByMessage : MatrixChat.RepairMessage(errors)));
             var second = await SchemaJsonChat.CallAsync(_http, model, MatrixChat.PlanSchema, messages, _models.NumCtx, ct, _models.KeepAlive);
             plan = second.Error is null ? MatrixChat.ParsePlan(second.Content) : null;
             (errors, forbidden) = second.Error is null ? Validate(plan, ctx, card is not null) : (new List<string> { second.Error }, null);

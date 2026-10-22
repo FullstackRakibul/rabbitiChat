@@ -217,7 +217,7 @@ public static class MatrixQuery
             else
                 foreach (var s in sources)
                     if (s.Columns.FirstOrDefault(c => c.Key == t) is { } col) { found = new MxFieldRef(t, s, col); break; }
-            if (found is null) throw new MxQueryError(400, $"Unknown field \"{t}\": not a column of the dataset{(joins.Count > 0 ? " or its joins" : "")}.");
+            if (found is null) throw new MxQueryError(400, $"Unknown field \"{t}\": not a column of the dataset{(joins.Count > 0 ? " or its joins" : "")}.{JoinHint(t, b.Kind, ctx)}");
             if (part is not null)
             {
                 if (found.Column.Type != MxType.Date) throw new MxQueryError(400, $"\"{t}:month\": only a date field can be grouped by month.");
@@ -316,6 +316,20 @@ public static class MatrixQuery
             Sql = sql, CountSql = countSql, Args = args, Columns = columns,
             Plain = Plain(b, joins, joinKeys, filters, groups, measures), BaseWhere = baseWhere, BaseArgs = baseArgs,
         };
+    }
+
+    /// <summary>
+    /// For an unknown field that the current dataset of another kind has: which, and how to reach it —
+    /// so a repair round (or a person) can join it rather than guess.
+    /// </summary>
+    private static string JoinHint(string field, string baseKind, MxQueryContext ctx)
+    {
+        var key = field.Contains('.') ? field[(field.IndexOf('.') + 1)..] : field;
+        var other = ctx.Datasets.Where(d => d.IsCurrent && d.ReportKind != baseKind && ctx.ColumnsOf(d).Any(c => c.Key == key))
+            .Select(d => d.ReportKind).Distinct().FirstOrDefault();
+        if (other is null) return "";
+        var on = ctx.Relations.FirstOrDefault(r => (r.LeftKind == baseKind && r.RightKind == other) || (r.LeftKind == other && r.RightKind == baseKind))?.LeftField;
+        return $" The current {other} dataset has it: add \"join\": [{{\"dataset\": \"current:{other}\"{(on is null ? "" : $", \"on\": \"{on}\"")}}}] and write \"{other}.{key}\".";
     }
 
     // ───────────────────────── conditions ─────────────────────────

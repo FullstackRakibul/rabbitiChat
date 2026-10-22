@@ -104,7 +104,9 @@ public static class SchemaJsonChat
             ["stream"] = false,
             ["think"] = false,
             ["options"] = new { temperature = 0, num_ctx = numCtx, num_predict = 1 },
-            ["messages"] = new[] { new { role = "system", content = system } },
+            // A one-character user turn: some chat templates (Qwen's) refuse a system message alone, and the
+            // cached prefix — the system message and the start of a user turn — is the real call's all the same.
+            ["messages"] = new[] { new { role = "system", content = system }, new { role = "user", content = "." } },
         };
         if (keepAlive is not null) payload["keep_alive"] = keepAlive;
         try
