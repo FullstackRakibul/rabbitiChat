@@ -31,16 +31,17 @@ public partial class MatrixService
             return MxResult<int>.Fail(MxOutcome.NotFound, "No such conversation.");
         var datasetId = input.DatasetId
             ?? (convo?.Scope is { } s && s.StartsWith("dataset:") && int.TryParse(s[8..], out var sid) ? sid : (int?)null);
-        if (datasetId is null) return MxResult<int>.Fail(MxOutcome.Invalid, "Ask about a dataset: open its Report page.");
-        var scope = await _repo.GetDatasetAsync(datasetId.Value, ct);
-        if (scope is null) return MxResult<int>.Fail(MxOutcome.NotFound, "No such dataset.");
+        // No dataset: a question across every current dataset (the Ask section).
+        MxDataset? scope = null;
+        if (datasetId is int did && (scope = await _repo.GetDatasetAsync(did, ct)) is null)
+            return MxResult<int>.Fail(MxOutcome.NotFound, "No such dataset.");
         var (model, refused) = await _models.ResolveAsync(user, input.Model, ct);
         if (model is null) return MxResult<int>.Fail(MxOutcome.Forbidden, refused!);
 
-        // ---- the conversation (this person's, about this dataset) ----
+        // ---- the conversation (this person's, about this dataset or all of them) ----
         convo ??= await _repo.AddConversationAsync(new Conversation
         {
-            UserId = user.Id, Kind = MatrixChat.ConversationKind, Scope = ScopeOf(scope.Id),
+            UserId = user.Id, Kind = MatrixChat.ConversationKind, Scope = scope is null ? null : ScopeOf(scope.Id),
             Title = question.Length > 40 ? question[..40] + "…" : question,
         }, ct);
         var earlier = await _repo.MessagesAsync(convo.Id, ct);
@@ -53,41 +54,41 @@ public partial class MatrixService
         var bengali = MatrixChat.IsBengali(question);
         await sink.StatusAsync(bengali ? "খুঁজছি… প্রশ্নটি বুঝে নিচ্ছি" : "Looking… working out what to compute");
 
-        var card = (await CardAsync(user, scope.Id, ct)).Value!;
-        var cardText = ReportCardBuilder.Render(card);
-        var cardLabels = ReportCardBuilder.Labels(card);
         var ctx = await QueryContextAsync(user, ct);
+        var card = scope is null ? null : (await CardAsync(user, scope.Id, ct)).Value!;
+        var cardText = card is null ? "" : ReportCardBuilder.Render(card);
+        var cardLabels = card is null ? new List<MxCardLabel>() : ReportCardBuilder.Labels(card);
+        var unavailable = card?.Unavailable ?? await AllUnavailableAsync(user, ctx, ct);
         var kpis = (await ListKpisAsync(ct)).ToDictionary(k => k.Key);
-
-        // The dataset in scope, then the current dataset of each other kind it can be joined with.
-        var inScope = new List<(MxDataset, List<MxDsColumn>)> { (scope, Columns(scope)) };
-        foreach (var other in ctx.Datasets.Where(d => d.IsCurrent && d.ReportKind != scope.ReportKind && d.ReportKind != MxReportKind.Custom)
-                     .GroupBy(d => d.ReportKind).Select(g => g.OrderBy(d => d.ReportDate ?? "").ThenBy(d => d.Id).Last()))
-            inScope.Add((other, Columns(other)));
 
         // ---- 1. plan ----
         var messages = new List<SchemaJsonMessage>
         {
-            new("system", MatrixChat.PlanSystem(scope, inScope, KpiLibrary.All, ctx, await SampleValuesAsync(ctx, inScope, ct))),
+            new("system", await PlanPrefixAsync(ctx, scope, unavailable, ct)),
             new("user", MatrixChat.PlanUser(cardText, history, question)),
         };
-        var meta = new Dictionary<string, object?> { ["model"] = model, ["datasetId"] = scope.Id, ["cardLabels"] = cardLabels };
-        var first = await SchemaJsonChat.CallAsync(_http, model, MatrixChat.PlanSchema, messages, _models.NumCtx, ct);
+        var meta = new Dictionary<string, object?> { ["model"] = model, ["datasetId"] = scope?.Id, ["cardLabels"] = cardLabels };
+        var first = await SchemaJsonChat.CallAsync(_http, model, MatrixChat.PlanSchema, messages, _models.NumCtx, ct, _models.KeepAlive);
         if (first.Error is not null)
             return await FinishAsync(convo, sink, $"The model could not plan an answer: {first.Error}", meta, clock, ct);
 
         var plan = MatrixChat.ParsePlan(first.Content);
-        var (errors, forbidden) = Validate(plan, ctx);
+        var (errors, forbidden) = Validate(plan, ctx, card is not null);
         var repaired = false;
-        if (forbidden is null && errors.Count > 0)
+        // A breakdown asked for, answered from a card that holds only part of its breakdowns: plan again, for every group.
+        var fullBreakdown = forbidden is null && errors.Count == 0 && plan?.Kind == "answer_from_card"
+            && card is not null && MatrixChat.AsksBreakdown(question) && card.Breakdowns.Any(ReportCardBuilder.PartOf)
+            && MatrixChat.AskedUnavailable(question, unavailable).Count == 0;
+        if (forbidden is null && (errors.Count > 0 || fullBreakdown))
         {
-            // One repair round, with the validator's own words.
+            // One repair round, with the validator's own words (or the reason a query is needed).
             repaired = true;
+            meta["replannedFor"] = fullBreakdown ? "full breakdown" : "invalid query";
             messages.Add(new("assistant", first.Content ?? ""));
-            messages.Add(new("user", MatrixChat.RepairMessage(errors)));
-            var second = await SchemaJsonChat.CallAsync(_http, model, MatrixChat.PlanSchema, messages, _models.NumCtx, ct);
+            messages.Add(new("user", fullBreakdown ? MatrixChat.FullBreakdownMessage : MatrixChat.RepairMessage(errors)));
+            var second = await SchemaJsonChat.CallAsync(_http, model, MatrixChat.PlanSchema, messages, _models.NumCtx, ct, _models.KeepAlive);
             plan = second.Error is null ? MatrixChat.ParsePlan(second.Content) : null;
-            (errors, forbidden) = second.Error is null ? Validate(plan, ctx) : (new List<string> { second.Error }, null);
+            (errors, forbidden) = second.Error is null ? Validate(plan, ctx, card is not null) : (new List<string> { second.Error }, null);
         }
         meta["plan"] = plan is null ? null : new { plan.Kind, plan.Queries, plan.Definition, plan.Need };
         meta["repaired"] = repaired;
@@ -148,7 +149,7 @@ public partial class MatrixService
         meta["results"] = results;
         await sink.FrameAsync(new
         {
-            type = "context", model, kind = plan.Kind, repaired, kpi = meta.GetValueOrDefault("kpi"), datasetId = scope.Id,
+            type = "context", model, kind = plan.Kind, repaired, kpi = meta.GetValueOrDefault("kpi"), datasetId = scope?.Id,
             results = results.Select(r => new
             {
                 plain = r.Plain, datasets = r.Datasets, matched = r.Matched, columns = r.Columns, groupBy = r.GroupBy, measures = r.Measures,
@@ -160,13 +161,17 @@ public partial class MatrixService
         // ---- 3. answer ----
         await sink.StatusAsync(bengali ? "উত্তর লিখছি…" : "Writing the answer…");
         var resultsText = MatrixChat.ResultsText(results, definition);
+        // Asked for something the card cannot give: the answer is told so in as many words, before it is written.
+        foreach (var u in MatrixChat.AskedUnavailable(question, unavailable))
+            resultsText += $"Asked but NOT AVAILABLE — say it cannot be computed and why, and give no number for it: {u.Label}: {u.Reason} "
+                + $"[{cardLabels.FirstOrDefault(l => l.Key == u.Key && l.Text.Contains("not available"))?.Label ?? "Card"}]\n";
         var capabilities = await ChatEndpoint.ModelCapabilitiesAsync(_chat, ModelPolicy.LocalSource, model, ct);
         bool? think = capabilities.Any(c => c.Equals("thinking", StringComparison.OrdinalIgnoreCase) || c.Equals("reasoning", StringComparison.OrdinalIgnoreCase)) ? false : null;
         var args = new ChatArgs(model, new List<ChatTurn>
         {
             new("system", MatrixChat.AnswerSystem(bengali)),
             new("user", MatrixChat.AnswerUser(cardText, resultsText, question)),
-        }, Tools: null, Think: think, NumCtx: _models.NumCtx, KeepAlive: null, Temperature: 0);
+        }, Tools: null, Think: think, NumCtx: _models.NumCtx, KeepAlive: _models.KeepAlive, Temperature: 0);
 
         var answer = new StringBuilder();
         var formulas = new HrFormulaStream(MatrixSummary.Number);
@@ -196,6 +201,21 @@ public partial class MatrixService
             answer.Append($"\n\n_{ex.Message}_");
         }
 
+        // ---- what is not available: said, and never replaced by another number ----
+        var asked = MatrixChat.AskedUnavailable(question, unavailable);
+        var unavailableMeta = new List<object>();
+        foreach (var u in asked)
+        {
+            var (substituted, said) = MatrixChat.Treatment(answer.ToString(), u);
+            unavailableMeta.Add(new { u.Key, substituted, said, u.Reason });
+            if (substituted || !said)
+            {
+                var label = cardLabels.FirstOrDefault(l => l.Key == u.Key && l.Text.Contains("not available"))?.Label ?? "Card";
+                await SendAsync(new[] { new HrFormulaPiece(MatrixChat.UnavailableNote(u, label, bengali, substituted)) });
+            }
+        }
+        meta["unavailable"] = unavailableMeta;
+
         // ---- 4. the checks ----
         var text = answer.ToString();
         var calculated = formulas.Formulas.Where(f => f.Ok).Select(f => f.Value!.Value);
@@ -203,7 +223,7 @@ public partial class MatrixService
         var unknown = MatrixChat.UnknownCitations(text,
             results.SelectMany(r => r.Rows.Select(x => x.Label)).ToHashSet(), cardLabels.Select(l => l.Label).ToHashSet(), KpiLibrary.All);
         var failed = formulas.Formulas.Where(f => !f.Ok).Select(f => f.Expression).ToList();
-        await sink.FrameAsync(new { type = "unverified", amounts = unverified, formulas = failed, citations = unknown });
+        await sink.FrameAsync(new { type = "unverified", amounts = unverified, formulas = failed, citations = unknown, unavailable = unavailableMeta });
 
         meta["formulas"] = formulas.Formulas.Select(f => new MxSummaryFormula(f.Offset, f.Display.Length, f.Expression, f.Display, f.Ok, f.Error)).ToList();
         meta["unverified"] = unverified;
@@ -213,8 +233,62 @@ public partial class MatrixService
         await _repo.AddMessageAsync(new Message { ConversationId = convo.Id, Role = "assistant", Content = text, MetaJson = JsonSerializer.Serialize(meta, Json) }, ct);
         await sink.FrameAsync(new { type = "done", firstWordMs = firstWord, totalMs = clock.ElapsedMilliseconds });
         _log.LogInformation("Matrix ask: dataset {Dataset}, plan {Kind}{Repaired}, {Queries} queries, {Unverified} unverified, {Unknown} unknown citations, first word {FirstWord} ms.",
-            scope.Id, plan.Kind, repaired ? " (repaired)" : "", results.Count, unverified.Count, unknown.Count, firstWord);
+            scope?.Id.ToString() ?? "all", plan.Kind, repaired ? " (repaired)" : "", results.Count, unverified.Count, unknown.Count, firstWord);
         return MxResult<int>.Success(convo.Id);
+    }
+
+    /// <summary>
+    /// The planner's system message for a dataset: the same text for every question on it (and for
+    /// its warm-up) — the dataset in scope, the current dataset of each kind it can be joined with,
+    /// their fields with common values, the KPIs and which are not available here.
+    /// </summary>
+    private async Task<string> PlanPrefixAsync(MxQueryContext ctx, MxDataset? scope, IReadOnlyList<MxCardUnavailable>? unavailable, CancellationToken ct)
+    {
+        var inScope = new List<(MxDataset, List<MxDsColumn>)>();
+        if (scope is not null) inScope.Add((scope, Columns(scope)));
+        foreach (var other in CurrentByKind(ctx).Where(d => d.ReportKind != scope?.ReportKind))
+            inScope.Add((other, Columns(other)));
+        return MatrixChat.PlanSystem(scope, inScope, KpiLibrary.All, ctx, await SampleValuesAsync(ctx, inScope, ct), unavailable);
+    }
+
+    /// <summary>The current dataset of each kind (the latest when a kind has several layouts).</summary>
+    private static IEnumerable<MxDataset> CurrentByKind(MxQueryContext ctx) =>
+        ctx.Datasets.Where(d => d.IsCurrent && d.ReportKind != MxReportKind.Custom)
+            .GroupBy(d => d.ReportKind).Select(g => g.OrderBy(d => d.ReportDate ?? "").ThenBy(d => d.Id).Last()).OrderBy(d => d.Id);
+
+    /// <summary>What none of the current datasets can give, each with its kind in the reason (Ask across all of them).</summary>
+    private async Task<List<MxCardUnavailable>> AllUnavailableAsync(User user, MxQueryContext ctx, CancellationToken ct)
+    {
+        var list = new List<MxCardUnavailable>();
+        foreach (var d in CurrentByKind(ctx))
+            if ((await CardAsync(user, d.Id, ct)).Value?.Unavailable is { } na)
+                list.AddRange(na.Select(u => u with { Reason = $"{u.Reason} (the current {d.ReportKind})" }));
+        return list;
+    }
+
+    public static readonly TimeSpan WarmEvery = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// The Report page or the Ask panel opened: has the model read this dataset's plan prefix now, so the
+    /// first question does not wait for it. At most once per dataset, model and prefix in ten minutes.
+    /// </summary>
+    public async Task<MxResult<MxWarmResult>> WarmAsync(User user, int? datasetId, CancellationToken ct = default)
+    {
+        MxDataset? scope = null;
+        if (datasetId is int did && (scope = await _repo.GetDatasetAsync(did, ct)) is null)
+            return MxResult<MxWarmResult>.Fail(MxOutcome.NotFound, "No such dataset.");
+        var (model, refused) = await _models.ResolveAsync(user, null, ct);
+        if (model is null) return MxResult<MxWarmResult>.Fail(MxOutcome.Forbidden, refused!);
+        var ctx = await QueryContextAsync(user, ct);
+        var unavailable = scope is null ? await AllUnavailableAsync(user, ctx, ct) : (await CardAsync(user, scope.Id, ct)).Value!.Unavailable;
+        var system = await PlanPrefixAsync(ctx, scope, unavailable, ct);
+        var key = $"matrix:warm:{scope?.Id.ToString() ?? "all"}:{model}:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(system)))[..16]}";
+        if (_cache.TryGetValue(key, out _)) return MxResult<MxWarmResult>.Success(new MxWarmResult(false, "warmed within the last 10 minutes", 0, model));
+        _cache.Set(key, true, WarmEvery);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var failed = await SchemaJsonChat.WarmAsync(_http, model, system, _models.NumCtx, _models.KeepAlive, ct);
+        if (failed is not null) _cache.Remove(key);
+        return MxResult<MxWarmResult>.Success(new MxWarmResult(failed is null, failed, clock.ElapsedMilliseconds, model));
     }
 
     /// <summary>
@@ -254,10 +328,12 @@ public partial class MatrixService
     }
 
     /// <summary>Validation errors of a plan's queries, and the first permission refusal (403), which no repair can fix.</summary>
-    private static (List<string> Errors, string? Forbidden) Validate(MxPlan? plan, MxQueryContext ctx)
+    private static (List<string> Errors, string? Forbidden) Validate(MxPlan? plan, MxQueryContext ctx, bool hasCard)
     {
         if (plan is null) return (new List<string> { "The answer was not a plan of the asked JSON shape." }, null);
         var errors = new List<string>();
+        if (plan.Kind == "answer_from_card" && !hasCard)
+            errors.Add("There is no report card here (the question is about all the current datasets): plan queries instead.");
         if (plan.Kind == "queries" && plan.Queries.Count == 0) errors.Add("A plan of kind queries needs at least one query.");
         if (plan.Kind == "definition" && KpiLibrary.Find(plan.Definition?.Trim()) is null) errors.Add($"There is no KPI \"{plan.Definition}\".");
         if (plan.Kind != "queries") return (errors, null);

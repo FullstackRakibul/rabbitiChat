@@ -242,7 +242,7 @@ public class MatrixRepository : IMatrixRepository
 
     public Task<List<Conversation>> ListConversationsAsync(int userId, string? scope, CancellationToken ct = default) =>
         _db.Conversations.AsNoTracking().Include(c => c.Messages)
-            .Where(c => c.UserId == userId && c.Kind == MatrixChat.ConversationKind && (scope == null || c.Scope == scope))
+            .Where(c => c.UserId == userId && c.Kind == MatrixChat.ConversationKind && c.Scope == scope)
             .OrderByDescending(c => c.Id).Take(100).ToListAsync(ct);
 
     public async Task DeleteConversationAsync(Conversation conversation, CancellationToken ct = default)

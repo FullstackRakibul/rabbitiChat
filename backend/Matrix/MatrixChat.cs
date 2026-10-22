@@ -76,8 +76,10 @@ public static partial class MatrixChat
     /// The planner's system message for a scope: the same text for every question on it.
     /// <paramref name="datasets"/>: the dataset in scope first, then the current datasets it can join.
     /// </summary>
-    public static string PlanSystem(MxDataset scope, IReadOnlyList<(MxDataset Dataset, List<MxDsColumn> Columns)> datasets,
-        IReadOnlyList<MxKpi> kpis, MxQueryContext ctx, IReadOnlyDictionary<string, List<string>>? samples = null)
+    /// <param name="scope">The dataset a Report page's Ask is about; null for Ask across every current dataset.</param>
+    public static string PlanSystem(MxDataset? scope, IReadOnlyList<(MxDataset Dataset, List<MxDsColumn> Columns)> datasets,
+        IReadOnlyList<MxKpi> kpis, MxQueryContext ctx, IReadOnlyDictionary<string, List<string>>? samples = null,
+        IReadOnlyList<MxCardUnavailable>? unavailable = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You turn a manager's question about garment-factory (RMG) HR data into a plan. Answer with JSON only, one of:");
@@ -101,17 +103,24 @@ public static partial class MatrixChat
         sb.AppendLine("Present in attendance: [\"att_status\", \"in\", [\"P\", \"LT\"]]; late: [\"att_status\", \"=\", \"LT\"]. Designations are matched with contains (\"Operator\", \"Helper\").");
         sb.AppendLine();
         sb.AppendLine("Examples:");
-        sb.AppendLine($"Headcount by section → {{\"kind\": \"queries\", \"queries\": [{{\"dataset\": \"{scope.Id}\", \"filter\": [[\"status\", \"in\", [\"Active\"]]], \"group_by\": [\"section\"], \"measures\": [[\"count\", \"*\", \"headcount\"]]}}]}}");
-        sb.AppendLine($"Sewing lines in Unit-2 → {{\"kind\": \"queries\", \"queries\": [{{\"dataset\": \"{scope.Id}\", \"filter\": [[\"status\", \"in\", [\"Active\"]], "
+        var example = scope?.Id.ToString(CultureInfo.InvariantCulture)
+            ?? (datasets.Any(x => x.Dataset.ReportKind == MxReportKind.Master) ? "current:master" : $"current:{datasets.FirstOrDefault().Dataset?.ReportKind ?? "master"}");
+        if (scope is null)
+            sb.AppendLine("This conversation is about all the current datasets below: there is no report card, so plan queries (or a definition, or what is missing). "
+                + "Use the dataset refs exactly as written; a question about two kinds may need a join or one query per dataset.");
+        sb.AppendLine($"Headcount by section → {{\"kind\": \"queries\", \"queries\": [{{\"dataset\": \"{example}\", \"filter\": [[\"status\", \"in\", [\"Active\"]]], \"group_by\": [\"section\"], \"measures\": [[\"count\", \"*\", \"headcount\"]]}}]}}");
+        sb.AppendLine($"Sewing lines in Unit-2 → {{\"kind\": \"queries\", \"queries\": [{{\"dataset\": \"{example}\", \"filter\": [[\"status\", \"in\", [\"Active\"]], "
             + "[\"line_type\", \"=\", \"Sewing\"], [\"line_no\", \"not_null\"], [\"unit\", \"=\", \"Unit-2\"]], \"measures\": [[\"count_distinct\", \"line_no\", \"lines\"]]}]}");
-        sb.AppendLine($"Female % in Cutting → {{\"kind\": \"queries\", \"queries\": [{{\"dataset\": \"{scope.Id}\", \"filter\": [[\"status\", \"in\", [\"Active\"]], [\"section\", \"=\", \"Cutting\"]], \"measures\": [[\"pct\", [\"count_if\", [\"gender\", \"=\", \"Female\"]], [\"count\", \"*\"], \"female_pct\"]]}}]}}");
+        sb.AppendLine($"Female % in Cutting → {{\"kind\": \"queries\", \"queries\": [{{\"dataset\": \"{example}\", \"filter\": [[\"status\", \"in\", [\"Active\"]], [\"section\", \"=\", \"Cutting\"]], \"measures\": [[\"pct\", [\"count_if\", [\"gender\", \"=\", \"Female\"]], [\"count\", \"*\"], \"female_pct\"]]}}]}}");
         sb.AppendLine();
         foreach (var (d, cols) in datasets)
         {
-            var reference = d.Id == scope.Id ? d.Id.ToString(CultureInfo.InvariantCulture) : $"current:{d.ReportKind}";
-            sb.AppendLine(d.Id == scope.Id
+            var reference = d.Id == scope?.Id ? d.Id.ToString(CultureInfo.InvariantCulture) : $"current:{d.ReportKind}";
+            sb.AppendLine(d.Id == scope?.Id
                 ? $"Dataset in scope: \"{reference}\" — {d.ReportKind}, {d.RowCount} rows, report date {d.ReportDate ?? "unknown"}. Fields:"
-                : $"Can be joined: \"{reference}\" (as {d.ReportKind}.<field>), report date {d.ReportDate ?? "unknown"}. Fields:");
+                : scope is null
+                    ? $"Dataset \"{reference}\" — {d.ReportKind}, {d.RowCount} rows, report date {d.ReportDate ?? "unknown"} (joined as {d.ReportKind}.<field>). Fields:"
+                    : $"Can be joined: \"{reference}\" (as {d.ReportKind}.<field>), report date {d.ReportDate ?? "unknown"}. Fields:");
             foreach (var c in cols.Where(c => c.Sensitivity != MxSensitivity.Sensitive))
             {
                 var f = FieldCatalog.Find(c.Field);
@@ -127,7 +136,12 @@ public static partial class MatrixChat
         }
         sb.AppendLine();
         sb.AppendLine("KPIs (for a definition):");
-        foreach (var k in kpis) sb.AppendLine($"  {k.Key} — {k.En}");
+        foreach (var k in kpis)
+            sb.AppendLine(unavailable?.FirstOrDefault(u => u.Key == k.Key) is { } u
+                ? $"  {k.Key} — {k.En} — NOT AVAILABLE in this dataset: {u.Reason}"
+                : $"  {k.Key} — {k.En}");
+        sb.AppendLine("A KPI marked NOT AVAILABLE cannot be computed here: for a question about it, plan answer_from_card (or queries for the rest of the question). "
+            + "The answer says it cannot be computed and why; never a query for another number to put in its place.");
         return sb.ToString();
     }
 
@@ -135,12 +149,69 @@ public static partial class MatrixChat
     public static string PlanUser(string card, IReadOnlyList<(string Question, string Answer)> history, string question)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Report card:").AppendLine(card);
+        sb.AppendLine("Report card:").AppendLine(card.Length > 0 ? card : "(none: the question is about all the current datasets)");
         foreach (var (q, a) in history)
             sb.AppendLine($"Earlier question: {q}").AppendLine($"Earlier answer: {(a.Length > 400 ? a[..400] + "…" : a)}");
         sb.AppendLine($"Question: {question}");
         return sb.ToString();
     }
+
+    [GeneratedRegex(@"\b(by|per|each|every|all|breakdown|list)\b|অনুযায়ী|প্রতিটি|প্রত্যেক|সব|তালিকা", RegexOptions.IgnoreCase)]
+    private static partial Regex Breakdown();
+
+    /// <summary>True when the question asks for a breakdown or a list rather than one number.</summary>
+    public static bool AsksBreakdown(string question) => Breakdown().IsMatch(question);
+
+    public const string FullBreakdownMessage =
+        "This question asks for a breakdown, and the report card holds only part of its breakdowns (the top and bottom three). "
+        + "Plan a query that returns every group. Return the plan with the same JSON shape.";
+
+    // ───────────────────────── what is not available ─────────────────────────
+
+    /// <summary>More ways a question names a KPI than its names (lower case).</summary>
+    private static readonly Dictionary<string, string[]> Aliases = new()
+    {
+        ["attendance_pct"] = new[] { "attendance rate", "attendance %", "attendance percentage", "attendance percent", "উপস্থিতির হার", "হাজিরার হার", "উপস্থিতি হার" },
+        ["female_pct"] = new[] { "female percentage", "female rate", "নারীর হার", "নারী কর্মীর হার" },
+        ["late_pct"] = new[] { "late percentage", "late rate", "দেরির হার" },
+    };
+
+    private static IEnumerable<string> NamesOf(MxCardUnavailable u) =>
+        new[] { u.Label, u.LabelBn }.Select(n => n.Replace("%", "").Trim().ToLowerInvariant()).Where(n => n.Length > 2)
+            .Concat(Aliases.GetValueOrDefault(u.Key) ?? Array.Empty<string>());
+
+    /// <summary>The unavailable KPIs a question asks for.</summary>
+    public static List<MxCardUnavailable> AskedUnavailable(string question, IReadOnlyList<MxCardUnavailable>? unavailable)
+    {
+        var q = question.ToLowerInvariant();
+        return (unavailable ?? Array.Empty<MxCardUnavailable>()).Where(u => NamesOf(u).Any(q.Contains)).ToList();
+    }
+
+    /// <summary>A sentence: up to . । ! ? or a line break — a decimal point (5.92) does not end one.</summary>
+    [GeneratedRegex(@"(?:[^.।!?\n]|\.(?=\d))+")]
+    private static partial Regex Sentence();
+
+    [GeneratedRegex(@"[\d০-৯]+(?:[.,][\d০-৯]+)?\s*%")]
+    private static partial Regex Percent();
+
+    [GeneratedRegex(@"not available|cannot be computed|can't be computed|cannot be calculated|isn't available|is not available|পাওয়া যায় না|গণনা করা যায় না|হিসাব করা যায় না|নির্ণয় করা যায় না|সম্ভব নয়|করা যাবে না|করা যায়নি|পাওয়া যায়নি|উপলব্ধ নয়|cannot be determined|not possible")]
+    private static partial Regex SaysUnavailable();
+
+    /// <summary>
+    /// How an answer treats an unavailable KPI it was asked for: Substituted — a sentence naming it
+    /// gives a percentage; Said — a sentence naming it says it cannot be computed.
+    /// </summary>
+    public static (bool Substituted, bool Said) Treatment(string answer, MxCardUnavailable u)
+    {
+        var names = NamesOf(u).ToList();
+        var naming = Sentence().Matches(answer.ToLowerInvariant()).Select(m => m.Value).Where(s => names.Any(s.Contains)).ToList();
+        return (naming.Any(s => Percent().IsMatch(s) && !SaysUnavailable().IsMatch(s)), naming.Any(s => SaysUnavailable().IsMatch(s)) || SaysUnavailable().IsMatch(answer.ToLowerInvariant()) && answer.Contains(u.Reason[..Math.Min(20, u.Reason.Length)]));
+    }
+
+    /// <summary>The sentence code adds when the answer did not say it, or put another number in its place.</summary>
+    public static string UnavailableNote(MxCardUnavailable u, string label, bool bengali, bool substituted) =>
+        (substituted ? (bengali ? "\n\n⚠ ওপরের শতাংশটি সেটি নয়। " : "\n\n⚠ The percentage above is not it. ") : "\n\n")
+        + (bengali ? $"{u.LabelBn} গণনা করা যায় না: {u.Reason} [{label}]" : $"{u.Label} cannot be computed: {u.Reason} [{label}]");
 
     public static string RepairMessage(IEnumerable<string> errors) =>
         "These queries are not valid:\n" + string.Join("\n", errors.Select(e => "- " + e))
@@ -178,6 +249,7 @@ public static partial class MatrixChat
         + "- Copy every number from the results or the report card, or write the calculation as [[= expression ]] with numbers from them. Never work a number out yourself.\n"
         + "- A formula holds only numbers, + - * / and parentheses, such as [[= 2226 + 1738 ]]: never a row label or a function.\n"
         + "- Cite where each number comes from: [R1] for result row R1, [C3] for report card line C3, [KPI: <name>] for a KPI's definition.\n"
+        + "- If the question asks for something the report card lists under \"Not available\", say that it cannot be computed and why. Never give another number, or another percentage, in its place.\n"
         + "- If the results do not answer the question, say so plainly. Never name a person.";
 
     /// <summary>Result rows as the model reads them: "R3: unit = ADL-Unit-1; headcount = 2226".</summary>
@@ -196,7 +268,7 @@ public static partial class MatrixChat
     }
 
     public static string AnswerUser(string card, string results, string question) =>
-        $"Report card:\n{card}\nResults:\n{(results.Length == 0 ? "(no query was run)\n" : results)}\nQuestion: {question}";
+        $"Report card:\n{(card.Length > 0 ? card : "(none: the question is about all the current datasets)\n")}\nResults:\n{(results.Length == 0 ? "(no query was run)\n" : results)}\nQuestion: {question}";
 
     public static string Value(object? v) => v switch
     {

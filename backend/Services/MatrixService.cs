@@ -236,6 +236,13 @@ public partial class MatrixService : IMatrixService
         // Each kind brings its automatic dashboards (§3.8).
         await EnsureAutoDashboardsAsync(ct);
 
+        // A card that could not give something — attendance % before any master was there — is made
+        // again now that another file has arrived; it may give it now.
+        foreach (var other in (await _repo.ListDatasetsAsync(ct)).Where(x => x.IsCurrent && !datasets.Any(d => d.Id == x.Id)))
+            if (await _repo.GetCardAsync(other.Id, ct) is { } otherCard
+                && JsonSerializer.Deserialize<MxReportCardDto>(otherCard.Json, Json) is { Unavailable.Count: > 0 })
+                await BuildCardAsync(user, other, ct);
+
         var names = string.Join(", ", usedTemplates.Select(t => $"{t.Name} v{t.Version}").Distinct());
         var message = allFromTemplates
             ? $"Imported with template {names}"
@@ -707,9 +714,11 @@ public partial class MatrixService : IMatrixService
                 var sumP = rows.Sum(x => (double)x["present"]!);
                 var sumA = rows.Sum(x => (double)x["active"]!);
                 var unmatched = present.Provenance.Joins.FirstOrDefault()?.Unmatched ?? 0;
+                var why = sumA > 0
+                    ? $"{sumP} present of {sumA} active in {rows.Count} unit(s); {unmatched} people in the attendance are not in the {kind} list"
+                    : $"none of the people in this attendance are in the current {kind} list ({unmatched} not found), so there is no active manpower of the same units to measure against";
                 return new MxKpiResult(key, en, bn, kpi.Unit, sumA > 0 ? Math.Round(100 * sumP / sumA, 2) : null, null, "unit", rows, null,
-                    $"{sumP} present of {sumA} active in {rows.Count} unit(s); {unmatched} people in the attendance are not in the {kind} list",
-                    null, present.Provenance);
+                    why, null, present.Provenance);
             }
             default: // open issues
             {

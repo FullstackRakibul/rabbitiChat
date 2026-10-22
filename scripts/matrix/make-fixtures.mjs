@@ -389,6 +389,10 @@ export function makeFixtures(dir) {
   M.attendance.reportDate = '2026-05-19'
   M.attendance2 = makeAttendance(dir, M, people, 'fx-attendance-2.xlsx', '(20-May-2026 To 20-May-2026)', 40)
   M.attendance2.reportDate = '2026-05-20'
+  // 21 May: no one here is in the master, so attendance % cannot be computed (the real files' case).
+  const strangers = Array.from({ length: 40 }, () => ({ EmpID: String(100000 + int(0, 99999)), Name: fakeName(), DesignationName: 'Operator', DepartmentName: 'Production' }))
+  M.attendance3 = makeAttendance(dir, M, strangers, 'fx-attendance-3.xlsx', '(21-May-2026 To 21-May-2026)', 0)
+  M.attendance3.reportDate = '2026-05-21'
   makeDesignation(dir, M)
   makeHrBasic(dir, M)
   M.manpower = makeManpower(dir, M, 'fx-manpower.xlsx', day(2026, 4, 1))

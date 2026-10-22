@@ -1,6 +1,7 @@
 <script setup>
 /**
- * ম্যাট্রিক্স — প্রশ্ন Ask, on a dataset's Report page (docs/MATRIX_PROMPT.md §3.9).
+ * ম্যাট্রিক্স — প্রশ্ন Ask, on a dataset's Report page, or across every current dataset in
+ * the Ask section (datasetId null) — docs/MATRIX_PROMPT.md §3.9.
  *
  * A question goes plan → MatrixQuery → answer on the server; here it streams. The
  * status line shows within a second, the answer word by word. Under each answer:
@@ -13,7 +14,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { AlertTriangle, ChevronDown, LayoutDashboard, Loader2, MessageSquarePlus, Send, Trash2 } from '@lucide/vue'
 import {
   createMatrixDashboard, deleteMatrixConversation, getMatrixConversation, getMatrixDashboard, listMatrixConversations,
-  listMatrixDashboards, saveMatrixDashboard, streamMatrixChat,
+  listMatrixDashboards, saveMatrixDashboard, streamMatrixChat, warmMatrixAsk, warmMatrixAskAll,
 } from '@/services/index.js'
 import { Button } from '@/components/ui/button'
 import MatrixChart from '@/components/matrix/MatrixChart.vue'
@@ -21,7 +22,8 @@ import { renderChecked } from '@/lib/matrix-text.js'
 import { formatDate, lakh } from '@/lib/matrix-format.js'
 
 const props = defineProps({
-  datasetId: { type: Number, required: true },
+  /** The dataset asked about; null: every current dataset (the Ask section). */
+  datasetId: { type: Number, default: null },
   /** action:matrix.dashboards.edit — "Add to dashboard". */
   canEditDashboards: { type: Boolean, default: false },
 })
@@ -154,14 +156,17 @@ async function addToDashboard(r) {
 
 const placeholder = computed(() => 'যেমন: ইউনিট অনুযায়ী জনবল কত? · e.g. Which line has the fewest operators?')
 
-watch(() => props.datasetId, async () => { await open(null); await loadConversations() })
-onMounted(loadConversations)
+/** The model reads this dataset's question prefix while the person reads the page (the server limits it to once per 10 minutes). */
+function warm() { (props.datasetId ? warmMatrixAsk(props.datasetId) : warmMatrixAskAll()).catch(() => { /* a warm-up that fails only means a slower first answer */ }) }
+
+watch(() => props.datasetId, async () => { warm(); await open(null); await loadConversations() })
+onMounted(() => { warm(); loadConversations() })
 </script>
 
 <template>
   <section class="flex min-w-0 flex-col rounded-lg border bg-card" data-ask :data-ask-dataset="datasetId">
     <header class="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-      <h4 class="flex-1 text-sm font-semibold">প্রশ্ন <span class="font-normal text-muted-foreground">Ask about this report</span></h4>
+      <h4 class="flex-1 text-sm font-semibold">প্রশ্ন <span class="font-normal text-muted-foreground">{{ datasetId ? 'Ask about this report' : 'Ask across every current dataset' }}</span></h4>
       <select v-if="conversations.length" class="h-7 max-w-[14rem] rounded-md border bg-background px-1 text-xs" :value="conversationId ?? ''"
         aria-label="Conversation" data-ask-conversations @change="open(Number($event.target.value) || null)">
         <option value="">নতুন প্রশ্ন · New conversation</option>

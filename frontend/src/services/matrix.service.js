@@ -212,3 +212,13 @@ export function getMatrixConversation(id) {
 export function deleteMatrixConversation(id) {
   return http.del(`/matrix/conversations/${id}`)
 }
+
+/** Has the model read this dataset's question prefix now (the server allows one per 10 minutes). */
+export function warmMatrixAsk(datasetId) {
+  return http.post(`/matrix/datasets/${datasetId}/warm`, {})
+}
+
+/** The same, for Ask across every current dataset (the Ask section). */
+export function warmMatrixAskAll() {
+  return http.post('/matrix/ask/warm', {})
+}

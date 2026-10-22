@@ -83,6 +83,9 @@ public interface IMatrixService
     /// </summary>
     Task<MxResult<int>> AskAsync(User user, MxAskInput input, IMxAskSink sink, CancellationToken ct = default);
 
+    /// <summary>Has the model read a dataset's plan prefix now (once per 10 minutes), so its first question is quick.</summary>
+    Task<MxResult<MxWarmResult>> WarmAsync(User user, int? datasetId, CancellationToken ct = default);
+
     Task<List<MxConversationDto>> ListConversationsAsync(User user, int? datasetId, CancellationToken ct = default);
     Task<MxResult<List<MxMessageDto>>> ConversationAsync(User user, int id, CancellationToken ct = default);
     Task<MxResult<bool>> DeleteConversationAsync(User user, int id, CancellationToken ct = default);

@@ -5,7 +5,7 @@ export {
   listMatrixDatasets, getMatrixDataset, getMatrixRows, getMatrixQuality, fixMatrixIssue, getMatrixCatalog,
   listMatrixDashboards, getMatrixDashboard, runMatrixDashboard, createMatrixDashboard, saveMatrixDashboard, deleteMatrixDashboard,
   listMatrixKpis, updateMatrixKpi, downloadMatrixExport, saveBlob, getMatrixCard, runMatrixReport, getMatrixSummary, writeMatrixSummary,
-  streamMatrixChat, listMatrixConversations, getMatrixConversation, deleteMatrixConversation,
+  streamMatrixChat, listMatrixConversations, getMatrixConversation, deleteMatrixConversation, warmMatrixAsk, warmMatrixAskAll,
 } from './matrix.service.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'

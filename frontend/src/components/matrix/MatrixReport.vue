@@ -106,6 +106,13 @@ watch(compare, rerun)
           <span class="opacity-70">({{ formatValue(changes[item.key].before, item.unit) }} আগে)</span>
         </span>
       </button>
+      <!-- what this data cannot give, and why: never another number in its place -->
+      <div v-for="u in card.unavailable ?? []" :key="u.key" class="flex min-w-0 flex-col gap-1 rounded-lg border border-dashed bg-card p-3" :data-card-unavailable="u.key">
+        <span class="line-clamp-2 text-sm font-semibold leading-tight">{{ u.labelBn }}</span>
+        <span class="truncate text-xs text-muted-foreground">{{ u.label }}</span>
+        <span class="mt-auto pt-1 text-2xl font-semibold text-muted-foreground">—</span>
+        <span class="text-[11px] text-muted-foreground">পাওয়া যায় না · not available: {{ u.reason }}</span>
+      </div>
     </div>
 
     <!-- questions about this report -->
@@ -118,7 +125,8 @@ watch(compare, rerun)
         <h4 class="font-semibold leading-tight">{{ b.labelBn }} <span class="text-xs font-normal text-muted-foreground">{{ b.label }}</span></h4>
         <div class="mt-2 grid grid-cols-2 gap-3">
           <div v-for="[list, bn, en] in [[b.top, 'সর্বোচ্চ', 'Highest'], [b.bottom, 'সর্বনিম্ন', 'Lowest']].filter((x) => x[0].length)" :key="en">
-            <p class="text-xs text-muted-foreground">{{ bn }} <span class="opacity-70">{{ en }}</span></p>
+            <p class="text-xs text-muted-foreground">{{ bn }} <span class="opacity-70">{{ en }}</span>
+              <span v-if="b.groups > list.length" class="opacity-70" data-part-of> · {{ en === 'Highest' ? 'top' : 'bottom' }} {{ list.length }} of {{ b.groups }}</span></p>
             <ul class="mt-1 space-y-0.5">
               <li v-for="e in list" :key="e.label">
                 <button type="button" class="flex w-full items-baseline gap-2 rounded px-1 text-left hover:bg-accent disabled:hover:bg-transparent" :disabled="!e.cite" @click="drill(e.cite)">

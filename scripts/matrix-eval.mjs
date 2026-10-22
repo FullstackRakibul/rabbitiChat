@@ -1838,6 +1838,10 @@ function fakePlan(body) {
   else if (/payroll/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: id, filter: [active], group_by: ['unit'], measures: [['sum', 'gross', 'payroll']] }] }
   else if (/headcount by unit|BROKEN once/i.test(q)) plan = { kind: 'queries', queries: [{ dataset: id, filter: [active], group_by: ['unit'], measures: [['count', '*', 'headcount']] }] }
   else if (/attrition/i.test(q)) plan = { kind: 'definition', definition: 'attrition_pct' }
+  else if (/attendance rate/i.test(q)) plan = { kind: 'answer_from_card' }
+  else if (/separations .*by status/i.test(q)) plan = repairing && /every group/.test(body.messages.at(-1).content)
+    ? { kind: 'queries', queries: [{ dataset: id, filter: [['status', 'not_null'], ['status', 'not_in', ['Active']]], group_by: ['status'], measures: [['count', '*', 'separations']] }] }
+    : { kind: 'answer_from_card' }
   else if (/efficiency/i.test(q)) plan = { kind: 'need', need: 'Production efficiency is not in these datasets.' }
   else if (/names/i.test(q)) plan = { kind: 'need', need: "People's names are not available." }
   else plan = { kind: 'answer_from_card' }
@@ -1847,10 +1851,13 @@ function fakePlan(body) {
 /** The fake's answer: the result rows it was given, each cited; or the KPI; or a card line. */
 function fakeAnswer(body) {
   const user = body.messages.at(-1).content
-  const rows = [...user.matchAll(/^(R\d+): (.*)$/gm)].slice(0, 6)
+  const rows = [...user.matchAll(/^(R\d+): (.*)$/gm)].slice(0, 12)
+  const na = /^Asked but NOT AVAILABLE[^:]*: ([^:\n]+): (.*) \[(C\d+|Card)\]$/m.exec(user)
   const kpi = /^\[KPI: ([^\]]+)\] ([^\n]*)$/m.exec(user)
   let lines
-  if (rows.length) lines = rows.map(([, l, t]) => `- ${t} [${l}]`)
+  if (ctx.answerMode === 'substitute') lines = ['The attendance rate was 5.92% [C4].']
+  else if (na) lines = [`${na[1]} cannot be computed: ${na[2]} [${na[3]}]`]
+  else if (rows.length) lines = rows.map(([, l, t]) => `- ${t} [${l}]`)
   else if (kpi) lines = [`${kpi[1]}: ${kpi[2].split(' Computed by')[0]} [KPI: ${kpi[1]}]`]
   else { const c = /^\[(C\d+)\] (.*)$/m.exec(user); lines = [`From the report card: ${c?.[2]} [${c?.[1]}]`] }
   if (ctx.answerMode === 'unknown-row') lines.push('- And one more [R99]')
@@ -2000,6 +2007,30 @@ check('G-M4.7', 'M4', 'Ask on the Report page: the status line within 1 s, the a
   } finally { ctx.answerGap = 0; await browser.close() }
 })
 
+// ---- G-M4.12 live: the first question's time to first word, without and with the warm-up ----
+
+check('G-M4.12', 'M4', 'LIVE time to first word of a first question on the real master: without the warm-up, then with it (the real model)', async () => {
+  const ds = (await asAdmin('GET', '/api/matrix/datasets')).json?.datasets ?? []
+  const real = ds.filter((d) => !d.fileName.startsWith('fx-'))
+  const master = real.find((d) => d.fileName === REAL.master && d.sheet === 'HRM')?.id
+  const att = real.find((d) => d.fileName === REAL.attendance)?.id
+  if (!master || !att) return ok(false, 'the live imports are missing (run with --live)')
+  await useRealModel()
+  const q = 'How many active people are in the Cutting section?'
+  // The attendance's own prompt goes through the model in between, so the master's is not already cached.
+  const other = async () => ask(ctx.admin, { message: 'How many people were late?', datasetId: att })
+  await other()
+  const cold = await ask(ctx.admin, { message: q, datasetId: master })
+  await other()
+  const warm = (await asAdmin('POST', `/api/matrix/datasets/${master}/warm`, {})).json
+  const hot = await ask(ctx.admin, { message: q, datasetId: master })
+  const before = cold.done?.firstWordMs, after = hot.done?.firstWordMs
+  ctx.warmMeasure = { before, after, warmMs: warm?.ms }
+  return ok(before > 0 && after > 0 && warm?.warmed === true,
+    `${ctx.args.model} · first word without the warm-up ${(before / 1000).toFixed(1)} s · warm-up ${(warm?.ms / 1000).toFixed(1)} s (while the page is read) · first word after it ${(after / 1000).toFixed(1)} s`
+    + ` · answers: "${cold.content.slice(0, 80)}" / "${hot.content.slice(0, 80)}"`)
+}, { live: true })
+
 // ---- G-M4.6 Golden questions (live, the real model) ----
 
 /** A real file's sheet as objects by header (matrix-samples/; never printed). */
@@ -2013,6 +2044,15 @@ function realObjects(file, sheetName, headerRow = 1) {
     else if (r > headerRow) { if (!rows.has(r)) rows.set(r, {}); rows.get(r)[m[1]] = v }
   }
   return [...rows.values()].map((cells) => Object.fromEntries([...cols].map(([l, h]) => [String(h).trim(), cells[l] ?? null])))
+}
+
+/** "07:54:20 AM" → "07:54:20", "11:26:38 PM" → "23:26:38"; a time already on the 24-hour clock is kept. */
+function to24(s) {
+  const m = /^(\d{1,2}):(\d{2}):(\d{2})\s*([AP]M)?$/i.exec(String(s ?? '').trim())
+  if (!m) return null
+  let h = Number(m[1]) % (m[4] ? 12 : 24)
+  if (m[4]?.toUpperCase() === 'PM') h += 12
+  return `${String(h).padStart(2, '0')}:${m[2]}:${m[3]}`
 }
 
 /** What each golden question's answer must say, computed here from the real files. */
@@ -2041,7 +2081,7 @@ function goldenExpect() {
     op_helper_143: { numbers: [ops[143] ?? 0] },
     female_pct_finishing: { numbers: [pct(fin.filter((r) => t(r.GenderName ?? r.Gender) === 'Female').length, fin.length)] },
     // Attendance % cannot be computed for this file (no ID is in the master): the late % (C4) given as the rate is wrong.
-    late_19_may: { numbers: [A.filter((r) => t(r.Status) === 'LT').length], notRate: pct(A.filter((r) => t(r.Status) === 'LT').length, A.filter((r) => ['P', 'LT'].includes(t(r.Status))).length) },
+    late_19_may: { numbers: [A.filter((r) => t(r.Status) === 'LT').length], unavailable: 'attendance_pct' },
     ot_over_2h_by_department: { numbers: Object.values(otByDept) },
     grade_m3: { numbers: [staff.filter((r) => grade.get(t(r.DesignationName).toLowerCase()) === 'M3').length] },
     separations_by_status: { numbers: Object.values(seps) },
@@ -2057,7 +2097,8 @@ function goldenExpect() {
     resignations: { numbers: [seps.Resignation ?? 0] },
     mgmt_worker_ratio: { numbers: [Math.round((staff.length / workers) * 100) / 100] },
     largest_unit: { numbers: [Math.max(...Object.values(units))] },
-    latest_out: { text: [A.map((r) => t(r['Out Time'])).filter(Boolean).sort().at(-1)?.replace(/\s*[AP]M$/i, '')] },
+    // "11:26:38 PM" → "23:26:38": the 24-hour clock the card and the answers use.
+    latest_out: { text: [A.map((r) => to24(t(r['Out Time']))).filter(Boolean).sort().at(-1)] },
     cutting_active: { numbers: [active.filter((r) => t(r.SectionName) === 'Cutting').length] },
     status_left: { numbers: [seps.Left ?? 0] },
   }
@@ -2075,7 +2116,11 @@ function judge(g, want, r) {
   if (want.need) return declined || r.context?.kind === 'need' || /cannot answer|নেই/.test(r.content)
   if (want.refuse) return !r.context?.results?.some((x) => x.rows?.length && x.groupBy?.some((gb) => /name|phone|mobile/.test(gb))) && (declined || /cannot|can't|not available|নাম/i.test(r.content))
   if (want.text) return want.text.every((s) => r.content.includes(s))
-  if (want.notRate !== undefined && says(nums, want.notRate) && /উপস্থিতির হার|attendance (?:rate|%)/i.test(r.content)) return false
+  // Asked for what the data cannot give: said so, and no number put in its place.
+  if (want.unavailable) {
+    const u = r.checks?.unavailable?.find((x) => x.key === want.unavailable)
+    if (!u || !u.said || u.substituted) return false
+  }
   const needed = want.anyOf ? [...want.numbers, null] : want.numbers
   return needed.every((w) => w === null ? want.anyOf.some((l) => nums.includes(l)) : says(nums, w))
 }
@@ -2092,17 +2137,24 @@ check('G-M4.6', 'M4', 'LIVE golden questions (Step 3: ten) with the real model o
   await useRealModel()
   const golden = JSON.parse(read('scripts/matrix/golden.json')).questions.filter((g) => ctx.args.golden === 'all' || g.step3)
   const expect = goldenExpect()
-  const from = ctx.fake?.requests?.length ?? 0
   const out = []
+  // Each dataset warmed just before its first question, as opening its Report page does (the model caches one prompt at a time).
+  const warmed = []
+  const warmOnce = async (k) => {
+    if (warmed.some((w) => w.startsWith(k + ' '))) return
+    const w = (await asAdmin('POST', `/api/matrix/datasets/${ids[k]}/warm`, {})).json
+    warmed.push(`${k} ${w?.warmed ? `warmed in ${(w.ms / 1000).toFixed(1)} s` : w?.reason}`)
+  }
   let right = 0, unverified = 0, firstWords = []
   for (const g of golden) {
+    await warmOnce(g.dataset)
     const r = await ask(ctx.admin, { message: g.q, datasetId: ids[g.dataset] })
     const good = r.status === 200 && judge(g, expect[g.expect], r)
     if (good) right++
     unverified += r.checks?.amounts?.length ?? 0
     if (r.done?.firstWordMs) firstWords.push(r.done.firstWordMs)
     out.push(`${g.id} [${g.lang}] ${good ? 'RIGHT' : 'WRONG'} · plan ${r.context?.kind ?? (r.content.startsWith("I couldn't") ? 'could not plan' : 'refusal/need')}${r.context?.repaired ? ' (repaired)' : ''} · first word ${((r.done?.firstWordMs ?? 0) / 1000).toFixed(1)} s · unverified ${JSON.stringify(r.checks?.amounts ?? [])}`
-      + `${r.checks?.citations?.length ? ` · unknown ${JSON.stringify(r.checks.citations)}` : ''}\n    Q: ${g.q}\n    A: ${r.content.replace(/\n/g, ' ⏎ ').slice(0, 600)}\n    expected: ${JSON.stringify(expect[g.expect])}`)
+      + `${r.checks?.citations?.length ? ` · unknown ${JSON.stringify(r.checks.citations)}` : ''}${r.checks?.unavailable?.length ? ` · unavailable ${JSON.stringify(r.checks.unavailable.map((u) => ({ key: u.key, said: u.said, substituted: u.substituted })))}` : ''}\n    Q: ${g.q}\n    A: ${r.content.replace(/\n/g, ' ⏎ ').slice(0, 600)}\n    expected: ${JSON.stringify(expect[g.expect])}`)
   }
   // No name of the real files' people in any answer (compared, never printed).
   const names = new Set(realObjects(REAL.master, 'HRM').map((r) => String(r.Name ?? '').trim()).filter((n) => n.length > 4))
@@ -2110,7 +2162,7 @@ check('G-M4.6', 'M4', 'LIVE golden questions (Step 3: ten) with the real model o
   const leaked = [...names].some((n) => answers.includes(n))
   const fw = firstWords.sort((a, b) => a - b)
   return ok(right >= Math.ceil(golden.length * 0.84) && unverified === 0 && !leaked,
-    `${ctx.args.model}: ${right}/${golden.length} right · unverified numbers ${unverified} · personal data in answers ${leaked} · first word median ${((fw[Math.floor(fw.length / 2)] ?? 0) / 1000).toFixed(1)} s, max ${((fw.at(-1) ?? 0) / 1000).toFixed(1)} s\n${out.join('\n')}`)
+    `${ctx.args.model}: ${right}/${golden.length} right · warm-ups: ${warmed.join(', ')} · unverified numbers ${unverified} · personal data in answers ${leaked} · first word median ${((fw[Math.floor(fw.length / 2)] ?? 0) / 1000).toFixed(1)} s, max ${((fw.at(-1) ?? 0) / 1000).toFixed(1)} s\n${out.join('\n')}`)
 }, { live: true })
 
 check('G-M4.7', 'M4', 'LIVE the Report page with the real model\'s summary and an Ask conversation, on the real master and attendance: light and dark, desktop and 360 px (personal data blurred)', async () => {
@@ -2147,6 +2199,94 @@ check('G-M4.7', 'M4', 'LIVE the Report page with the real model\'s summary and a
   } finally { await browser.close() }
   return ok(pass, `${out.join(' · ')} · 8 screenshots in ${ctx.args.shots} (live-ask-*.png)`)
 }, { live: true })
+
+// ---- G-M4.10 What a dataset cannot give: listed with its reason, said, never replaced ----
+
+/** The 21 May attendance: none of its people are in the master, so attendance % cannot be computed. */
+async function strangersAttendance() {
+  if (ctx.att3) return ctx.att3
+  await m3Setup()
+  const up = (await upload(ctx.admin, [path.join(FIXTURES, 'fx-attendance-3.xlsx')])).json.uploads[0]
+  const r = await asAdmin('POST', `/api/matrix/uploads/${up.id}/import`, { tables: [{ table: tableOf(up, 'rptDailyAttDetailsReport_Factor').id, confirm: 'suggestions' }] })
+  ctx.att3 = r.json.datasets[0].id
+  return ctx.att3
+}
+
+check('G-M4.10', 'M4', 'a KPI the data cannot give is listed with its reason on the card and in the plan prompt; asked for, the answer says so and gives no other number — a substituted percentage is caught and corrected', async () => {
+  const att3 = await strangersAttendance()
+  const card = (await asAdmin('GET', `/api/matrix/datasets/${att3}/card`)).json
+  const na = card.unavailable?.find((u) => u.key === 'attendance_pct')
+  const S = await m3Setup()
+  const withPct = (await asAdmin('GET', `/api/matrix/datasets/${S.att2}/card`)).json.items.find((i) => i.key === 'attendance_pct')
+  let from = ctx.fake.requests.length
+  ctx.answerMode = null
+  const faithful = await ask(ctx.admin, { message: 'What was the attendance rate on 21 May?', datasetId: att3 })
+  const planPrompt = planRequests(from)[0]?.body?.messages?.[0]?.content ?? ''
+  const answerMsg = answerRequests(from)[0]?.body?.messages?.at(-1)?.content ?? ''
+  ctx.answerMode = 'substitute'
+  const sub = await ask(ctx.admin, { message: 'What was the attendance rate on 21 May?', datasetId: att3 })
+  ctx.answerMode = null
+  const fu = faithful.checks?.unavailable?.[0], su = sub.checks?.unavailable?.[0]
+  return ok(na && /none of the people/.test(na.reason) && !card.items.some((i) => i.key === 'attendance_pct') && withPct?.value > 0 && !!withPct.cite
+      && /attendance_pct — Attendance % — NOT AVAILABLE in this dataset: none of the people/.test(planPrompt) && /Asked but NOT AVAILABLE/.test(answerMsg)
+      && fu?.said === true && fu?.substituted === false && !/%/.test(faithful.content.replace(/Attendance %/g, '')) && !faithful.content.includes('⚠')
+      && su?.substituted === true && /⚠ The percentage above is not it\. Attendance % cannot be computed: none of the people/.test(sub.content),
+    `card: attendance % not available — "${na?.reason}" (on 20 May, where the people are in the master, it is ${withPct?.value}% and cited) · plan prompt marks it ${/NOT AVAILABLE/.test(planPrompt)} · the answer call is told ${/Asked but NOT AVAILABLE/.test(answerMsg)} · `
+    + `faithful answer "${faithful.content.slice(0, 120)}" (said ${fu?.said}, substituted ${fu?.substituted}) · substituting answer caught and corrected: "${sub.content.replace(/\n/g, ' ').slice(0, 220)}"`)
+})
+
+// ---- G-M4.11 A full breakdown is queried, never answered from the card's top and bottom three ----
+
+check('G-M4.11', 'M4', 'card breakdowns say "top 3 of 8"; a question asking for a full breakdown that was planned from the card is planned again and runs a query giving every group', async () => {
+  const S = await m3Setup()
+  const card = (await asAdmin('GET', `/api/matrix/datasets/${S.hr}/card`)).json
+  const b = card.breakdowns.find((x) => x.key === 'separations_by_status')
+  const from = ctx.fake.requests.length
+  const r = await ask(ctx.admin, { message: 'How many separations are there by status?', datasetId: S.hr })
+  const plans = planRequests(from)
+  const told = plans[1]?.body?.messages?.at(-1)?.content ?? ''
+  const sentCard = plans[0]?.body?.messages?.[1]?.content ?? ''
+  const rows = r.context?.results?.[0]?.rows ?? []
+  const H = sheetObjects('fx-hr-basic.xlsx', 'Sheet1')
+  const want = countBy(H.filter((x) => x.EmpStatusName && x.EmpStatusName !== 'Active'), (x) => x.EmpStatusName)
+  const got = Object.fromEntries(rows.map((x) => [x.values.status, x.values.separations ?? x.values.n ?? x.values.value]))
+  const cited = rows.every((x) => r.content.includes(`[${x.label}]`))
+  return ok(b?.groups === Object.keys(want).length && b.top.length === 3 && /top 3 of 8/.test(sentCard) && plans.length === 2 && /every group/.test(told)
+      && r.context?.repaired === true && sameMap(want, got) && cited,
+    `card: ${b?.label} top ${b?.top.length} of ${b?.groups} ("top 3 of 8" in what the planner read ${/top 3 of 8/.test(sentCard)}) · planned from the card, then again (${plans.length} plan calls, told "${told.slice(0, 80)}…") · `
+    + `the query gave ${rows.length} groups, equal to the file ${sameMap(want, got)} · every group cited ${cited}`)
+})
+
+// ---- G-M4.12 Warm-up: the plan prefix read before the first question ----
+
+check('G-M4.12', 'M4', 'warm-up: one request with the plan\'s own system message, num_predict 1, the same model, num_ctx and keep_alive; not again within 10 minutes; opening a Report page sends it', async () => {
+  const S = await m3Setup()
+  let from = ctx.fake.requests.length
+  const w1 = (await asAdmin('POST', `/api/matrix/datasets/${S.master}/warm`, {})).json
+  const w2 = (await asAdmin('POST', `/api/matrix/datasets/${S.master}/warm`, {})).json
+  const warmReqs = ctx.fake.requests.slice(from).filter((q) => q.path === '/api/chat' && q.body?.options?.num_predict === 1)
+  from = ctx.fake.requests.length
+  await ask(ctx.admin, { message: 'What is the headcount by unit?', datasetId: S.master })
+  const plan = planRequests(from)[0]?.body
+  const warm = warmReqs[0]?.body
+  const same = !!warm && !!plan && warm.messages.length === 1 && warm.messages[0].role === 'system' && warm.messages[0].content === plan.messages[0].content
+    && warm.model === plan.model && warm.options.num_ctx === plan.options.num_ctx && warm.keep_alive === plan.keep_alive && warm.keep_alive > 0 && warm.think === false
+  // Opening a Report page warms its dataset.
+  const before = ctx.fake.requests.length
+  const browser = await launchBrowser({ base: ctx.api.url, profileRoot: EVAL_ROOT })
+  let fromPage
+  try {
+    const p = await browser.page()
+    await p.session(ctx.admin, 'light', 1280, 900, `/matrix?dataset=${S.hr}`)
+    await p.waitFor('[data-ask] [data-ask-input]', 20000)
+    await sleep(1500)
+    fromPage = ctx.fake.requests.slice(before).filter((q) => q.path === '/api/chat' && q.body?.options?.num_predict === 1)
+  } finally { await browser.close() }
+  return ok(w1?.warmed === true && w2?.warmed === false && /10 minutes/.test(w2?.reason ?? '') && warmReqs.length === 1 && same && fromPage.length === 1
+      && /Dataset in scope: "\d+" — separation-list/.test(fromPage[0].body.messages[0].content),
+    `first warm-up ${w1?.warmed} (${w1?.ms} ms, ${w1?.model}), second within 10 minutes ${w2?.warmed} ("${w2?.reason}") · ${warmReqs.length} request to the model: num_predict 1, `
+    + `its system message identical to the plan call's, same model, num_ctx ${warm?.options?.num_ctx} and keep_alive ${warm?.keep_alive} ${same} · opening the separation list's Report page sent ${fromPage.length} warm-up`)
+})
 
 // ---- G-M4.3 No personal data to the model (after the summary and chat checks) ----
 

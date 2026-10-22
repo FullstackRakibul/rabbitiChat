@@ -20,19 +20,21 @@ public sealed record SchemaJsonAnswer(string? Content, int PromptTokens, int Out
 
 public static class SchemaJsonChat
 {
+    /// <param name="keepAlive">How long Ollama keeps the model loaded, in seconds; null sends nothing (its default).</param>
     public static async Task<SchemaJsonAnswer> CallAsync(
         IHttpClientFactory http, string model, object schema, IEnumerable<SchemaJsonMessage> messages, int numCtx,
-        CancellationToken ct)
+        CancellationToken ct, int? keepAlive = null)
     {
-        var payload = new
+        var payload = new Dictionary<string, object?>
         {
-            model,
-            stream = true,
-            format = schema,
-            think = false,
-            options = new { temperature = 0, num_ctx = numCtx },
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToArray(),
+            ["model"] = model,
+            ["stream"] = true,
+            ["format"] = schema,
+            ["think"] = false,
+            ["options"] = new { temperature = 0, num_ctx = numCtx },
+            ["messages"] = messages.Select(m => new { role = m.Role, content = m.Content }).ToArray(),
         };
+        if (keepAlive is not null) payload["keep_alive"] = keepAlive;
 
         try
         {
@@ -86,5 +88,32 @@ public static class SchemaJsonChat
         {
             return new(null, 0, 0, $"Could not reach the model: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Has Ollama read a system message into its prompt cache now, so the call that later
+    /// starts with the same message only reads what follows: one token is generated
+    /// (num_predict 1), with the model, num_ctx, keep_alive and thinking the real call will use.
+    /// Returns null, or why it did not happen.
+    /// </summary>
+    public static async Task<string?> WarmAsync(IHttpClientFactory http, string model, string system, int numCtx, int? keepAlive, CancellationToken ct)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["stream"] = false,
+            ["think"] = false,
+            ["options"] = new { temperature = 0, num_ctx = numCtx, num_predict = 1 },
+            ["messages"] = new[] { new { role = "system", content = system } },
+        };
+        if (keepAlive is not null) payload["keep_alive"] = keepAlive;
+        try
+        {
+            var client = http.CreateClient("ollama-extract");
+            using var resp = await client.PostAsJsonAsync("/api/chat", payload, ct);
+            return resp.IsSuccessStatusCode ? null : $"Ollama answered {(int)resp.StatusCode} for model '{model}'.";
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { return $"Could not reach the model: {ex.Message}"; }
     }
 }

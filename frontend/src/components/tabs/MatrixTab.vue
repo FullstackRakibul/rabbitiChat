@@ -34,6 +34,7 @@ import { formatBytes, formatDate } from '@/lib/matrix-format.js'
 // ECharts comes with the dashboards only, so the rest of the app does not load it.
 const MatrixDashboard = defineAsyncComponent(() => import('@/components/matrix/MatrixDashboard.vue'))
 const MatrixReport = defineAsyncComponent(() => import('@/components/matrix/MatrixReport.vue'))
+const MatrixAsk = defineAsyncComponent(() => import('@/components/matrix/MatrixAsk.vue'))
 
 const props = defineProps({
   /** The user's section keys and action keys, as /api/me/access gave them. */
@@ -66,6 +67,7 @@ const view = computed(() => {
   if (route.query.dashboard) return 'dashboard'
   if (route.query.section === 'dashboards') return 'dashboards'
   if (route.query.section === 'definitions') return 'definitions'
+  if (route.query.section === 'ask') return 'ask'
   if (route.query.upload) return 'mapping'
   if (route.query.dataset || route.query.quality) return 'dataset'
   return 'home'
@@ -81,11 +83,12 @@ const DATASET_TABS = computed(() => [
   ['data', 'ডেটা', 'Data', true],
   ['quality', 'মান', 'Quality', true],
 ].filter((x) => x[3]))
-const section = computed(() => (['dashboard', 'dashboards'].includes(view.value) ? 'dashboards' : view.value === 'definitions' ? 'definitions' : 'data'))
+const section = computed(() => (['dashboard', 'dashboards'].includes(view.value) ? 'dashboards' : ['definitions', 'ask'].includes(view.value) ? view.value : 'data'))
 const printing = computed(() => view.value === 'dashboard' && !!route.query.print)
 const SECTIONS = computed(() => [
   ['data', 'ডেটা', 'Data', {}, canData.value],
   ['dashboards', 'ড্যাশবোর্ড', 'Dashboards', { section: 'dashboards' }, canDashboards.value],
+  ['ask', 'প্রশ্ন', 'Ask', { section: 'ask' }, canAsk.value],
   ['definitions', 'সংজ্ঞা', 'Definitions', { section: 'definitions' }, canData.value || canDashboards.value],
 ].filter((s) => s[4]))
 
@@ -246,6 +249,9 @@ onMounted(async () => {
         </li>
       </ul>
     </section>
+
+    <MatrixAsk v-else-if="view === 'ask' && canAsk" :dataset-id="null" :can-edit-dashboards="canEditDashboards" data-ask-section
+      @drill="drill" @definition="(k) => go({ section: 'definitions', kpi: k })" />
 
     <MatrixDefinitions v-else-if="view === 'definitions'" :can-kpis="canDashboards" :can-fields="canData" :can-edit-kpis="canEditKpis"
       :focus="String(route.query.kpi ?? '')" />

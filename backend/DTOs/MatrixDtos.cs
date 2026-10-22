@@ -215,9 +215,12 @@ public sealed record MxCardComparison(int PreviousId, string? PreviousDate, List
 
 public sealed record MxCardIssue(string Check, string Severity, int Count);
 
+/// <summary>A KPI of the card's kind this dataset cannot give, and why (no such field; no one to measure against …).</summary>
+public sealed record MxCardUnavailable(string Key, string Label, string LabelBn, string Reason);
+
 public sealed record MxReportCardDto(int DatasetId, string Kind, string Name, string? ReportDate, List<string> Scope,
     List<MxCardItem> Items, List<MxCardBreakdown> Breakdowns, MxCardComparison? Comparison, List<MxCardIssue> Quality,
-    int Tokens, DateTime CreatedAtUtc, int Version = 0);
+    int Tokens, DateTime CreatedAtUtc, int Version = 0, List<MxCardUnavailable>? Unavailable = null);
 
 // ---- Dashboards (§3.8) ----
 
@@ -285,6 +288,9 @@ public sealed record MxSummaryInput(string? Language, string? Model);
 
 /// <param name="DatasetId">The dataset the question is about (its Report page's Ask).</param>
 public sealed record MxAskInput(int? ConversationId, string? Message, int? DatasetId, string? Model);
+
+/// <summary>A warm-up: whether it ran (not when one ran within ten minutes, or Ollama refused), how long it took.</summary>
+public sealed record MxWarmResult(bool Warmed, string? Reason, long Ms, string Model);
 
 public sealed record MxConversationDto(int Id, string Title, string? Scope, DateTime CreatedAt, int Messages);
 

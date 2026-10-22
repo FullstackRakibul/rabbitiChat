@@ -16,6 +16,9 @@ public sealed class MatrixModel(IConfiguration config, ModelPolicy modelPolicy)
     public string? Configured =>
         Blank(config["Matrix:Model"]) ?? Blank(config["Extraction:DefaultModel"]) ?? Blank(config["Ollama:DefaultModel"]);
 
+    /// <summary>How long Ollama keeps the Matrix model loaded between questions, in seconds (Matrix:KeepAlive; 30 minutes).</summary>
+    public int KeepAlive => int.TryParse(config["Matrix:KeepAlive"], out var k) ? k : 1800;
+
     /// <summary>The context window Matrix asks for.</summary>
     public int NumCtx => int.TryParse(config["Matrix:NumCtx"] ?? config["Extraction:NumCtx"], out var n) && n > 0 ? n : 16384;
 

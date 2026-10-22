@@ -20,8 +20,10 @@
 //   POST /api/matrix/datasets/{id}/report       { filters, compare } → the Report page's charts      section:matrix.dashboards
 //   GET  /api/matrix/datasets/{id}/summary      ?lang=bn|en — the saved summary                     section:matrix.dashboards
 //   POST /api/matrix/datasets/{id}/summary      { language, model? } — written from the card, checked section:matrix.dashboards
-//   POST /api/matrix/chat                       { message, datasetId, conversationId? } → NDJSON  section:matrix.ask
-//   GET  /api/matrix/conversations              ?dataset= — this person's Ask conversations          section:matrix.ask
+//   POST /api/matrix/chat                       { message, datasetId?, conversationId? } → NDJSON (no datasetId: every current dataset)  section:matrix.ask
+//   POST /api/matrix/datasets/{id}/warm         the plan prefix read into the model's cache (≤ 1 per 10 min) section:matrix.ask
+//   POST /api/matrix/ask/warm                   the same, for Ask across every current dataset        section:matrix.ask
+//   GET  /api/matrix/conversations              ?dataset= — this person's Ask conversations; without it, the Ask section's (no dataset)  section:matrix.ask
 //   GET/DELETE /api/matrix/conversations/{id}   its messages (with what each answer used) / delete   section:matrix.ask
 //   GET  /api/matrix/dashboards                 the dashboards the caller may see                    section:matrix.dashboards
 //   GET  /api/matrix/dashboards/{id}            one, with its layout                                 section:matrix.dashboards
@@ -147,6 +149,14 @@ namespace RabbitIC.Api.MinimalApis
                 var r = await svc.AskAsync(await User(ctx, db), input, sink, ct);
                 if (r.Outcome != MxOutcome.Ok && !sink.Started) await Error(r.Outcome, r.Error).ExecuteAsync(ctx);
             });
+
+            g.MapPost("/datasets/{id:int}/warm", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused ? refused.Result
+                    : Map(await svc.WarmAsync(await User(ctx, db), id, ct)));
+
+            g.MapPost("/ask/warm", async (HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused ? refused.Result
+                    : Map(await svc.WarmAsync(await User(ctx, db), null, ct)));
 
             g.MapGet("/conversations", async (int? dataset, HttpContext ctx, AppDbContext db, AccessPolicy access, IMatrixService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.MatrixAsk, ct) is { } refused ? refused.Result

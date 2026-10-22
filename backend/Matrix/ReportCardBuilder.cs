@@ -17,10 +17,13 @@ namespace RabbitIC.Api.Matrix;
 public static class ReportCardBuilder
 {
     /// <summary>Cards made by an older builder are made again when read (CardAsync).</summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>A per-line KPI shown as one tile: its median, citing every row it counts (the KPI named here).</summary>
     private static readonly Dictionary<string, string> MedianCites = new() { ["operators_per_line"] = "sewing_operators" };
+
+    /// <summary>A KPI with no citation of its own cites the rows it counts (attendance %: the present people).</summary>
+    private static readonly Dictionary<string, string> NumeratorCites = new() { ["attendance_pct"] = "att_present" };
     private sealed record Plan(string[] Items, string[] Breakdowns);
 
     private static Plan PlanFor(string kind) => kind switch
@@ -29,7 +32,7 @@ public static class ReportCardBuilder
             new[] { "active_headcount", "sewing_lines_total", "operators_per_line", "female_pct", "mgmt_worker_ratio", "headcount_without_grade_mapping" },
             new[] { "headcount_by_unit", "headcount_by_section", "operators_per_line", "headcount_by_designation" }),
         MxReportKind.AttendanceDaily => new(
-            new[] { "rows_total", "att_present", "att_late", "late_pct", "ot_over_2h", "ot_over_4h", "ot_total", "earliest_in", "latest_out" },
+            new[] { "rows_total", "att_present", "att_late", "late_pct", "attendance_pct", "ot_over_2h", "ot_over_4h", "ot_total", "earliest_in", "latest_out" },
             new[] { "shift_mix", "present_by_department" }),
         MxReportKind.SeparationList => new(
             new[] { "rows_total", "separations_total", "active_headcount" },
@@ -43,25 +46,37 @@ public static class ReportCardBuilder
         List<MxQualityIssue> issues)
     {
         var plan = PlanFor(d.ReportKind);
+        string? failed = null;
         async Task<MxKpiResult?> Try(string key, MxDataset on)
         {
-            // A KPI whose fields this dataset lacks (or the caller may not see) is left out of the card.
+            // A KPI whose fields this dataset lacks (or the caller may not see) has no value; why is kept.
+            failed = null;
             try { return await run(key, on, null); }
-            catch (MxQueryError) { return null; }
+            catch (MxQueryError e) { failed = e.Message; return null; }
         }
 
         // A per-line KPI's value is its median line.
         static double? ValueOf(MxKpiResult r) => r.Value ?? r.Summary?.Median;
 
         var items = new List<MxCardItem>();
+        var unavailable = new List<MxCardUnavailable>();
         foreach (var key in plan.Items)
         {
-            if (await Try(key, d) is not { } r || (ValueOf(r) is null && r.Text is null)) continue;
+            var got = await Try(key, d);
+            if (got is not { } r || (ValueOf(r) is null && r.Text is null))
+            {
+                // Listed with its reason, so neither the summary nor an answer puts another number in its place.
+                var kpi = KpiLibrary.Find(key);
+                unavailable.Add(new MxCardUnavailable(key, got?.NameEn ?? kpi?.En ?? key, got?.NameBn ?? kpi?.Bn ?? key,
+                    failed ?? got?.Detail ?? "this data gives no value for it"));
+                continue;
+            }
             if (r.Summary is { } s && MedianCites.TryGetValue(key, out var citeKey))
                 items.Add(new MxCardItem(key, $"{r.NameEn} (median)", $"{r.NameBn} (মধ্যমা)", s.Median, null, "per line",
                     (await Try(citeKey, d))?.Cite, $"lowest {Fmt(s.Min)}, highest {Fmt(s.Max)}, over {s.Count} lines"));
             else
-                items.Add(new MxCardItem(key, r.NameEn, r.NameBn, r.Value, r.Text, r.Unit, r.Cite));
+                items.Add(new MxCardItem(key, r.NameEn, r.NameBn, r.Value, r.Text, r.Unit,
+                    r.Cite ?? (NumeratorCites.TryGetValue(key, out var numerator) ? (await Try(numerator, d))?.Cite : null), r.Detail));
         }
 
         var breakdowns = new List<MxCardBreakdown>();
@@ -92,7 +107,7 @@ public static class ReportCardBuilder
             scope.AddRange(units.Rows.Select(x => x.GetValueOrDefault("unit")?.ToString()).Where(u => u is not null).Select(u => u!).Take(20));
 
         var quality = issues.Where(i => i.State == MxQualityIssue.Open).Select(i => new MxCardIssue(i.Check, i.Severity, i.Count)).ToList();
-        var card = new MxReportCardDto(d.Id, d.ReportKind, d.Name, d.ReportDate, scope, items, breakdowns, comparison, quality, 0, DateTime.UtcNow, Version);
+        var card = new MxReportCardDto(d.Id, d.ReportKind, d.Name, d.ReportDate, scope, items, breakdowns, comparison, quality, 0, DateTime.UtcNow, Version, unavailable);
         return card with { Tokens = PoPromptBuilder.EstimateTokens(Render(card)) };
     }
 
@@ -121,6 +136,7 @@ public static class ReportCardBuilder
                 Add(x.Key, $"{x.Label} {Fmt(x.Before)} → {Fmt(x.After)} ({(x.Change >= 0 ? "+" : "")}{Fmt(x.Change)})",
                     card.Items.FirstOrDefault(i => i.Key == x.Key)?.Cite);
         foreach (var q in card.Quality) Add("quality", $"{q.Check} {q.Count} ({q.Severity})", null);
+        foreach (var u in card.Unavailable ?? new()) Add(u.Key, $"{u.Label} ({u.LabelBn}): not available — {u.Reason}", null);
         return list;
     }
 
@@ -136,15 +152,21 @@ public static class ReportCardBuilder
         foreach (var _ in card.Items) sb.AppendLine(Next());
         foreach (var b in card.Breakdowns)
         {
-            // "of 8": the card lists part of the breakdown, and says so.
-            sb.AppendLine($"{b.Label} ({b.LabelBn}) — {b.Groups} groups; highest {b.Top.Count}: {string.Join("; ", b.Top.Select(_ => Next()))}");
-            if (b.Bottom.Count > 0) sb.AppendLine($"  lowest {b.Bottom.Count}: {string.Join("; ", b.Bottom.Select(_ => Next()))}");
+            // "top 3 of 8": a breakdown the card holds only part of says so.
+            var all = PartOf(b) ? "" : " (all of them)";
+            sb.AppendLine($"{b.Label} ({b.LabelBn}) — top {b.Top.Count} of {b.Groups}{all}: {string.Join("; ", b.Top.Select(_ => Next()))}");
+            if (b.Bottom.Count > 0) sb.AppendLine($"  bottom {b.Bottom.Count} of {b.Groups}: {string.Join("; ", b.Bottom.Select(_ => Next()))}");
         }
         if (card.Comparison is { } c)
             sb.AppendLine($"Against the previous snapshot ({c.PreviousDate}): {string.Join("; ", c.Items.Select(_ => Next()))}");
         if (card.Quality.Count > 0) sb.AppendLine($"Open quality issues: {string.Join("; ", card.Quality.Select(_ => Next()))}");
+        if (card.Unavailable is { Count: > 0 } na)
+            sb.AppendLine($"Not available in this data (never give another number in their place): {string.Join("; ", na.Select(_ => Next()))}");
         return sb.ToString();
     }
+
+    /// <summary>True when the card shows only part of a breakdown: fewer distinct entries than its groups.</summary>
+    public static bool PartOf(MxCardBreakdown b) => b.Top.Concat(b.Bottom).Select(e => e.Label).Distinct().Count() < b.Groups;
 
     private static string Fmt(double? v) => v is null ? "—" : v.Value.ToString("0.##", CultureInfo.InvariantCulture);
 }

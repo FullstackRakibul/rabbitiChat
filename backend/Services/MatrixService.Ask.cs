@@ -47,7 +47,7 @@ public partial class MatrixService
         var capabilities = await ChatEndpoint.ModelCapabilitiesAsync(_chat, ModelPolicy.LocalSource, model, ct);
         bool? think = capabilities.Any(c => c.Equals("thinking", StringComparison.OrdinalIgnoreCase) || c.Equals("reasoning", StringComparison.OrdinalIgnoreCase)) ? false : null;
         var args = new ChatArgs(model, new List<ChatTurn> { new("system", system), new("user", MatrixSummary.User(cardText, language)) },
-            Tools: null, Think: think, NumCtx: _models.NumCtx, KeepAlive: null, Temperature: 0);
+            Tools: null, Think: think, NumCtx: _models.NumCtx, KeepAlive: _models.KeepAlive, Temperature: 0);
 
         var answer = new StringBuilder();
         var formulas = new HrFormulaStream(MatrixSummary.Number);
