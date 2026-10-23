@@ -59,6 +59,9 @@ public sealed class RequestLoggingMiddleware
         catch { /* best effort */ }
 
         var correlationId = ctx.Items[CorrelationMiddleware.ItemKey] as string;
+        var publicVisitor = RabbitIC.Api.Truth.TunnelGuard.IsTunnel(ctx)
+            || RabbitIC.Api.Truth.TunnelGuard.IsPublicTruthPath(path)
+            || path.StartsWith("/truth", StringComparison.OrdinalIgnoreCase);
         var rawQuery = ctx.Request.QueryString.Value;
 
         var entry = new ActivityLog
@@ -76,8 +79,9 @@ public sealed class RequestLoggingMiddleware
             QueryString   = redactor.RedactQueryString(rawQuery),
             StatusCode    = ctx.Response.StatusCode,
             DurationMs    = sw.ElapsedMilliseconds,
-            ClientIp      = ctx.Connection.RemoteIpAddress?.ToString(),
-            UserAgent     = ctx.Request.Headers.UserAgent.ToString().TruncateTo(512),
+            // The Ministry of Truth's visitors are the public: no IP, no user agent (docs/TRUTH_PROMPT.md §7).
+            ClientIp      = publicVisitor ? null : ctx.Connection.RemoteIpAddress?.ToString(),
+            UserAgent     = publicVisitor ? null : ctx.Request.Headers.UserAgent.ToString().TruncateTo(512),
             Module        = DeriveModule(path),
             Environment   = env.EnvironmentName,
             MachineName   = System.Net.Dns.GetHostName(),

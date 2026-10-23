@@ -1,0 +1,22 @@
+{
+  "memes": [
+    { "id": "patch-freedom", "bn": "প্যাচ করাই স্বাধীনতা।", "en": "PATCHING IS FREEDOM.",
+      "mood": "relief", "placement": ["divider", "footer", "empty"], "style": "ribbon", "pose": "relieved", "weight": 3, "active": true },
+    { "id": "ignorance", "bn": "না জানাই দুর্বলতা।", "en": "IGNORANCE IS A VULNERABILITY.",
+      "mood": "calm", "placement": ["divider", "footer", "empty"], "style": "ribbon", "pose": null, "weight": 3, "active": true },
+    { "id": "two-plus-two", "bn": "২ + ২ = ৪। আর 8.3.20 < 8.3.36।", "en": "2 + 2 = 4. And 8.3.20 < 8.3.36.",
+      "mood": "calm", "placement": ["divider", "footer", "404"], "style": "telescreen", "pose": "calm", "weight": 2, "active": true },
+    { "id": "rotate-keys", "bn": "চোখ নয়, key ঘোরান।", "en": "Rotate your keys. Not your eyes.",
+      "mood": "alert", "placement": ["divider", "footer"], "style": "stamp", "pose": "alert", "weight": 2, "active": true },
+    { "id": "memory-hole", "bn": "এই মন্ত্রণালয় কিছু ভোলে না। এখানে কোনো মেমোরি হোল নেই।", "en": "This ministry has a memory. No memory hole here.",
+      "mood": "relief", "placement": ["divider", "footer", "empty"], "style": "telescreen", "pose": "relieved", "weight": 2, "active": true },
+    { "id": "thoughtcrime", "bn": "আনপ্যাচড সার্ভার? এটা চিন্তাপরাধ।", "en": "Unpatched server? That's a thoughtcrime.",
+      "mood": "alert", "placement": ["divider", "404"], "style": "stamp", "pose": null, "weight": 2, "active": true },
+    { "id": "backup-first", "bn": "আগে ব্যাকআপ, পরে শান্তি।", "en": "Backup first. Regret never.",
+      "mood": "alert", "placement": ["divider", "footer", "backend-down"], "style": "ribbon", "pose": null, "weight": 2, "active": true },
+    { "id": "room-101", "bn": "আপডেট না করা সার্ভারের জায়গা রুম ১০১।", "en": "Room 101 is for servers that skip updates.",
+      "mood": "calm", "placement": ["404", "divider"], "style": "stamp", "pose": null, "weight": 2, "active": true },
+    { "id": "env-diary", "bn": "আপনার .env ডায়েরি না, শেয়ার করবেন না।", "en": "Your .env is not a diary. Don't share it.",
+      "mood": "calm", "placement": ["divider", "footer", "backend-down"], "style": "telescreen", "pose": null, "weight": 2, "active": true }
+  ]
+}

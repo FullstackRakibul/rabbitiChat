@@ -53,6 +53,8 @@ COPY backend/RabbitIC.Api.csproj ./
 RUN dotnet restore RabbitIC.Api.csproj
 
 COPY backend/ ./
+# The Ministry of Truth's site text is embedded from the frontend's folder (RabbitIC.Api.csproj).
+COPY frontend/src/truth/content/ /frontend/src/truth/content/
 
 # A stray local database or build output in the build context must not ship.
 RUN rm -rf bin obj Data/*.db Data/*.db-shm Data/*.db-wal \

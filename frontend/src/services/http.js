@@ -79,7 +79,12 @@ async function request(path, { method = 'GET', body, signal, authError = true } 
   noteAccessRev(res)
 
   if (res.status === 401 && authError) throw new AuthError()
-  if (!res.ok) throw new HttpError((await errorMessage(res)) || `Request failed (${res.status})`, res.status)
+  if (!res.ok) {
+    const err = new HttpError((await errorMessage(res)) || `Request failed (${res.status})`, res.status)
+    // The JSON body when there is one: a refusal can carry more than its message (the Ministry of Truth's checklist problems).
+    try { err.data = await res.clone().json() } catch { err.data = null }
+    throw err
+  }
   return res
 }
 

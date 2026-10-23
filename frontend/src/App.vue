@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote, Activity, Satellite, Grip, Users, Grid3x3
+  Scissors, StickyNote, Activity, Satellite, Grip, Users, Grid3x3, Newspaper
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -43,6 +43,7 @@ import RbacTab from '@/components/tabs/RbacTab.vue'
 import NotesTab from '@/components/tabs/NotesTab.vue'
 import HrTab from '@/components/tabs/HrTab.vue'
 import MatrixTab from '@/components/tabs/MatrixTab.vue'
+import TruthTab from '@/components/tabs/TruthTab.vue'
 import PublicNote from '@/components/notes/PublicNote.vue'
 import LogsTab from '@/components/tabs/LogsTab.vue'
 import OddityTab from '@/components/tabs/OddityTab.vue'
@@ -441,6 +442,7 @@ const MODULE_ICONS = {
   workspace: Brain,
   hr: Users,
   matrix: Grid3x3,
+  truth: Newspaper,
   todo: ListTodo,
   search: Globe,
   notes: StickyNote,
@@ -1178,6 +1180,11 @@ const notesTabRef = ref(null)
       <!-- ম্যাট্রিক্স · Matrix: what the user may see inside it is the server's (sections, actions). -->
       <TabsContent v-if="allowedTabs?.includes('matrix')" value="matrix" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <MatrixTab :sections="mySections" :actions="myActions" />
+      </TabsContent>
+
+      <!-- সত্য মন্ত্রণালয় · Ministry of Truth: the staff side; the public page is /truth (truth.html). -->
+      <TabsContent v-if="allowedTabs?.includes('truth')" value="truth" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <TruthTab :actions="myActions" />
       </TabsContent>
       
       <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

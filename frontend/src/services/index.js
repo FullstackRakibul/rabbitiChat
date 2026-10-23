@@ -54,3 +54,9 @@ export {
   listActivityLogs, listAuditLogs, getActivityLog, getCorrelation,
   getSystemInfo, getLogStats, openLogStream, logClientEvent, flushClientEvents
 } from './logs.service.js'
+export {
+  listTruthTechs, createTruthTech, updateTruthTech, listTruthIssues, createTruthIssue, getTruthIssue, updateTruthIssue,
+  deleteTruthIssue, checkTruthIssue, previewTruthIssue, withdrawTruthIssue, publishTruthIssue,
+  createTruthItem, updateTruthItem, deleteTruthItem, changeTruthStatus, addTruthCorrection, verifyTruthNumber,
+  unverifyTruthNumber, getTruthContent, saveTruthContentDraft, rollbackTruthContent, publishTruthContent,
+} from './truth.service.js'

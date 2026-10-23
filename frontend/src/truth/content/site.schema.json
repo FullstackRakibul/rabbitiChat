@@ -1,0 +1,1272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "site.schema.json",
+  "title": "Ministry of Truth: global site text",
+  "description": "Every fixed string of the public site, the share pages and the emails (docs/TRUTH_PROMPT.md §5). Plain text only: no HTML, no URL other than https, and only the placeholders a key lists in x-placeholders. Both languages have the same keys; an empty English value falls back to the built-in default.",
+  "x-schemaVersion": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bn",
+    "en"
+  ],
+  "properties": {
+    "bn": {
+      "$ref": "#/$defs/lang"
+    },
+    "en": {
+      "$ref": "#/$defs/lang"
+    }
+  },
+  "$defs": {
+    "lang": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site",
+        "nav",
+        "lang",
+        "theme",
+        "time",
+        "hero",
+        "banner",
+        "status",
+        "severity",
+        "board",
+        "log",
+        "item",
+        "refs",
+        "archive",
+        "about",
+        "offline",
+        "empty",
+        "notFound",
+        "loading",
+        "footer",
+        "noscript",
+        "nick",
+        "serious",
+        "stamp",
+        "glossary",
+        "privacy",
+        "mascot"
+      ],
+      "properties": {
+        "site": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "series",
+            "tagline",
+            "description"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "series": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "tagline": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "nav": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "board",
+            "log",
+            "details",
+            "archive",
+            "about",
+            "home",
+            "skip",
+            "sections",
+            "glossary",
+            "privacy"
+          ],
+          "properties": {
+            "board": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "log": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "details": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "archive": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "about": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "home": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "skip": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "sections": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "glossary": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "privacy": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "lang": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "bn",
+            "en"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "bn": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "en": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "theme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "toDark",
+            "toLight"
+          ],
+          "properties": {
+            "toDark": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "toLight": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "time": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "zoneNote",
+            "clock",
+            "clockMinutes",
+            "withUtc",
+            "date",
+            "dateTime",
+            "range",
+            "am",
+            "pm",
+            "dawn",
+            "morning",
+            "noon",
+            "afternoon",
+            "evening",
+            "night",
+            "m1",
+            "m2",
+            "m3",
+            "m4",
+            "m5",
+            "m6",
+            "m7",
+            "m8",
+            "m9",
+            "m10",
+            "m11",
+            "m12"
+          ],
+          "properties": {
+            "zoneNote": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "clock": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "ampm",
+                "daypart",
+                "hour"
+              ]
+            },
+            "clockMinutes": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "ampm",
+                "daypart",
+                "hour",
+                "minute"
+              ]
+            },
+            "withUtc": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "local",
+                "utc"
+              ]
+            },
+            "date": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "day",
+                "month",
+                "year"
+              ]
+            },
+            "dateTime": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "date",
+                "time"
+              ]
+            },
+            "range": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "end",
+                "start"
+              ]
+            },
+            "am": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "pm": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "dawn": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "morning": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "noon": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "afternoon": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "evening": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "night": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m1": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m2": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m3": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m4": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m5": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m6": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m7": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m8": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m9": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m10": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m11": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "m12": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "hero": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "updated"
+          ],
+          "properties": {
+            "updated": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            }
+          }
+        },
+        "banner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "activeAttack",
+            "patchScheduled",
+            "patchTimeTba"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "activeAttack": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "tech"
+              ]
+            },
+            "patchScheduled": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "tech",
+                "time"
+              ]
+            },
+            "patchTimeTba": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "tech"
+              ]
+            }
+          }
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active_attack",
+            "breach_confirmed",
+            "patch_scheduled",
+            "ongoing",
+            "contained",
+            "unconfirmed",
+            "patched",
+            "blocked",
+            "resolved"
+          ],
+          "properties": {
+            "active_attack": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "breach_confirmed": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "patch_scheduled": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "ongoing": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "contained": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "unconfirmed": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "patched": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "blocked": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "resolved": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "severity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "critical": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "high": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "medium": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "low": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "info": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "board": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "empty"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "empty": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "log": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "empty",
+            "ERR",
+            "WARN",
+            "FIX",
+            "INFO"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "empty": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "ERR": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "WARN": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "FIX": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "INFO": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "impact",
+            "whatToDo",
+            "advisories",
+            "affected",
+            "fixedIn",
+            "cvss",
+            "exploited",
+            "kev",
+            "timeline",
+            "statusHistory",
+            "statusChange",
+            "statusSet",
+            "patchAt",
+            "since",
+            "byline",
+            "tags",
+            "share",
+            "copied",
+            "enMissing",
+            "corrections",
+            "correctionAt"
+          ],
+          "properties": {
+            "impact": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "whatToDo": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "advisories": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "affected": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "fixedIn": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "cvss": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "score"
+              ]
+            },
+            "exploited": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "kev": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "timeline": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "statusHistory": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "statusChange": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "from",
+                "to"
+              ]
+            },
+            "statusSet": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "to"
+              ]
+            },
+            "patchAt": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            },
+            "since": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            },
+            "byline": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "author",
+                "date"
+              ]
+            },
+            "tags": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "share": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "copied": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "enMissing": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "corrections": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "correctionAt": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            }
+          }
+        },
+        "refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "official",
+            "vendor",
+            "research",
+            "community",
+            "news",
+            "claim",
+            "opens"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "official": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "vendor": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "research": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "community": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "news": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "claim": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "opens": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "archive": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "empty",
+            "items",
+            "itemsOne",
+            "current"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "empty": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "items": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            },
+            "itemsOne": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            },
+            "current": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "about": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "p1",
+            "p2",
+            "p3",
+            "p4",
+            "p5",
+            "p6"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p1": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p2": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p3": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p4": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p5": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p6": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "offline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bar",
+            "errorTitle",
+            "errorBody",
+            "retry"
+          ],
+          "properties": {
+            "bar": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            },
+            "errorTitle": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "errorBody": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "retry": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "empty": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "body"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "notFound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "body",
+            "back"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "back": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "loading": {
+          "type": "string",
+          "maxLength": 600,
+          "x-placeholders": []
+        },
+        "footer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "note",
+            "rss"
+          ],
+          "properties": {
+            "note": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "rss": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "noscript": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "link"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "link": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "nick": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "board",
+            "log",
+            "guides",
+            "archive",
+            "corrections",
+            "glossary",
+            "subscribe",
+            "room101",
+            "sleeping",
+            "privacy"
+          ],
+          "properties": {
+            "board": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "log": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "guides": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "archive": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "corrections": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "glossary": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "subscribe": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "room101": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "sleeping": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "privacy": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "serious": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "stamp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verified",
+            "unconfirmed",
+            "corrected"
+          ],
+          "properties": {
+            "verified": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "unconfirmed": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "corrected": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "glossary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "intro",
+            "close",
+            "all"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "intro": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "close": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "all": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "privacy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "p1",
+            "p2",
+            "p3"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p1": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p2": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "p3": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "mascot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "body",
+            "calm",
+            "alert",
+            "worried",
+            "relieved",
+            "reading",
+            "sleeping"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "calm": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "alert": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "worried": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "relieved": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "reading": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "sleeping": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        }
+      }
+    }
+  }
+}

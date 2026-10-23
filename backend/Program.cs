@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Data;
 using RabbitIC.Api.Middleware;
@@ -10,12 +11,16 @@ using RabbitIC.Api.Models;
 using RabbitIC.Api.Observability;
 using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Retrieval;
+using RabbitIC.Api.Truth;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Secrets come from user-secrets or the environment only; any found in appsettings*.json
 // are discarded here, before anything reads them (backend/Secrets/SecretConfig.cs).
 var droppedSecrets = RabbitIC.Api.Secrets.SecretConfig.Scrub(builder.Configuration);
+
+// সত্য মন্ত্রণালয়: the tunnel's own port on 127.0.0.1, next to every address the app already has (Truth/TunnelGuard.cs).
+RabbitIC.Api.Truth.TunnelGuard.AddTunnelPort(builder);
 
 
 // ---- Config ----
@@ -185,6 +190,29 @@ builder.Services.AddScoped<RabbitIC.Api.Matrix.MatrixModel>();
 builder.Services.AddScoped<RabbitIC.Api.Matrix.TemplateMatcher>();
 builder.Services.AddScoped<RabbitIC.Api.Services.IMatrixService, RabbitIC.Api.Services.MatrixService>();
 
+// সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md): the staff side and the snapshots the public reads.
+builder.Services.AddScoped<RabbitIC.Api.Truth.TruthService>();
+var truthTunnel = builder.Configuration.GetSection(RabbitIC.Api.Truth.TunnelOptions.Section).Get<RabbitIC.Api.Truth.TunnelOptions>()
+	?? new RabbitIC.Api.Truth.TunnelOptions();
+// Per visitor IP — the tunnel's forwarded header, believed only from the tunnel. Held in memory, never logged.
+builder.Services.AddRateLimiter(o =>
+{
+	o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+	o.OnRejected = (ctx, _) =>
+	{
+		ctx.HttpContext.Response.Headers.RetryAfter = "60";
+		return ValueTask.CompletedTask;
+	};
+	var perMinute = builder.Configuration.GetValue<int?>("Truth:RateLimits:GetPerMinute") ?? 120;
+	o.AddPolicy(RabbitIC.Api.MinimalApis.TruthPublicApis.RatePolicy, ctx =>
+		System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+			RabbitIC.Api.Truth.TunnelGuard.ClientIp(ctx, truthTunnel)?.ToString() ?? "unknown",
+			_ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+			{
+				PermitLimit = perMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+			}));
+});
+
 // ---- মানব সম্পদ (HR Assistant): the HR library (docs/HR_MODULE_PROMPT.md) ----
 builder.Services.AddScoped<RabbitIC.Api.Hr.HrLibrary>();
 // মানব সম্পদ · নিয়মাবলি: HR's rule pages, their append-only history and their Library copies.
@@ -338,6 +366,15 @@ var app = builder.Build();
 foreach (var key in droppedSecrets)
 	app.Logger.LogWarning("Secret config: ignored a value for {Key}; set it with user-secrets or the environment instead.", key);
 
+// সত্য মন্ত্রণালয়. First of all: a request through the tunnel may reach /public/truth/* and nothing
+// else — not Swagger, not a static file, not the SPA (Truth/TunnelGuard.cs). Then /truth-api/* is
+// read as /public/truth/*, the spelling Vercel's rewrites use, so the LAN preview and the eval see
+// what a visitor does; routing comes after the rewrite so it matches the rewritten path.
+app.UseTruthTunnelGuard();
+app.UseRewriter(new RewriteOptions()
+	.AddRewrite(@"^truth-api/(.*)$", "public/truth/$1", skipRemainingRules: true));
+app.UseRouting();
+
 // Swagger UI at /swagger — enabled in all environments (this is an internal tool).
 app.UseSwagger();
 app.UseSwaggerUI(o =>
@@ -360,6 +397,7 @@ app.UseStaticFiles();
 app.UseCorrelation();         // X-Correlation-Id on every request
 app.UseRequestLogging();      // ActivityLog entry after response completes
 app.UseTabAccess();
+app.UseRateLimiter();
 
 app.ApplicationPublicApis();
 app.ApplicationOllamaApis();
@@ -376,6 +414,7 @@ app.ApplicationNoteApis();
 app.ApplicationOddityApis();
 app.ApplicationHrApis();
 app.ApplicationMatrixApis();
+app.ApplicationTruthApis();
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);
@@ -395,6 +434,17 @@ app.MapFallback(async ctx =>
         || path.StartsWith("/oddity/api", StringComparison.OrdinalIgnoreCase);
 
     var indexHtml = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");
+
+    // The Ministry of Truth's public shell is a page of its own (frontend/truth.html), as on Vercel.
+    var truthHtml = Path.Combine(app.Environment.WebRootPath ?? "", "truth.html");
+    if ((path.Equals("/truth", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/truth/", StringComparison.OrdinalIgnoreCase))
+        && File.Exists(truthHtml))
+    {
+        TruthHeaders.Apply(ctx.Response);
+        ctx.Response.ContentType = "text/html; charset=utf-8";
+        await ctx.Response.SendFileAsync(truthHtml);
+        return;
+    }
 
     if (isApiPath || !File.Exists(indexHtml))
     {

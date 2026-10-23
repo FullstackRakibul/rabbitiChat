@@ -37,6 +37,18 @@ public class AppDbContext : DbContext
     public DbSet<MxSummary> MxSummaries => Set<MxSummary>();
     public DbSet<MxKpiDefinition> MxKpiDefinitions => Set<MxKpiDefinition>();
 
+    // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md §2). The public reads TrSnapshots only.
+    public DbSet<TrTech> TrTechs => Set<TrTech>();
+    public DbSet<TrIssue> TrIssues => Set<TrIssue>();
+    public DbSet<TrItem> TrItems => Set<TrItem>();
+    public DbSet<TrAdvisory> TrAdvisories => Set<TrAdvisory>();
+    public DbSet<TrTimelineEvent> TrTimelineEvents => Set<TrTimelineEvent>();
+    public DbSet<TrSource> TrSources => Set<TrSource>();
+    public DbSet<TrStatusEvent> TrStatusEvents => Set<TrStatusEvent>();
+    public DbSet<TrCorrection> TrCorrections => Set<TrCorrection>();
+    public DbSet<TrSnapshot> TrSnapshots => Set<TrSnapshot>();
+    public DbSet<TrSiteContent> TrSiteContents => Set<TrSiteContent>();
+
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
     /// <summary>Which models each role may run — see Rbac/ModelPolicy.cs.</summary>
@@ -118,6 +130,17 @@ public class AppDbContext : DbContext
         b.Entity<MxQualityIssue>().HasIndex(i => i.DatasetId);
         b.Entity<MxFixLog>().HasIndex(f => f.DatasetId);
         b.Entity<MxKpiDefinition>().HasKey(k => k.Key);
+
+        b.Entity<TrTech>().HasIndex(t => t.Slug).IsUnique();
+        b.Entity<TrIssue>().HasIndex(i => i.Slug).IsUnique();
+        b.Entity<TrItem>().HasIndex(i => i.IssueId);
+        b.Entity<TrAdvisory>().HasIndex(a => a.ItemId);
+        b.Entity<TrTimelineEvent>().HasIndex(e => e.ItemId);
+        b.Entity<TrSource>().HasIndex(s => s.ItemId);
+        b.Entity<TrStatusEvent>().HasIndex(e => e.ItemId);
+        b.Entity<TrCorrection>().HasIndex(c => c.ItemId);
+        b.Entity<TrSnapshot>().HasIndex(s => new { s.IssueId, s.CreatedAtUtc });
+        b.Entity<TrSiteContent>().HasIndex(c => new { c.Kind, c.Status, c.Version });
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)
@@ -290,5 +313,13 @@ public class AppDbContext : DbContext
         b.Entity<OddityKey>().Property(k => k.ExpiresAtUtc).HasConversion(utcOrNull);
         b.Entity<OdditySettings>().Property(s => s.UpdatedAtUtc).HasConversion(utc);
         b.Entity<OddityRequest>().Property(r => r.TimestampUtc).HasConversion(utc);
+
+        // The same for the Ministry of Truth: every time it shows is converted from UTC to Bangladesh time.
+        foreach (var type in b.Model.GetEntityTypes().Where(t => t.ClrType.Name.StartsWith("Tr", StringComparison.Ordinal)))
+        foreach (var prop in type.GetProperties())
+        {
+            if (prop.ClrType == typeof(DateTime)) prop.SetValueConverter(utc);
+            else if (prop.ClrType == typeof(DateTime?)) prop.SetValueConverter(utcOrNull);
+        }
     }
 }

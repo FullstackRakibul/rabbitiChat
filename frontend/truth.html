@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="bn" class="dark" data-default-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>%TRUTH_TITLE%</title>
+    <meta name="description" content="%TRUTH_DESCRIPTION%" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#101214" />
+    <link rel="icon" type="image/svg+xml" href="/truth-icon.svg" />
+    <link rel="alternate" type="application/rss+xml" href="/truth-api/feed.xml?lang=bn" title="%TRUTH_TITLE%" />
+    <!-- The site text and the current issue start with the page, not after the script. -->
+    <link rel="preload" href="/truth-api/site-content" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/truth-api/current" as="fetch" crossorigin="anonymous" />
+  </head>
+  <body>
+    <noscript>%TRUTH_NOSCRIPT%</noscript>
+    <div id="app">%TRUTH_SHELL%</div>
+    <script type="module" src="/src/truth/main.js"></script>
+  </body>
+</html>

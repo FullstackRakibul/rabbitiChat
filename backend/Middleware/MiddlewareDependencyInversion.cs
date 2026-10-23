@@ -131,6 +131,17 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        /// <summary>
+        /// সত্য মন্ত্রণালয়: the staff API under /api/truth (gated by the `truth` tab), and the
+        /// public snapshots under /public/truth — the only paths the tunnel lets through.
+        /// </summary>
+        public static WebApplication ApplicationTruthApis(this WebApplication app)
+        {
+            app.MapGroup("/api").WithTags("Ministry of Truth").MapTruthApis();
+            app.MapGroup("/public").WithTags("Ministry of Truth (public)").MapTruthPublicApis();
+            return app;
+        }
+
         public static WebApplication ApplicationOddityApis(this WebApplication app)
         {
             var adminApi = app.MapGroup("/api").WithTags("Oddity");

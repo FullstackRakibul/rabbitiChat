@@ -1,0 +1,428 @@
+{
+  "bn": {
+    "site": {
+      "name": "সত্য মন্ত্রণালয়",
+      "series": "সাইবার সপ্তাহ",
+      "tagline": "আপনার ব্যবহার করা প্রযুক্তির নিরাপত্তা ও আপডেটের খবর, প্রতি সপ্তাহে।",
+      "description": "পিএইচপি, নোড.জেএস, ক্লাউড প্ল্যাটফর্ম ও আরও প্রযুক্তির সাপ্তাহিক নিরাপত্তা বুলেটিন: সারসংক্ষেপ, সংস্করণ, করণীয় আর সূত্র।"
+    },
+    "nav": {
+      "board": "অবস্থা",
+      "log": "লগ",
+      "details": "বিস্তারিত",
+      "archive": "আর্কাইভ",
+      "about": "আমরা কীভাবে যাচাই করি",
+      "home": "চলতি সংখ্যা",
+      "skip": "মূল লেখায় যান",
+      "sections": "এই পাতায়",
+      "glossary": "শব্দকোষ",
+      "privacy": "গোপনীয়তা"
+    },
+    "lang": {
+      "label": "ভাষা",
+      "bn": "বাংলা",
+      "en": "EN"
+    },
+    "theme": {
+      "toDark": "ডার্ক মোড চালু করুন",
+      "toLight": "লাইট মোড চালু করুন"
+    },
+    "time": {
+      "zoneNote": "সময় বাংলাদেশের",
+      "clock": "{daypart} {hour}টা",
+      "clockMinutes": "{daypart} {hour}টা {minute} মিনিট",
+      "withUtc": "{local} ({utc} UTC)",
+      "date": "{day} {month} {year}",
+      "dateTime": "{date}, {time}",
+      "range": "{start} – {end}",
+      "am": "এএম",
+      "pm": "পিএম",
+      "dawn": "ভোর",
+      "morning": "সকাল",
+      "noon": "দুপুর",
+      "afternoon": "বিকেল",
+      "evening": "সন্ধ্যা",
+      "night": "রাত",
+      "m1": "জানুয়ারি",
+      "m2": "ফেব্রুয়ারি",
+      "m3": "মার্চ",
+      "m4": "এপ্রিল",
+      "m5": "মে",
+      "m6": "জুন",
+      "m7": "জুলাই",
+      "m8": "আগস্ট",
+      "m9": "সেপ্টেম্বর",
+      "m10": "অক্টোবর",
+      "m11": "নভেম্বর",
+      "m12": "ডিসেম্বর"
+    },
+    "hero": {
+      "updated": "সর্বশেষ আপডেট: {time}"
+    },
+    "banner": {
+      "title": "এখনই নজর দিন",
+      "activeAttack": "{tech}: সক্রিয় আক্রমণ চলছে",
+      "patchScheduled": "{tech}: প্যাচ আসছে {time}",
+      "patchTimeTba": "{tech}: প্যাচ আসছে, সময় এখনো জানানো হয়নি"
+    },
+    "status": {
+      "active_attack": "সক্রিয় আক্রমণ",
+      "breach_confirmed": "তথ্য ফাঁস নিশ্চিত",
+      "patch_scheduled": "প্যাচ নির্ধারিত",
+      "ongoing": "চলমান",
+      "contained": "নিয়ন্ত্রণে",
+      "unconfirmed": "নিশ্চিত না",
+      "patched": "প্যাচ এসেছে",
+      "blocked": "ঠেকানো হয়েছে",
+      "resolved": "সমাধান হয়েছে"
+    },
+    "severity": {
+      "label": "ঝুঁকি",
+      "critical": "অতি জরুরি",
+      "high": "উচ্চ",
+      "medium": "মাঝারি",
+      "low": "কম",
+      "info": "তথ্য"
+    },
+    "board": {
+      "title": "অবস্থা এক নজরে",
+      "empty": "এই সংখ্যায় কোনো বিষয় নেই।"
+    },
+    "log": {
+      "title": "এই সপ্তাহের লগ",
+      "empty": "এই সপ্তাহে লগে কিছু নেই।",
+      "ERR": "ত্রুটি",
+      "WARN": "সতর্ক",
+      "FIX": "সমাধান",
+      "INFO": "তথ্য"
+    },
+    "item": {
+      "impact": "কী প্রভাব পড়ে",
+      "whatToDo": "এখন যা করবেন",
+      "advisories": "নিরাপত্তা পরামর্শ",
+      "affected": "আক্রান্ত সংস্করণ",
+      "fixedIn": "যে সংস্করণে ঠিক হয়েছে",
+      "cvss": "ঝুঁকি স্কোর {score}",
+      "exploited": "আক্রমণে ব্যবহার হচ্ছে",
+      "kev": "পরিচিত-আক্রমণ তালিকায় আছে",
+      "timeline": "সময়রেখা",
+      "statusHistory": "অবস্থার পরিবর্তন",
+      "statusChange": "{from} থেকে {to}",
+      "statusSet": "অবস্থা: {to}",
+      "patchAt": "প্যাচের সময়: {time}",
+      "since": "{time} থেকে",
+      "byline": "লিখেছেন {author} · {date}",
+      "tags": "ট্যাগ",
+      "share": "লিংক শেয়ার করুন",
+      "copied": "লিংক কপি হয়েছে",
+      "enMissing": "ইংরেজি সংস্করণ এখনো নেই।",
+      "corrections": "সংশোধন",
+      "correctionAt": "সংশোধন · {time}"
+    },
+    "refs": {
+      "title": "সূত্র",
+      "official": "অফিশিয়াল",
+      "vendor": "নির্মাতা",
+      "research": "গবেষণা",
+      "community": "কমিউনিটি",
+      "news": "সংবাদ",
+      "claim": "দাবি, নিশ্চিত নয়",
+      "opens": "নতুন ট্যাবে খুলবে"
+    },
+    "archive": {
+      "title": "আগের সংখ্যা",
+      "empty": "এখনো আগের কোনো সংখ্যা নেই।",
+      "items": "{count}টি বিষয়",
+      "itemsOne": "{count}টি বিষয়",
+      "current": "চলতি"
+    },
+    "about": {
+      "title": "আমরা কীভাবে যাচাই করি",
+      "p1": "আমরা শুধু প্রকাশ্য তথ্য ব্যবহার করি: নির্মাতার নিরাপত্তা পরামর্শ, অফিশিয়াল ঘোষণা, গবেষকদের প্রতিবেদন আর নির্ভরযোগ্য সংবাদ। প্রতিটি বিষয়ের নিচে সূত্রের তালিকা থাকে।",
+      "p2": "কোনো লেখা আমরা হুবহু কপি করি না। নিজের ভাষায় সারসংক্ষেপ লিখি, আর মূল লেখার লিংক দিই। ছোট উদ্ধৃতি থাকলে তা উদ্ধৃতিচিহ্নের মধ্যে, সূত্রসহ।",
+      "p3": "কোনো দাবি যদি শুধু আক্রমণকারী বা ডার্ক ওয়েব থেকে আসে, সেটি “নিশ্চিত না” হিসেবে দেখানো হয়।",
+      "p4": "প্রতিটি সংখ্যা, যেমন সিভিই নম্বর, সংস্করণ, তারিখ, সময় বা পরিমাণ, প্রকাশের আগে সূত্রের সাথে মিলিয়ে দেখা হয়।",
+      "p5": "অবস্থা বদলালে তা সময়সহ লেখা থাকে। ভুল হলে আমরা চুপচাপ বদলাই না, “সংশোধন” হিসেবে দেখাই।",
+      "p6": "সময় সব জায়গায় বাংলাদেশের সময়ে দেখানো হয়। সূত্রে ইউটিসি সময় থাকলে দুটোই দেখানো হয়।"
+    },
+    "offline": {
+      "bar": "সর্বশেষ সংরক্ষিত তথ্য · {time} · সার্ভারে এখন পৌঁছানো যাচ্ছে না",
+      "errorTitle": "এই মুহূর্তে বুলেটিন আনা যাচ্ছে না",
+      "errorBody": "সার্ভারে পৌঁছানো যাচ্ছে না। একটু পরে আবার চেষ্টা করুন, অথবা আরএসএস ফিডে চোখ রাখুন।",
+      "retry": "আবার চেষ্টা করুন"
+    },
+    "empty": {
+      "title": "প্রথম সংখ্যা শিগগিরই আসছে",
+      "body": "এখনো কোনো সংখ্যা প্রকাশ হয়নি। আরএসএস ফিডে চোখ রাখুন।"
+    },
+    "notFound": {
+      "title": "এই পাতাটি পাওয়া যায়নি",
+      "body": "এই ঠিকানায় কিছু নেই। হয়তো লিংকটা ভুল, অথবা পাতাটা সরে গেছে।",
+      "back": "টেলিস্ক্রিনে ফিরে যান"
+    },
+    "loading": "লোড হচ্ছে…",
+    "footer": {
+      "note": "শুধু প্রকাশ্য তথ্য, আমাদের নিজের ভাষায় সারসংক্ষেপ, সূত্রসহ।",
+      "rss": "আরএসএস ফিড"
+    },
+    "noscript": {
+      "text": "পুরো পাতাটি দেখতে জাভাস্ক্রিপ্ট চালু করুন, অথবা সাধারণ সংস্করণটি খুলুন।",
+      "link": "সাধারণ সংস্করণ"
+    },
+    "nick": {
+      "board": "টেলিস্ক্রিন",
+      "log": "রেকর্ড বিভাগ",
+      "guides": "মেরামত মন্ত্রণালয়",
+      "archive": "যে আর্কাইভ পোড়ে না",
+      "corrections": "কোনো মেমোরি হোল নেই",
+      "glossary": "নিউস্পিক অভিধান",
+      "subscribe": "ঘরে বসে টেলিস্ক্রিন",
+      "room101": "রুম ১০১",
+      "sleeping": "টেলিস্ক্রিন ঘুমাচ্ছে",
+      "privacy": "ছোট ভাই আপনাকে দেখছে না"
+    },
+    "serious": {
+      "label": "সিরিয়াস মোড"
+    },
+    "stamp": {
+      "verified": "যাচাইকৃত",
+      "unconfirmed": "নিশ্চিত না",
+      "corrected": "সংশোধিত"
+    },
+    "glossary": {
+      "title": "শব্দকোষ",
+      "intro": "এই পাতায় যেসব শব্দ আসে, তাদের এক লাইনের সহজ ব্যাখ্যা।",
+      "close": "বন্ধ করুন",
+      "all": "পুরো শব্দকোষ"
+    },
+    "privacy": {
+      "title": "গোপনীয়তা",
+      "p1": "এই পাতায় কোনো ট্র্যাকার, অ্যানালিটিক্স কুকি বা বিজ্ঞাপনের পিক্সেল নেই।",
+      "p2": "ফন্টসহ সবকিছু এই সাইট থেকেই আসে। অন্য কোনো কোম্পানির সার্ভারে আপনার ব্রাউজার কোনো অনুরোধ পাঠায় না।",
+      "p3": "আপনার বেছে নেওয়া ভাষা আর থিম শুধু আপনার ব্রাউজারেই থাকে।"
+    },
+    "mascot": {
+      "title": "ছোট ভাই",
+      "body": "আমাদের মাসকট: একটা ছোট্ট টেলিস্ক্রিন, যার কোণে একটু ফাটল। সে কাউকে নজরে রাখে না; শুধু খবরের অবস্থা দেখে মুখের ভাব বদলায়।",
+      "calm": "শান্ত",
+      "alert": "সতর্ক",
+      "worried": "চিন্তিত",
+      "relieved": "স্বস্তিতে",
+      "reading": "পড়ছে",
+      "sleeping": "ঘুমাচ্ছে"
+    }
+  },
+  "en": {
+    "site": {
+      "name": "Ministry of Truth",
+      "series": "Cyber Week",
+      "tagline": "Security and update news for the technologies you run, every week.",
+      "description": "A weekly security bulletin for PHP, Node.js, cloud platforms and more: summaries, versions, what to do, and sources."
+    },
+    "nav": {
+      "board": "Status",
+      "log": "Log",
+      "details": "Details",
+      "archive": "Archive",
+      "about": "How we verify",
+      "home": "Current issue",
+      "skip": "Skip to content",
+      "sections": "On this page",
+      "glossary": "Glossary",
+      "privacy": "Privacy"
+    },
+    "lang": {
+      "label": "Language",
+      "bn": "বাংলা",
+      "en": "EN"
+    },
+    "theme": {
+      "toDark": "Switch to dark mode",
+      "toLight": "Switch to light mode"
+    },
+    "time": {
+      "zoneNote": "Bangladesh time",
+      "clock": "{hour} {ampm}",
+      "clockMinutes": "{hour}:{minute} {ampm}",
+      "withUtc": "{local} ({utc} UTC)",
+      "date": "{day} {month} {year}",
+      "dateTime": "{date}, {time}",
+      "range": "{start} – {end}",
+      "am": "AM",
+      "pm": "PM",
+      "dawn": "early morning",
+      "morning": "morning",
+      "noon": "midday",
+      "afternoon": "afternoon",
+      "evening": "evening",
+      "night": "night",
+      "m1": "January",
+      "m2": "February",
+      "m3": "March",
+      "m4": "April",
+      "m5": "May",
+      "m6": "June",
+      "m7": "July",
+      "m8": "August",
+      "m9": "September",
+      "m10": "October",
+      "m11": "November",
+      "m12": "December"
+    },
+    "hero": {
+      "updated": "Last updated: {time}"
+    },
+    "banner": {
+      "title": "Needs attention now",
+      "activeAttack": "{tech}: under active attack",
+      "patchScheduled": "{tech}: patch due {time}",
+      "patchTimeTba": "{tech}: patch coming, time not announced yet"
+    },
+    "status": {
+      "active_attack": "Active attack",
+      "breach_confirmed": "Breach confirmed",
+      "patch_scheduled": "Patch scheduled",
+      "ongoing": "Ongoing",
+      "contained": "Contained",
+      "unconfirmed": "Unconfirmed",
+      "patched": "Patched",
+      "blocked": "Blocked",
+      "resolved": "Resolved"
+    },
+    "severity": {
+      "label": "Severity",
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low",
+      "info": "Info"
+    },
+    "board": {
+      "title": "Status at a glance",
+      "empty": "No items in this issue."
+    },
+    "log": {
+      "title": "This week's log",
+      "empty": "Nothing in the log this week.",
+      "ERR": "ERR",
+      "WARN": "WARN",
+      "FIX": "FIX",
+      "INFO": "INFO"
+    },
+    "item": {
+      "impact": "What it affects",
+      "whatToDo": "What to do now",
+      "advisories": "Advisories",
+      "affected": "Affected versions",
+      "fixedIn": "Fixed in",
+      "cvss": "CVSS {score}",
+      "exploited": "Exploited in the wild",
+      "kev": "On the known-exploited list",
+      "timeline": "Timeline",
+      "statusHistory": "Status changes",
+      "statusChange": "{from} to {to}",
+      "statusSet": "Status: {to}",
+      "patchAt": "Patch due: {time}",
+      "since": "since {time}",
+      "byline": "By {author} · {date}",
+      "tags": "Tags",
+      "share": "Share link",
+      "copied": "Link copied",
+      "enMissing": "English version not available yet.",
+      "corrections": "Corrections",
+      "correctionAt": "Correction · {time}"
+    },
+    "refs": {
+      "title": "References",
+      "official": "Official",
+      "vendor": "Vendor",
+      "research": "Research",
+      "community": "Community",
+      "news": "News",
+      "claim": "Claim, unconfirmed",
+      "opens": "opens in a new tab"
+    },
+    "archive": {
+      "title": "Past issues",
+      "empty": "No past issues yet.",
+      "items": "{count} items",
+      "itemsOne": "{count} item",
+      "current": "Current"
+    },
+    "about": {
+      "title": "How we verify",
+      "p1": "We use public information only: vendor security advisories, official announcements, researchers' reports and reliable news. Every item lists its sources underneath.",
+      "p2": "We never copy articles. We summarise in our own words and link to the original. A short quote, when there is one, is in quote marks with its source.",
+      "p3": "A claim that comes only from the attacker or the dark web is shown as “Unconfirmed”.",
+      "p4": "Every number, such as a CVE ID, version, date, time or amount, is checked against a source before it is published.",
+      "p5": "When a status changes, the change is shown with its time. When we get something wrong we never change it quietly; we show a “Correction”.",
+      "p6": "Times are shown in Bangladesh time everywhere. When a source gives a UTC time, both are shown."
+    },
+    "offline": {
+      "bar": "Last saved information · {time} · The server can't be reached right now",
+      "errorTitle": "We can't load the bulletin right now",
+      "errorBody": "The server can't be reached. Please try again in a little while, or follow the RSS feed.",
+      "retry": "Try again"
+    },
+    "empty": {
+      "title": "The first issue is coming soon",
+      "body": "Nothing has been published yet. Follow the RSS feed to hear when it is."
+    },
+    "notFound": {
+      "title": "Page not found",
+      "body": "There is nothing at this address. The link may be wrong, or the page has moved.",
+      "back": "Back to the telescreen"
+    },
+    "loading": "Loading…",
+    "footer": {
+      "note": "Public information only, summarised in our own words, with sources.",
+      "rss": "RSS feed"
+    },
+    "noscript": {
+      "text": "Turn on JavaScript to see the full page, or open the plain version.",
+      "link": "Plain version"
+    },
+    "nick": {
+      "board": "TELESCREEN",
+      "log": "RECORDS DEPT.",
+      "guides": "MINISTRY OF REPAIR",
+      "archive": "THE ARCHIVE THAT NEVER BURNS",
+      "corrections": "NO MEMORY HOLE",
+      "glossary": "NEWSPEAK DICTIONARY",
+      "subscribe": "TELESCREEN AT HOME",
+      "room101": "ROOM 101",
+      "sleeping": "THE TELESCREEN IS SLEEPING",
+      "privacy": "LITTLE BROTHER IS NOT WATCHING YOU"
+    },
+    "serious": {
+      "label": "Serious mode"
+    },
+    "stamp": {
+      "verified": "VERIFIED",
+      "unconfirmed": "UNCONFIRMED",
+      "corrected": "CORRECTED"
+    },
+    "glossary": {
+      "title": "Glossary",
+      "intro": "One-line plain explanations of the words this page uses.",
+      "close": "Close",
+      "all": "The whole glossary"
+    },
+    "privacy": {
+      "title": "Privacy",
+      "p1": "This page has no trackers, no analytics cookies and no ad pixels.",
+      "p2": "Everything, fonts included, comes from this site. Your browser sends no request to any other company.",
+      "p3": "The language and theme you choose stay in your own browser."
+    },
+    "mascot": {
+      "title": "Little Brother",
+      "body": "Our mascot: a small telescreen with a crack in one corner. It watches nobody; its face just follows the state of the news.",
+      "calm": "Calm",
+      "alert": "Alert",
+      "worried": "Worried",
+      "relieved": "Relieved",
+      "reading": "Reading",
+      "sleeping": "Sleeping"
+    }
+  }
+}

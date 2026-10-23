@@ -39,6 +39,9 @@ public static class SchemaUpgrade
         EnsureRbacSchema(db);
         EnsureAccessSchema(db);
         EnsureTablesFromModel(db, "Mx");
+        EnsureTablesFromModel(db, "Tr");
+        // Memes and the glossary joined the site text as content kinds (docs/TRUTH_PROMPT.md v4).
+        AddColumnIfMissing(db, "TrSiteContents", "Kind", @"ALTER TABLE ""TrSiteContents"" ADD COLUMN ""Kind"" TEXT NOT NULL DEFAULT 'site';");
         AddColumnIfMissing(db, "Conversations", "Scope", @"ALTER TABLE ""Conversations"" ADD COLUMN ""Scope"" TEXT NULL;");
         AddColumnIfMissing(db, "Messages", "MetaJson", @"ALTER TABLE ""Messages"" ADD COLUMN ""MetaJson"" TEXT NULL;");
         EnsureRoleModelPolicyTable(db);

@@ -29,6 +29,21 @@
   </ItemGroup>
 
   <!--
+    The Ministry of Truth's global site text and its schema are the frontend's own
+    files (docs/TRUTH_PROMPT.md §5): the share pages and the emails read the same
+    text the public shell bundles, so there is one copy, never two that drift. The
+    Dockerfile copies this folder next to backend/ for the same reason.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\frontend\src\truth\content\site.default.json" LogicalName="Truth.site.default.json" />
+    <EmbeddedResource Include="..\frontend\src\truth\content\site.schema.json" LogicalName="Truth.site.schema.json" />
+    <EmbeddedResource Include="..\frontend\src\truth\content\memes.default.json" LogicalName="Truth.memes.default.json" />
+    <EmbeddedResource Include="..\frontend\src\truth\content\memes.schema.json" LogicalName="Truth.memes.schema.json" />
+    <EmbeddedResource Include="..\frontend\src\truth\content\glossary.default.json" LogicalName="Truth.glossary.default.json" />
+    <EmbeddedResource Include="..\frontend\src\truth\content\glossary.schema.json" LogicalName="Truth.glossary.schema.json" />
+  </ItemGroup>
+
+  <!--
     Never publish developer-local configuration. appsettings.Development.json
     holds real API keys on a developer machine (it is git-ignored for that
     reason), and `dotnet publish` would otherwise copy it into the output and

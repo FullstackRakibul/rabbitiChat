@@ -75,6 +75,8 @@ public static class RolePresetSeeds
         [PermissionKeys.HrLibraryStats] = Array.Empty<string>(),
         [PermissionKeys.LogsAudit] = Array.Empty<string>(),
         [PermissionKeys.AccessManage] = Array.Empty<string>(),
+        // The Ministry of Truth (docs/TRUTH_PROMPT.md §8): the admin preset only. Its tab is in no role's list above.
+        [PermissionKeys.TruthPublish] = Array.Empty<string>(),
     };
 
     /// <summary>

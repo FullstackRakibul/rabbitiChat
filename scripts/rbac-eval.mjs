@@ -43,7 +43,10 @@ const SYSTEM = [...GENERAL, 'chat', 'workspace', 'docs', 'search', 'ielts', 'com
  * part of the expected presets, and outside G-P1.2's before/after (the build P1 is
  * compared with predates them).
  */
-const LATER_TABS = { matrix: ['HrAssistant', 'System', 'GroundControl', 'SystemAdmin'] }   // docs/MATRIX_PROMPT.md §3.10
+const LATER_TABS = {
+  matrix: ['HrAssistant', 'System', 'GroundControl', 'SystemAdmin'],   // docs/MATRIX_PROMPT.md §3.10
+  truth: ['SystemAdmin'],                                              // docs/TRUTH_PROMPT.md §8: the admin preset only
+}
 const withLater = (role, tabs) => [...tabs, ...Object.keys(LATER_TABS).filter((t) => LATER_TABS[t].includes(role))]
 
 const BASELINE = Object.fromEntries(Object.entries({

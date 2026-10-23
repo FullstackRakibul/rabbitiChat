@@ -102,6 +102,10 @@ export async function launchBrowser({ base, profileRoot }) {
           await sleep(1200)
         },
         async reload() { const l = loaded(); await s('Page.reload'); await l; await sleep(1200) },
+        /** Opens a URL in this page and waits for its load event (truth-eval: a public page, no session). */
+        async goto(url, settle = 800) { const l = loaded(); await s('Page.navigate', { url }); await l; await sleep(settle) },
+        /** A raw DevTools call on this page — timezone, locale, network (truth-eval). */
+        cdp: (method, params) => s(method, params),
         async setTheme(theme) {
           await evaluate(`localStorage.setItem('rabbitic-theme', '${theme}'); document.documentElement.classList.toggle('dark', ${theme === 'dark'}); 0`)
           await sleep(300)

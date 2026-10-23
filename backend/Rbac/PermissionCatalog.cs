@@ -57,6 +57,11 @@ public static class PermissionKeys
     public const string MatrixViewPersonal = "action:matrix.view-personal";
     public const string MatrixViewSalary = "action:matrix.view-salary";
 
+    // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md §8), kept minimal: the tab opens it and
+    // edits drafts; publish puts anything in front of the public (items, guides, mail, site text, memes).
+    public const string TabTruth = "tab:truth";
+    public const string TruthPublish = "action:truth.publish";
+
     public static string Tab(string tabKey) => "tab:" + tabKey;
 }
 
@@ -115,6 +120,8 @@ public static class PermissionCatalog
         Section(PermissionKeys.MatrixAsk, "Ask", "প্রশ্ন", "Work", PermissionKeys.TabMatrix),
         Action(PermissionKeys.MatrixViewPersonal, "See names", "নাম দেখা", "Work", PermissionKeys.TabMatrix),
         Action(PermissionKeys.MatrixViewSalary, "See salary figures", "বেতনের অঙ্ক দেখা", "Work", PermissionKeys.TabMatrix),
+        Tab("truth", "Ministry of Truth", "সত্য মন্ত্রণালয়", "Work", label: "সত্য মন্ত্রণালয় · Ministry of Truth"),
+        Action(PermissionKeys.TruthPublish, "Publish: issues, guides, mail, site text and memes", "প্রকাশ: সংখ্যা, গাইড, মেইল, সাইটের লেখা ও মিম", "Work", PermissionKeys.TabTruth),
         Tab("todo", "To-Do", "করণীয়", "Work"),
         Tab("search", "Search", "অনুসন্ধান", "Work"),
         Tab("notes", "Notes", "নোট", "Work"),
