@@ -17,14 +17,15 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
 async function refresh() {
   try { techs.value = (await listTruthTechs()).techs } catch (e) { error.value = e.message }
 }
-const blank = () => ({ slug: '', name: '', category: 'language', monogram: '', hue: 210, homepage: '', versionLines: '' })
+const blank = () => ({ slug: '', name: '', category: 'language', monogram: '', hue: 210, homepage: '', versionLines: '', eolLines: '' })
 function edit(t) {
-  editing.value = t ? { ...t, versionLines: JSON.parse(t.versionLinesJson || '[]').join(', ') } : blank()
+  editing.value = t ? { ...t, versionLines: JSON.parse(t.versionLinesJson || '[]').join(', '), eolLines: JSON.parse(t.eolLinesJson || '[]').join(', ') } : blank()
 }
 async function save() {
   error.value = ''
   const t = editing.value
-  const body = { ...t, hue: Number(t.hue), homepage: t.homepage || null, versionLines: String(t.versionLines).split(',').map((v) => v.trim()).filter(Boolean) }
+  const lines = (s) => String(s ?? '').split(',').map((v) => v.trim()).filter(Boolean)
+  const body = { ...t, hue: Number(t.hue), homepage: t.homepage || null, versionLines: lines(t.versionLines), eolLines: lines(t.eolLines) }
   try {
     if (t.id) await updateTruthTech(t.id, body); else await createTruthTech(body)
     editing.value = null
@@ -57,6 +58,7 @@ onMounted(refresh)
         </svg>
       </div>
       <label class="text-sm">Version lines<input v-model="editing.versionLines" placeholder="3.1, 3.2" :class="field"></label>
+      <label class="text-sm">End-of-life lines<input v-model="editing.eolLines" placeholder="3.0" :class="field"></label>
       <div class="flex gap-2 sm:col-span-4"><Button type="submit" size="sm">Save</Button><Button type="button" size="sm" variant="ghost" @click="editing = null">Cancel</Button></div>
     </form>
 

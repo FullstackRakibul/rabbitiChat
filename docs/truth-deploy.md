@@ -119,6 +119,31 @@ for p in /api/models /api/auth/login /swagger/index.html / /index.html /truth /t
 done
 ```
 
+P2 adds the share pages and the feed, all through the same `/public/truth/*`:
+
+```bash
+curl -s "$SITE/truth/s/issue/current?lang=en" | grep -o '<meta property="og:[a-z]*" content="[^"]*"'   # og:title, og:description, og:url …
+curl -s "$SITE/truth/s/guide/<guide-slug>?lang=bn" | grep -c '<script'   # 0: share pages carry no JavaScript
+curl -s "$SITE/truth-api/feed.xml?lang=bn" | head -c 300                  # RSS 2.0, issues and guides
+curl -s -o /dev/null -w '%{http_code}\n' "$TUNNEL/public/truth/share/issue/current"   # 200
+curl -s -o /dev/null -D - -H 'accept-encoding: br, gzip' \
+  -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36' \
+  "$SITE/truth-api/site-content" | grep -i '^content-encoding'   # br or gzip
+```
+
+The backend compresses everything under `/public/truth/*` (Brotli or gzip).
+The last command asks with a browser's user agent because on the build machine
+something inspects plain-HTTP loopback traffic from browsers and passes it on
+decoded. If the line is missing, the same thing may sit between `tailscaled`
+and the backend, and visitors get the site text uncompressed (about 38 KB
+instead of about 9 KB).
+
+Share pages (`backend/Truth/TruthShare.cs`) are rendered on the server from the
+published snapshot and the published site text. They are cached for 5 minutes
+and styled by `/truth-share.css` from the static build. The links they print use
+`Truth:PublicBaseUrl` (default `https://mostisko.vercel.app`). Set it if the
+public host changes. The feed uses it too.
+
 ## 5. When the backend is off
 
 The shell is static on Vercel and keeps working. Each visitor's browser keeps

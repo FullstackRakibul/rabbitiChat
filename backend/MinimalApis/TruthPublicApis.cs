@@ -4,7 +4,12 @@
 //   GET /public/truth/issues           the archive: every published issue, from its snapshot
 //   GET /public/truth/issues/{slug}    one published issue's latest snapshot
 //   GET /public/truth/site-content     the published site text, memes and glossary (each null: the built-in default)
-//   GET /public/truth/time             { serverNow } — never cached, for the countdown (P2)
+//   GET /public/truth/time             { serverNow } — never cached, for the countdown
+//   GET /public/truth/guides           every published guide (the guides list, the cards' buttons)
+//   GET /public/truth/guides/{slug}    one published guide's latest snapshot
+//   GET /public/truth/share/issue/{slug|current}?lang=   a plain HTML page with OG tags, no JS (/truth/s/issue/…)
+//   GET /public/truth/share/guide/{slug}?lang=           the same for a guide, at its default platform and versions
+//   GET /public/truth/feed.xml?lang=bn|en                RSS 2.0: issues and guides
 //
 // The only routes the tunnel lets through (Truth/TunnelGuard.cs); on Vercel they
 // are /truth-api/*, and the backend answers that spelling too (Program.cs), so
@@ -52,6 +57,44 @@ namespace RabbitIC.Api.MinimalApis
                 return Serve(ctx, json, TruthSnapshot.ETag(json), 60);
             });
 
+            g.MapGet("/guides", async (HttpContext ctx, GuideService guides, CancellationToken ct) =>
+            {
+                var json = await guides.IndexJsonAsync(ct);
+                return Serve(ctx, json, TruthSnapshot.ETag(json), 300);
+            });
+
+            g.MapGet("/guides/{slug}", async (string slug, HttpContext ctx, GuideService guides, CancellationToken ct) =>
+                await guides.PublishedSnapshotAsync(slug.ToLowerInvariant(), ct) is { } snap ? Serve(ctx, snap.Json, snap.ETag, 300) : NotFound(ctx));
+
+            g.MapGet("/share/issue/{slug}", async (string slug, string? lang, HttpContext ctx, TruthService svc, IConfiguration config, CancellationToken ct) =>
+            {
+                var snap = slug == "current" ? await svc.CurrentAsync(ct) : await svc.IssueAsync(slug.ToLowerInvariant(), ct);
+                if (snap is null) return SharePageMissing(ctx);
+                var l = lang == "en" ? "en" : "bn";
+                return Html(ctx, TruthShare.IssuePage(System.Text.Json.Nodes.JsonNode.Parse(snap.Json)!.AsObject(), await SiteTextAsync(svc, ct), l, BaseUrl(config), slug.ToLowerInvariant()));
+            });
+
+            g.MapGet("/share/guide/{slug}", async (string slug, string? lang, HttpContext ctx, TruthService svc, GuideService guides, IConfiguration config, CancellationToken ct) =>
+            {
+                if (await guides.PublishedSnapshotAsync(slug.ToLowerInvariant(), ct) is not { } snap) return SharePageMissing(ctx);
+                var l = lang == "en" ? "en" : "bn";
+                return Html(ctx, TruthShare.GuidePage(System.Text.Json.Nodes.JsonNode.Parse(snap.Json)!.AsObject(), await SiteTextAsync(svc, ct), l, BaseUrl(config)));
+            });
+
+            g.MapGet("/feed.xml", async (string? lang, HttpContext ctx, TruthService svc, GuideService guides, IConfiguration config, CancellationToken ct) =>
+            {
+                var l = lang == "en" ? "en" : "bn";
+                var issues = new List<System.Text.Json.Nodes.JsonObject>();
+                foreach (var i in System.Text.Json.Nodes.JsonNode.Parse(await svc.ArchiveJsonAsync(ct))!["issues"]!.AsArray())
+                    if (await svc.IssueAsync(i!["slug"]!.GetValue<string>(), ct) is { } s) issues.Add(System.Text.Json.Nodes.JsonNode.Parse(s.Json)!.AsObject());
+                var guideDocs = new List<System.Text.Json.Nodes.JsonObject>();
+                foreach (var x in System.Text.Json.Nodes.JsonNode.Parse(await guides.IndexJsonAsync(ct))!["guides"]!.AsArray())
+                    if (await guides.PublishedSnapshotAsync(x!["slug"]!.GetValue<string>(), ct) is { } s) guideDocs.Add(System.Text.Json.Nodes.JsonNode.Parse(s.Json)!.AsObject());
+                Common(ctx);
+                ctx.Response.Headers.CacheControl = "public, max-age=300";
+                return Results.Text(TruthShare.Feed(issues, guideDocs, await SiteTextAsync(svc, ct), l, BaseUrl(config)), "application/rss+xml; charset=utf-8");
+            });
+
             g.MapGet("/time", (HttpContext ctx) =>
             {
                 Common(ctx);
@@ -78,6 +121,27 @@ namespace RabbitIC.Api.MinimalApis
             if (ctx.Request.Headers.IfNoneMatch.Any(v => v is not null && v.Split(',').Select(t => t.Trim()).Contains(etag)))
                 return Results.StatusCode(StatusCodes.Status304NotModified);
             return Results.Text(json, "application/json; charset=utf-8");
+        }
+
+        /// <summary>The published site text over the built-in default — the share pages and the feed say what the page says.</summary>
+        private static async Task<System.Text.Json.Nodes.JsonObject> SiteTextAsync(TruthService svc, CancellationToken ct) =>
+            TruthText.Merge(await svc.PublishedContentAsync(TruthContent.Site, ct) is { } row ? System.Text.Json.Nodes.JsonNode.Parse(row.Json) as System.Text.Json.Nodes.JsonObject : null);
+
+        private static string BaseUrl(IConfiguration config) => (config["Truth:PublicBaseUrl"] ?? "https://mostisko.vercel.app").TrimEnd('/');
+
+        private static IResult Html(HttpContext ctx, string html)
+        {
+            TruthHeaders.Apply(ctx.Response);
+            ctx.Response.Headers.CacheControl = "public, max-age=300";
+            return Results.Content(html, "text/html; charset=utf-8");
+        }
+
+        private static IResult SharePageMissing(HttpContext ctx)
+        {
+            TruthHeaders.Apply(ctx.Response);
+            ctx.Response.Headers.CacheControl = "public, max-age=60";
+            return Results.Content("<!DOCTYPE html><html lang=\"bn\"><head><meta charset=\"utf-8\"><title>404</title><link rel=\"stylesheet\" href=\"/truth-share.css\"></head><body><main><p><a href=\"/truth\">/truth</a></p></main></body></html>",
+                "text/html; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
         }
 
         private static IResult NotFound(HttpContext ctx)

@@ -59,4 +59,7 @@ export {
   deleteTruthIssue, checkTruthIssue, previewTruthIssue, withdrawTruthIssue, publishTruthIssue,
   createTruthItem, updateTruthItem, deleteTruthItem, changeTruthStatus, addTruthCorrection, verifyTruthNumber,
   unverifyTruthNumber, getTruthContent, saveTruthContentDraft, rollbackTruthContent, publishTruthContent,
+  listTruthPlatforms, listTruthGuides, createTruthGuide, getTruthGuide, updateTruthGuide, deleteTruthGuide, openTruthGuideGrid,
+  checkTruthGuide, ackTruthFinding, setTruthGuideChecklist, withdrawTruthGuide, addTruthGuideCorrection, verifyTruthGuideNumber,
+  publishTruthGuide,
 } from './truth.service.js'

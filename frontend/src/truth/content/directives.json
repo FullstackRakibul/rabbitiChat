@@ -1,0 +1,39 @@
+{
+  "description": "Known ini directives per guide variable (docs/TRUTH_PROMPT.md §6.4): an `ini` step that sets a directive not listed for the selected version gets the unknown_ini_directive warning. `since` / `until` bound the versions a directive exists in (until: the last version that has it). The safety check reads this file (embedded at build), or the file Truth:DirectivesFile names; add a directive here when a guide needs one.",
+  "variables": {
+    "php": {
+      "memory_limit": {},
+      "upload_max_filesize": {},
+      "post_max_size": {},
+      "max_file_uploads": {},
+      "file_uploads": {},
+      "max_input_vars": {},
+      "max_input_time": {},
+      "max_execution_time": {},
+      "expose_php": {},
+      "display_errors": {},
+      "display_startup_errors": {},
+      "log_errors": {},
+      "error_log": {},
+      "error_reporting": {},
+      "allow_url_fopen": {},
+      "allow_url_include": {},
+      "disable_functions": {},
+      "disable_classes": {},
+      "open_basedir": {},
+      "short_open_tag": {},
+      "session.cookie_secure": {},
+      "session.cookie_httponly": {},
+      "session.cookie_samesite": {},
+      "session.use_strict_mode": {},
+      "session.save_path": {},
+      "opcache.enable": {},
+      "opcache.memory_consumption": {},
+      "opcache.validate_timestamps": {},
+      "date.timezone": {},
+      "default_charset": {},
+      "zend.assertions": {},
+      "zend.exception_ignore_args": {}
+    }
+  }
+}

@@ -4,12 +4,12 @@
  *
  * Sections: Issues (each issue's items, the pre-publish checklist and the number
  * check), Technologies (the neutral lettermarks), and — for whoever may publish —
- * Site text (§5), Memes (§3A.5) and Glossary (§3A.7). Fix guides arrive in P2,
- * subscribers and mail in P3.
+ * Site text (§5), Memes (§3A.5) and Glossary (§3A.7). Fix guides (§6) with their
+ * variant grid. Subscribers and mail arrive in P3.
  *
  * Two permissions, kept minimal: the tab opens it and edits drafts;
  * action:truth.publish puts anything in front of the public. The server checks
- * every route again. The view is in the URL: ?issue=, ?section=techs|site-text|memes|glossary.
+ * every route again. The view is in the URL: ?issue=, ?section=guides (&guide=), techs, site-text, memes, glossary.
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -17,6 +17,8 @@ import { Newspaper } from '@lucide/vue'
 import TruthIssues from '@/components/truth/TruthIssues.vue'
 import TruthIssueEditor from '@/components/truth/TruthIssueEditor.vue'
 import TruthTechs from '@/components/truth/TruthTechs.vue'
+import TruthGuides from '@/components/truth/TruthGuides.vue'
+import TruthGuideEditor from '@/components/truth/TruthGuideEditor.vue'
 import TruthSiteText from '@/components/truth/TruthSiteText.vue'
 import TruthMemes from '@/components/truth/TruthMemes.vue'
 import TruthGlossary from '@/components/truth/TruthGlossary.vue'
@@ -36,13 +38,16 @@ const PUBLISH_ONLY = ['site-text', 'memes', 'glossary']
 const section = computed(() => {
   const s = String(route.query.section ?? '')
   if (s === 'techs') return 'techs'
+  if (s === 'guides') return 'guides'
   if (PUBLISH_ONLY.includes(s) && can.value.publish) return s
   return 'issues'
 })
 const issueId = computed(() => Number(route.query.issue || 0) || null)
+const guideId = computed(() => (route.query.guide === 'new' ? 'new' : Number(route.query.guide || 0) || null))
 
 const SECTIONS = computed(() => [
   ['issues', 'সংখ্যা ও বিষয়', 'Issues & items', {}, true],
+  ['guides', 'সমাধান গাইড', 'Fix guides', { section: 'guides' }, true],
   ['techs', 'প্রযুক্তি', 'Technologies', { section: 'techs' }, true],
   ['site-text', 'সাইটের লেখা', 'Site text', { section: 'site-text' }, can.value.publish],
   ['memes', 'মিম', 'Memes', { section: 'memes' }, can.value.publish],
@@ -70,6 +75,9 @@ const go = (query) => router.push({ path: route.path, query })
     </div>
 
     <TruthTechs v-if="section === 'techs'" :can-edit="can.edit" />
+    <TruthGuideEditor v-else-if="section === 'guides' && guideId" :id="guideId" :key="String(guideId)" :can="can"
+      @close="go({ section: 'guides' })" @created="(id) => go({ section: 'guides', guide: id })" />
+    <TruthGuides v-else-if="section === 'guides'" :can-edit="can.edit" @open="(id) => go({ section: 'guides', guide: id })" />
     <TruthSiteText v-else-if="section === 'site-text'" />
     <TruthMemes v-else-if="section === 'memes'" />
     <TruthGlossary v-else-if="section === 'glossary'" />

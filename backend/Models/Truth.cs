@@ -67,8 +67,11 @@ public class TrTech
     public int Hue { get; set; }
     public string? Homepage { get; set; }
 
-    /// <summary>["3.1","3.2", …] — the version lines the version checker (P2) knows.</summary>
+    /// <summary>["3.1","3.2", …] — the version lines the version checker knows.</summary>
     public string VersionLinesJson { get; set; } = "[]";
+
+    /// <summary>The lines past their end of life (no more fixes): the version checker says "EOL" for them.</summary>
+    public string EolLinesJson { get; set; } = "[]";
 }
 
 /// <summary>One weekly issue (slug "2026-w43"). Its items are published together.</summary>
@@ -118,6 +121,13 @@ public class TrItem
     public string? WhatToDoBn { get; set; }
     public string? WhatToDoEn { get; set; }
     public DateTime? PatchScheduledAtUtc { get; set; }
+
+    /// <summary>"Do now" (§3.6): the command that shows the installed version, and its code language.</summary>
+    public string? DoNowCommand { get; set; }
+    public string? DoNowLanguage { get; set; }
+
+    /// <summary>"Do now": the keys to rotate, as chips — [{ "label": "API key", "url": "https://…" }].</summary>
+    public string RotateKeysJson { get; set; } = "[]";
     public string TagsJson { get; set; } = "[]";
     public string AuthorName { get; set; } = "";
     public int Order { get; set; }
@@ -170,6 +180,9 @@ public class TrSource
 {
     public int Id { get; set; }
     public int? ItemId { get; set; }
+
+    /// <summary>A guide's source, when it is not an item's.</summary>
+    public int? GuideId { get; set; }
     public int Order { get; set; }
     public string Url { get; set; } = "";
     public string Publisher { get; set; } = "";
@@ -248,4 +261,147 @@ public class TrSiteContent
     public string? Note { get; set; }
     public int EditedByUserId { get; set; }
     public DateTime EditedAtUtc { get; set; }
+}
+
+// ─────────────────────────── fix guides (§6, P2) ───────────────────────────
+
+public static class TrGuidePhase
+{
+    public const string BeforePatch = "before_patch";
+    public const string AfterPatch = "after_patch";
+    public const string Hardening = "hardening";
+    public static readonly string[] All = { BeforePatch, AfterPatch, Hardening };
+}
+
+public static class TrStepKind
+{
+    public static readonly string[] All = { "note", "command", "config", "verify", "panel", "waf_rule", "warning", "undo" };
+
+    /// <summary>The kinds that change a server: a guide with one needs a verify step and an undo step (§8).</summary>
+    public static readonly string[] Changing = { "command", "config", "waf_rule" };
+}
+
+/// <summary>
+/// A fix guide: steps for each platform and version, from public sources, published
+/// by a person after the variant grid, the safety check and a 4-item checklist (§6.3).
+/// </summary>
+public class TrGuide
+{
+    public int Id { get; set; }
+    public string Slug { get; set; } = "";
+
+    /// <summary>The item it fixes, when there is one; the technology names what it is for either way.</summary>
+    public int? ItemId { get; set; }
+    public int TechId { get; set; }
+    public string TitleBn { get; set; } = "";
+    public string? TitleEn { get; set; }
+
+    /// <summary><see cref="TrGuidePhase"/>. before_patch is always shown as temporary (rule 8).</summary>
+    public string Phase { get; set; } = TrGuidePhase.BeforePatch;
+    public string? IntroBn { get; set; }
+    public string? IntroEn { get; set; }
+
+    /// <summary>{ "php": { "options": ["8.3","8.4"], "default": "8.4", "labelBn": "…", "labelEn": "…" } } — the selectors (§6.2).</summary>
+    public string VariablesJson { get; set; } = "{}";
+
+    /// <summary>The platform keys the guide supports (platforms.json); the page's selector shows only these.</summary>
+    public string PlatformsJson { get; set; } = "[]";
+    public bool BackupFirst { get; set; } = true;
+    public string AuthorName { get; set; } = "";
+
+    /// <summary>The source this guide is based on (a community post, rule 2), shown as "ভিত্তি / Based on" — its order among the guide's sources.</summary>
+    public int? BasedOnSourceOrder { get; set; }
+    public string Status { get; set; } = TrIssueStatus.Draft;
+
+    /// <summary>Any change to the guide or its steps. Publishing needs the grid opened, and the checklist ticked, after it.</summary>
+    public DateTime EditedAtUtc { get; set; }
+    public DateTime? GridOpenedAtUtc { get; set; }
+
+    /// <summary>{ tested, verify, undo, sources, byUserId, atUtc } — the publisher's 4 ticks (§6.3).</summary>
+    public string ChecklistJson { get; set; } = "{}";
+
+    /// <summary>Numbers in the guide's own words verified by hand (rule 4), as on an item. Staff only.</summary>
+    public string HandVerifiedJson { get; set; } = "[]";
+    public DateTime? FirstPublishedAtUtc { get; set; }
+    public DateTime? PublishedAtUtc { get; set; }
+    public int? PublishedByUserId { get; set; }
+    public int CreatedByUserId { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+}
+
+public class TrGuideStep
+{
+    public int Id { get; set; }
+    public int GuideId { get; set; }
+    public int Order { get; set; }
+
+    /// <summary><see cref="TrStepKind.All"/>.</summary>
+    public string Kind { get; set; } = "command";
+
+    /// <summary>A platform key, or "any".</summary>
+    public string Platform { get; set; } = "any";
+    public string? TitleBn { get; set; }
+    public string? TitleEn { get; set; }
+    public string? BodyBn { get; set; }
+    public string? BodyEn { get; set; }
+
+    /// <summary>A template (§6.2).</summary>
+    public string? Code { get; set; }
+
+    /// <summary>The code block's language; empty: the platform's shell.</summary>
+    public string? Language { get; set; }
+
+    /// <summary>For a verify step: what the reader should see — a template too.</summary>
+    public string? ExpectedOutput { get; set; }
+
+    /// <summary>A condition in the template's own syntax ("php>=8.5"): the step shows only when it holds.</summary>
+    public string? Condition { get; set; }
+
+    /// <summary>"What this may break" (যা ভাঙতে পারে), for edge rules and risky steps.</summary>
+    public string? SideEffectsBn { get; set; }
+    public string? SideEffectsEn { get; set; }
+}
+
+/// <summary>
+/// A safety warning someone acknowledged, with their note (§6.3). Findings are worked
+/// out from the rendered variants each time; an acknowledgement belongs to one exact
+/// finding (<see cref="FindingKey"/>: rule, variant, step and line), so it lapses when any
+/// of them changes. The note is staff-only; readers see the warning itself.
+/// </summary>
+public class TrSafetyFinding
+{
+    public int Id { get; set; }
+    public int GuideId { get; set; }
+    public string FindingKey { get; set; } = "";
+    public int StepOrder { get; set; }
+    public string Variant { get; set; } = "";
+    public string RuleId { get; set; } = "";
+    public string Level { get; set; } = "warn";
+    public string Message { get; set; } = "";
+    public int AcknowledgedByUserId { get; set; }
+    public string AcknowledgedNote { get; set; } = "";
+    public DateTime AtUtc { get; set; }
+}
+
+/// <summary>A guide as the public saw it: immutable JSON, one row per publish.</summary>
+public class TrGuideSnapshot
+{
+    public int Id { get; set; }
+    public int GuideId { get; set; }
+    public string GuideSlug { get; set; } = "";
+    public string Json { get; set; } = "";
+    public string ETag { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; }
+    public int PublishedByUserId { get; set; }
+}
+
+/// <summary>A visible correction to a published guide (rule 5), append-only.</summary>
+public class TrGuideCorrection
+{
+    public int Id { get; set; }
+    public int GuideId { get; set; }
+    public DateTime AtUtc { get; set; }
+    public string TextBn { get; set; } = "";
+    public string? TextEn { get; set; }
+    public int ByUserId { get; set; }
 }

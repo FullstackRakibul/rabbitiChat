@@ -93,7 +93,13 @@ export async function startVercelLocal({ dist: distDir, config, tunnel, port = 0
         const r2 = await fetch(upstream, { method: req.method, headers, body: body.length ? Buffer.concat(body) : undefined, redirect: 'manual' })
         res.statusCode = r2.status
         r2.headers.forEach((v, k) => { if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(k)) res.setHeader(k, v) })
-        res.end(Buffer.from(await r2.arrayBuffer()))
+        // fetch hands the body back decoded; the visitor gets it in the origin's encoding, as through a proxy.
+        let out = Buffer.from(await r2.arrayBuffer())
+        const enc = r2.headers.get('content-encoding')
+        if (enc === 'br') out = zlib.brotliCompressSync(out)
+        else if (enc === 'gzip') out = zlib.gzipSync(out)
+        if (enc === 'br' || enc === 'gzip') res.setHeader('Content-Encoding', enc)
+        res.end(out)
       } catch {
         res.statusCode = 502
         res.end('upstream unreachable')

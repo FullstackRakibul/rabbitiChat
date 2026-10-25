@@ -1,0 +1,25 @@
+/* The Ministry of Truth's share pages (/truth/s/*): plain and readable, no script.
+   A file, not inline styles, because the pages' CSP allows styles from 'self' only. */
+:root { color-scheme: light dark; --bg: #efe6d2; --fg: #141410; --muted: #514c3e; --line: #cfc3a6; --accent: #9e0f27; --box: #f8f3e6; --amber: #6a4300; --amber-bg: #f6e3b0; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0e0f0c; --fg: #efe6d2; --muted: #b9b29f; --line: #2d3428; --accent: #f2a900; --box: #161a14; --amber: #ffd27a; --amber-bg: #3b2e0b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.7 "Noto Sans Bengali", system-ui, sans-serif; }
+main { max-width: 44rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+a { color: var(--accent); }
+h1 { font-size: 1.6rem; line-height: 1.3; margin: .4rem 0; }
+h2 { font-size: 1.2rem; line-height: 1.35; margin: .5rem 0; }
+h3 { font-size: 1rem; margin: 1rem 0 .3rem; color: var(--muted); }
+.site, .muted, .tech, .kind { color: var(--muted); font-size: .9rem; margin: 0; }
+.lead { font-size: 1.05rem; }
+.open { display: inline-block; padding: .6rem 1.1rem; border: 2px solid var(--fg); border-radius: 999px; font-weight: 600; text-decoration: none; color: var(--fg); }
+.item, .step { background: var(--box); border: 1px solid var(--line); border-radius: 14px; padding: 1rem; margin: 1rem 0; }
+.steps { list-style: none; padding: 0; }
+.pill, .phase { display: inline-block; padding: .05rem .6rem; border-radius: 999px; border: 1px solid var(--line); font-weight: 600; }
+.patch, .backup, .breaks { background: var(--amber-bg); color: var(--amber); border-radius: 10px; padding: .6rem .8rem; }
+pre { background: #08140e; color: #cfe8d6; border-radius: 10px; padding: .75rem; overflow-x: auto; font: .9rem/1.6 "JetBrains Mono", ui-monospace, monospace; font-variant-ligatures: none; }
+.refs { padding-left: 1.4rem; }
+.refs span { display: block; color: var(--muted); font-size: .9rem; }
+.correction { border-left: 3px solid var(--amber); padding-left: .6rem; }
+footer { margin-top: 2rem; color: var(--muted); font-size: .9rem; }

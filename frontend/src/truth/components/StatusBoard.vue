@@ -4,6 +4,7 @@ import { useI18n } from '../lib/i18n.js'
 import Lettermark from './Lettermark.vue'
 import SectionTitle from './SectionTitle.vue'
 import StatusPill from './StatusPill.vue'
+import Countdown from './Countdown.vue'
 import { lang } from '../lib/lang.js'
 import { pick } from '../lib/content.js'
 
@@ -23,7 +24,10 @@ const { t } = useI18n()
             <span class="block font-semibold leading-snug" translate="no">{{ i.tech.name }}</span>
             <span class="line-clamp-2 block text-sm leading-normal text-muted" data-content :lang="pick(i, 'headline', lang).lang">{{ pick(i, 'headline', lang).text }}</span>
           </span>
-          <StatusPill :status="i.status" />
+          <span class="flex flex-col items-end gap-1">
+            <StatusPill :status="i.status" />
+            <Countdown v-if="i.status === 'patch_scheduled' && i.patchScheduledAt" :at="i.patchScheduledAt" class="text-xs text-muted" />
+          </span>
         </a>
       </li>
     </ul>

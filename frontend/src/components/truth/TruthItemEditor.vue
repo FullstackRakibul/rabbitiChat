@@ -35,6 +35,8 @@ function fromItem(i) {
     headlineBn: i?.headlineBn ?? '', headlineEn: i?.headlineEn ?? '', summaryBn: i?.summaryBn ?? '', summaryEn: i?.summaryEn ?? '',
     impactBn: i?.impactBn ?? '', impactEn: i?.impactEn ?? '', whatToDoBn: i?.whatToDoBn ?? '', whatToDoEn: i?.whatToDoEn ?? '',
     patchScheduledAt: toUtcInput(i?.patchScheduledAt), tags: (i?.tags ?? []).join(', '), authorName: i?.authorName ?? '', order: i?.order ?? 0,
+    doNowCommand: i?.doNowCommand ?? '', doNowLanguage: i?.doNowLanguage ?? '',
+    rotateKeys: (i?.rotateKeys ?? []).map((k) => `${k.label}${k.url ? ' | ' + k.url : ''}`).join('\n'),
     advisories: (i?.advisories ?? []).map((a) => ({ ...a, cvss: a.cvss ?? '', fixedVersions: (a.fixedVersions ?? []).join(', ') })),
     timeline: (i?.timeline ?? []).map((e) => ({ ...e, occurredAt: toUtcInput(e.occurredAt) })),
     sources: (i?.sources ?? []).map((s) => ({ ...s })),
@@ -53,6 +55,8 @@ function payload() {
     headlineBn: f.headlineBn, headlineEn: nul(f.headlineEn), summaryBn: f.summaryBn, summaryEn: nul(f.summaryEn),
     impactBn: nul(f.impactBn), impactEn: nul(f.impactEn), whatToDoBn: nul(f.whatToDoBn), whatToDoEn: nul(f.whatToDoEn),
     patchScheduledAt: fromUtcInput(f.patchScheduledAt), tags: list(f.tags), authorName: f.authorName, order: Number(f.order) || 0,
+    doNowCommand: nul(f.doNowCommand), doNowLanguage: nul(f.doNowLanguage),
+    rotateKeys: String(f.rotateKeys ?? '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [label, url] = l.split('|').map((x) => x.trim()); return { label, url: url || null } }),
     advisories: f.advisories.map((a) => ({
       cveId: nul(a.cveId), cvss: a.cvss === '' || a.cvss === null ? null : Number(a.cvss), titleBn: nul(a.titleBn), titleEn: nul(a.titleEn),
       affectedRange: nul(a.affectedRange), fixedVersions: list(a.fixedVersions), exploitedInWild: !!a.exploitedInWild, kevListed: !!a.kevListed,
@@ -128,6 +132,11 @@ const techName = computed(() => props.techs.find((t) => t.id === Number(form.val
         <label class="text-sm">ট্যাগ <span class="text-muted-foreground">Tags, comma-separated</span><input v-model="form.tags" :class="field"></label>
         <label class="text-sm">লেখক <span class="text-muted-foreground">Byline</span><input v-model="form.authorName" :class="field"></label>
         <label class="text-sm">ক্রম <span class="text-muted-foreground">Order</span><input v-model="form.order" type="number" :class="field"></label>
+        <label class="text-sm sm:col-span-2">এখনই করুন <span class="text-muted-foreground">Do now: the command that shows the version (safety-checked)</span>
+          <textarea v-model="form.doNowCommand" class="min-h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 font-mono text-xs" spellcheck="false" /></label>
+        <label class="text-sm">Language<input v-model="form.doNowLanguage" placeholder="bash" :class="field"></label>
+        <label class="text-sm sm:col-span-3">Keys to rotate <span class="text-muted-foreground">one per line: label | https link (optional)</span>
+          <textarea v-model="form.rotateKeys" class="min-h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm" /></label>
       </fieldset>
 
       <fieldset :disabled="!canEdit" class="grid gap-2">

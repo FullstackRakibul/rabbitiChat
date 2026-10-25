@@ -16,7 +16,8 @@
       "skip": "মূল লেখায় যান",
       "sections": "এই পাতায়",
       "glossary": "শব্দকোষ",
-      "privacy": "গোপনীয়তা"
+      "privacy": "গোপনীয়তা",
+      "guides": "সমাধান গাইড"
     },
     "lang": {
       "label": "ভাষা",
@@ -117,7 +118,10 @@
       "copied": "লিংক কপি হয়েছে",
       "enMissing": "ইংরেজি সংস্করণ এখনো নেই।",
       "corrections": "সংশোধন",
-      "correctionAt": "সংশোধন · {time}"
+      "correctionAt": "সংশোধন · {time}",
+      "guideBefore": "প্যাচের আগে: অস্থায়ী সমাধান",
+      "guideAfter": "প্যাচের পরে: আপডেট",
+      "guideHardening": "আরও সুরক্ষা"
     },
     "refs": {
       "title": "সূত্র",
@@ -179,7 +183,9 @@
       "subscribe": "ঘরে বসে টেলিস্ক্রিন",
       "room101": "রুম ১০১",
       "sleeping": "টেলিস্ক্রিন ঘুমাচ্ছে",
-      "privacy": "ছোট ভাই আপনাকে দেখছে না"
+      "privacy": "ছোট ভাই আপনাকে দেখছে না",
+      "donow": "নির্দেশ দপ্তর",
+      "checker": "সংস্করণ যাচাই কক্ষ"
     },
     "serious": {
       "label": "সিরিয়াস মোড"
@@ -210,6 +216,93 @@
       "relieved": "স্বস্তিতে",
       "reading": "পড়ছে",
       "sleeping": "ঘুমাচ্ছে"
+    },
+    "guides": {
+      "title": "সমাধান গাইড",
+      "intro": "প্ল্যাটফর্ম আর সংস্করণ বেছে নিয়ে ধাপে ধাপে করুন।",
+      "tech": "প্রযুক্তি",
+      "platform": "প্ল্যাটফর্ম",
+      "all": "সব",
+      "empty": "এখনো কোনো গাইড নেই।",
+      "none": "এই বাছাইয়ে কোনো গাইড নেই।"
+    },
+    "phase": {
+      "before_patch": "অস্থায়ী সমাধান · প্যাচের আগে",
+      "after_patch": "প্যাচের পরে",
+      "hardening": "আরও সুরক্ষা"
+    },
+    "kind": {
+      "note": "নোট",
+      "command": "কমান্ড",
+      "config": "সেটিং",
+      "verify": "যাচাই",
+      "panel": "প্যানেল থেকে, টার্মিনাল ছাড়া",
+      "waf_rule": "এজ বা ফায়ারওয়াল নিয়ম",
+      "warning": "সতর্কতা",
+      "undo": "ফিরিয়ে আনা"
+    },
+    "guide": {
+      "backupTitle": "সবার আগে ব্যাকআপ নিন",
+      "backup": "কিছু বদলানোর আগে কনফিগ ফাইল আর ডেটার একটা কপি রাখুন।",
+      "temporary": "এটি অস্থায়ী সমাধান। প্যাচ এলে তা বসাতেই হবে।",
+      "platform": "প্ল্যাটফর্ম",
+      "howToKnow": "কীভাবে বুঝবেন: {hint}",
+      "steps": "ধাপগুলো",
+      "noSteps": "এই বাছাইয়ে কোনো ধাপ নেই।",
+      "expected": "আউটপুটে যা দেখবেন",
+      "mayBreak": "যা ভাঙতে পারে",
+      "compare": "আপনার আউটপুট এখানে পেস্ট করে মিলিয়ে দেখুন",
+      "compareNote": "যা পেস্ট করবেন তা শুধু এই ব্রাউজারেই থাকে, কোথাও পাঠানো হয় না।",
+      "match": "মিলে গেছে",
+      "mismatch": "মেলেনি: {count}টি লাইন আলাদা",
+      "copy": "কপি",
+      "copied": "কপি হয়েছে",
+      "wrap": "লাইন ভাঙুন",
+      "basedOn": "ভিত্তি: {who}",
+      "forItem": "যে বিষয়ের জন্য: {title}",
+      "after": "প্যাচ এলে: {title}",
+      "warnings": "সতর্কতা",
+      "shownFor": "দেখানো হচ্ছে: {platform}, {versions}",
+      "open": "গাইড খুলুন"
+    },
+    "safety": {
+      "memory_unlimited": "এই সেটিং PHP-এর মেমোরির সীমা তুলে দেয়; কাজ শেষ হলে আগের মানে ফিরিয়ে আনুন।",
+      "waf_block_all_multipart": "এই নিয়ম সব ফাইল আপলোড আটকায়, শুধু ঝুঁকির পথটি নয়।",
+      "tee_overwrite": "এই কমান্ড পুরো ফাইলটা নতুন করে লেখে; আগের লেখা মুছে যায়।",
+      "restart_without_verify": "রিস্টার্টের পর সার্ভিসটি চলছে কি না দেখে নিন।",
+      "unknown_ini_directive": "এই সংস্করণে এই সেটিং চেনা নয়; বদলানোর আগে নিশ্চিত হয়ে নিন।",
+      "docker_exec_ephemeral": "চলমান কন্টেইনারের ভেতরে বদলালে কন্টেইনার নতুন করে বানালেই তা হারিয়ে যায়; ইমেজ বা মাউন্ট করা কনফিগ বদলান।"
+    },
+    "countdown": {
+      "in": "আর {time} বাকি",
+      "passed": "নির্ধারিত সময় পেরিয়ে গেছে",
+      "d": "{n} দিন",
+      "h": "{n} ঘণ্টা",
+      "m": "{n} মিনিট"
+    },
+    "checker": {
+      "title": "আপনার সংস্করণ মিলিয়ে দেখুন",
+      "tech": "প্রযুক্তি",
+      "version": "আপনার সংস্করণ",
+      "placeholder": "যেমন 3.1.5",
+      "check": "দেখুন",
+      "note": "সংস্করণটি শুধু আপনার ব্রাউজারেই মেলানো হয়, কোথাও পাঠানো হয় না।",
+      "invalid": "একটি সংস্করণ লিখুন, যেমন 3.1.5।",
+      "safe": "এই সংখ্যার নিরাপত্তা পরামর্শে {version} আক্রান্ত নয়।",
+      "update": "{version} আক্রান্ত। {fix}-এ আপডেট করুন।",
+      "eol": "{line} লাইনের মেয়াদ শেষ: এতে আর কোনো সমাধান আসবে না। চালু থাকা নতুন লাইনে যান।",
+      "notYet": "{version} আক্রান্ত, কিন্তু প্যাচ এখনো আসেনি ({time})। এর মধ্যে অস্থায়ী সমাধান দেখুন।",
+      "noFix": "{version} আক্রান্ত, আর এই লাইনে এখনো কোনো সমাধান নেই।",
+      "guide": "অস্থায়ী সমাধান দেখুন"
+    },
+    "donow": {
+      "title": "এখনই করুন",
+      "check": "সংস্করণ দেখুন: {tech}",
+      "rotate": "এই চাবিগুলো নতুন করে বানান"
+    },
+    "share": {
+      "open": "পুরো পাতাটি খুলুন",
+      "openGuide": "নিজের প্ল্যাটফর্মের ধাপগুলো খুলুন"
     }
   },
   "en": {
@@ -229,7 +322,8 @@
       "skip": "Skip to content",
       "sections": "On this page",
       "glossary": "Glossary",
-      "privacy": "Privacy"
+      "privacy": "Privacy",
+      "guides": "Fix guides"
     },
     "lang": {
       "label": "Language",
@@ -330,7 +424,10 @@
       "copied": "Link copied",
       "enMissing": "English version not available yet.",
       "corrections": "Corrections",
-      "correctionAt": "Correction · {time}"
+      "correctionAt": "Correction · {time}",
+      "guideBefore": "Before the patch: temporary fix",
+      "guideAfter": "After the patch: update",
+      "guideHardening": "Hardening"
     },
     "refs": {
       "title": "References",
@@ -392,7 +489,9 @@
       "subscribe": "TELESCREEN AT HOME",
       "room101": "ROOM 101",
       "sleeping": "THE TELESCREEN IS SLEEPING",
-      "privacy": "LITTLE BROTHER IS NOT WATCHING YOU"
+      "privacy": "LITTLE BROTHER IS NOT WATCHING YOU",
+      "donow": "MINISTRY ORDERS",
+      "checker": "VERSION CHECKPOINT"
     },
     "serious": {
       "label": "Serious mode"
@@ -423,6 +522,93 @@
       "relieved": "Relieved",
       "reading": "Reading",
       "sleeping": "Sleeping"
+    },
+    "guides": {
+      "title": "Fix guides",
+      "intro": "Choose your platform and version, then follow the steps.",
+      "tech": "Technology",
+      "platform": "Platform",
+      "all": "All",
+      "empty": "No guides yet.",
+      "none": "No guide matches."
+    },
+    "phase": {
+      "before_patch": "Temporary fix · before the patch",
+      "after_patch": "After the patch",
+      "hardening": "Hardening"
+    },
+    "kind": {
+      "note": "Note",
+      "command": "Command",
+      "config": "Setting",
+      "verify": "Verify",
+      "panel": "From the panel, no terminal",
+      "waf_rule": "Edge or firewall rule",
+      "warning": "Warning",
+      "undo": "Undo"
+    },
+    "guide": {
+      "backupTitle": "Back up first",
+      "backup": "Copy your config files and data before you change anything.",
+      "temporary": "This is a temporary fix. Install the patch when it is out.",
+      "platform": "Platform",
+      "howToKnow": "How to tell: {hint}",
+      "steps": "Steps",
+      "noSteps": "No steps for this choice.",
+      "expected": "What you should see",
+      "mayBreak": "What this may break",
+      "compare": "Paste your output here to compare",
+      "compareNote": "What you paste stays in this browser; it is sent nowhere.",
+      "match": "Matches",
+      "mismatch": "Doesn't match: {count} line(s) differ",
+      "copy": "Copy",
+      "copied": "Copied",
+      "wrap": "Wrap lines",
+      "basedOn": "Based on: {who}",
+      "forItem": "For: {title}",
+      "after": "When the patch is out: {title}",
+      "warnings": "Warnings",
+      "shownFor": "Shown for: {platform}, {versions}",
+      "open": "Open the guide"
+    },
+    "safety": {
+      "memory_unlimited": "This setting removes PHP's memory cap; set it back when you're done.",
+      "waf_block_all_multipart": "This rule blocks every file upload, not only the risky path.",
+      "tee_overwrite": "This command rewrites the whole file; what was in it is gone.",
+      "restart_without_verify": "After the restart, check that the service is running.",
+      "unknown_ini_directive": "This setting isn't known for this version; make sure before you change it.",
+      "docker_exec_ephemeral": "A change made inside a running container is lost when the container is recreated; change the image or a mounted config."
+    },
+    "countdown": {
+      "in": "in {time}",
+      "passed": "the scheduled time has passed",
+      "d": "{n} d",
+      "h": "{n} h",
+      "m": "{n} min"
+    },
+    "checker": {
+      "title": "Check your version",
+      "tech": "Technology",
+      "version": "Your version",
+      "placeholder": "e.g. 3.1.5",
+      "check": "Check",
+      "note": "Checked in your browser only; it is sent nowhere.",
+      "invalid": "Type a version, like 3.1.5.",
+      "safe": "{version} is not affected by the advisories in this issue.",
+      "update": "{version} is affected. Update to {fix}.",
+      "eol": "The {line} line has reached its end of life: no more fixes. Move to a supported line.",
+      "notYet": "{version} is affected, but the patch isn't out yet ({time}). Meanwhile, see the temporary fix.",
+      "noFix": "{version} is affected, and there is no fix for its line yet.",
+      "guide": "See the temporary fix"
+    },
+    "donow": {
+      "title": "Do it now",
+      "check": "Check the version: {tech}",
+      "rotate": "Rotate these keys"
+    },
+    "share": {
+      "open": "Open the full page",
+      "openGuide": "Open the steps for your platform"
     }
   }
 }

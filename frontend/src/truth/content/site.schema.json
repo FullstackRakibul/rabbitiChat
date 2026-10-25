@@ -49,7 +49,16 @@
         "stamp",
         "glossary",
         "privacy",
-        "mascot"
+        "mascot",
+        "guides",
+        "phase",
+        "kind",
+        "guide",
+        "safety",
+        "countdown",
+        "checker",
+        "donow",
+        "share"
       ],
       "properties": {
         "site": {
@@ -97,7 +106,8 @@
             "skip",
             "sections",
             "glossary",
-            "privacy"
+            "privacy",
+            "guides"
           ],
           "properties": {
             "board": {
@@ -146,6 +156,11 @@
               "x-placeholders": []
             },
             "privacy": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "guides": {
               "type": "string",
               "maxLength": 600,
               "x-placeholders": []
@@ -639,7 +654,10 @@
             "copied",
             "enMissing",
             "corrections",
-            "correctionAt"
+            "correctionAt",
+            "guideBefore",
+            "guideAfter",
+            "guideHardening"
           ],
           "properties": {
             "impact": {
@@ -762,6 +780,21 @@
               "x-placeholders": [
                 "time"
               ]
+            },
+            "guideBefore": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "guideAfter": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "guideHardening": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
             }
           }
         },
@@ -1051,7 +1084,9 @@
             "subscribe",
             "room101",
             "sleeping",
-            "privacy"
+            "privacy",
+            "donow",
+            "checker"
           ],
           "properties": {
             "board": {
@@ -1100,6 +1135,16 @@
               "x-placeholders": []
             },
             "privacy": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "donow": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "checker": {
               "type": "string",
               "maxLength": 600,
               "x-placeholders": []
@@ -1260,6 +1305,527 @@
               "x-placeholders": []
             },
             "sleeping": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "guides": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "intro",
+            "tech",
+            "platform",
+            "all",
+            "empty",
+            "none"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "intro": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "tech": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "platform": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "all": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "empty": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "none": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "phase": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "before_patch",
+            "after_patch",
+            "hardening"
+          ],
+          "properties": {
+            "before_patch": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "after_patch": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "hardening": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "kind": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "note",
+            "command",
+            "config",
+            "verify",
+            "panel",
+            "waf_rule",
+            "warning",
+            "undo"
+          ],
+          "properties": {
+            "note": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "config": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "verify": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "panel": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "waf_rule": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "warning": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "undo": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "guide": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "backupTitle",
+            "backup",
+            "temporary",
+            "platform",
+            "howToKnow",
+            "steps",
+            "noSteps",
+            "expected",
+            "mayBreak",
+            "compare",
+            "compareNote",
+            "match",
+            "mismatch",
+            "copy",
+            "copied",
+            "wrap",
+            "basedOn",
+            "forItem",
+            "after",
+            "warnings",
+            "shownFor",
+            "open"
+          ],
+          "properties": {
+            "backupTitle": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "backup": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "temporary": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "platform": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "howToKnow": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "hint"
+              ]
+            },
+            "steps": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "noSteps": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "expected": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "mayBreak": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "compare": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "compareNote": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "match": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "mismatch": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            },
+            "copy": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "copied": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "wrap": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "basedOn": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "who"
+              ]
+            },
+            "forItem": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "title"
+              ]
+            },
+            "after": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "title"
+              ]
+            },
+            "warnings": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "shownFor": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "platform",
+                "versions"
+              ]
+            },
+            "open": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "safety": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory_unlimited",
+            "waf_block_all_multipart",
+            "tee_overwrite",
+            "restart_without_verify",
+            "unknown_ini_directive",
+            "docker_exec_ephemeral"
+          ],
+          "properties": {
+            "memory_unlimited": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "waf_block_all_multipart": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "tee_overwrite": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "restart_without_verify": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "unknown_ini_directive": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "docker_exec_ephemeral": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "countdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "in",
+            "passed",
+            "d",
+            "h",
+            "m"
+          ],
+          "properties": {
+            "in": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            },
+            "passed": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "d": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "n"
+              ]
+            },
+            "h": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "n"
+              ]
+            },
+            "m": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "n"
+              ]
+            }
+          }
+        },
+        "checker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "tech",
+            "version",
+            "placeholder",
+            "check",
+            "note",
+            "invalid",
+            "safe",
+            "update",
+            "eol",
+            "notYet",
+            "noFix",
+            "guide"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "tech": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "placeholder": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "check": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "invalid": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "safe": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "version"
+              ]
+            },
+            "update": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "fix",
+                "version"
+              ]
+            },
+            "eol": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "line"
+              ]
+            },
+            "notYet": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time",
+                "version"
+              ]
+            },
+            "noFix": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "version"
+              ]
+            },
+            "guide": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "donow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "check",
+            "rotate"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "check": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "tech"
+              ]
+            },
+            "rotate": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "share": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "open",
+            "openGuide"
+          ],
+          "properties": {
+            "open": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "openGuide": {
               "type": "string",
               "maxLength": 600,
               "x-placeholders": []

@@ -95,6 +95,8 @@ a { color: var(--accent); }
    its file never competes with the first paint; until then: the mono face. */
 :root { --typewriter: var(--font-mono); }
 html.fonts-late { --typewriter: "Special Elite", var(--font-mono); }
+/* Commands and expected output show every character as typed: no "=>" drawn as an arrow. */
+code, pre, kbd, samp { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
 .display { font-family: "Anton", var(--font-sans); text-transform: uppercase; letter-spacing: 0.01em; line-height: 1.1; font-weight: 400; }
 .display:lang(bn) { font-family: "Baloo Da 2", var(--font-sans); text-transform: none; letter-spacing: 0; font-weight: 800; line-height: 1.35; }
 .nick { font-family: var(--typewriter); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }

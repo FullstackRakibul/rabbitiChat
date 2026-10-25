@@ -52,3 +52,24 @@ async function publishOutcome(res) {
   if (res?.status === 400) return { ok: false, error: res.message, problems: res.data?.problems ?? [] }
   throw res
 }
+
+// ─────────── fix guides (§6) ───────────
+export const listTruthPlatforms = () => http.get('/truth/platforms')
+export const listTruthGuides = () => http.get('/truth/guides')
+export const createTruthGuide = (guide) => http.post('/truth/guides', guide)
+export const getTruthGuide = (id) => http.get(`/truth/guides/${id}`)
+export const updateTruthGuide = (id, guide) => http.put(`/truth/guides/${id}`, guide)
+export const deleteTruthGuide = (id) => http.del(`/truth/guides/${id}`)
+/** Every variant rendered and checked — and the server records that the grid was opened (§6.3). */
+export const openTruthGuideGrid = (id) => http.post(`/truth/guides/${id}/grid`)
+export const checkTruthGuide = (id) => http.get(`/truth/guides/${id}/check`)
+export const ackTruthFinding = (id, findingKey, note) => http.post(`/truth/guides/${id}/ack`, { findingKey, note })
+export const setTruthGuideChecklist = (id, checklist) => http.put(`/truth/guides/${id}/checklist`, checklist)
+export const withdrawTruthGuide = (id) => http.post(`/truth/guides/${id}/withdraw`)
+export const addTruthGuideCorrection = (id, body) => http.post(`/truth/guides/${id}/corrections`, body)
+export const verifyTruthGuideNumber = (id, token, note) => http.post(`/truth/guides/${id}/verify`, { token, note })
+
+export async function publishTruthGuide(id) {
+  const res = await http.raw(`/truth/guides/${id}/publish`, { method: 'POST' }).catch((e) => e)
+  return publishOutcome(res)
+}

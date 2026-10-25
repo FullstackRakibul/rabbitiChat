@@ -8,7 +8,7 @@
 // the headline and Little Brother in the corner, his pose following the news.
 // While anything is under active attack the view turns serious by itself: no
 // glitch, no crack, no memes but the footer's, and a worried mascot.
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from '../lib/i18n.js'
 import UrgentBanner from '../components/UrgentBanner.vue'
 import ChipNav from '../components/ChipNav.vue'
@@ -22,12 +22,19 @@ import Mascot from '../components/Mascot.vue'
 import CrackOverlay from '../components/CrackOverlay.vue'
 import MemeBanner from '../components/MemeBanner.vue'
 import SeriousSwitch from '../components/SeriousSwitch.vue'
+import DoNow from '../components/DoNow.vue'
+import Link from '../components/Link.vue'
+import { loadGuides } from '../lib/guides.js'
+import { startTicking, syncClock } from '../lib/clock.js'
 import Room101 from './Room101.vue'
 import { load, rssUrl } from '../lib/api.js'
 import { lang } from '../lib/lang.js'
 import { pick } from '../lib/content.js'
 import { formatDateTime, formatRange } from '../lib/time.js'
 import { pickMeme, setIssueState, view } from '../lib/theme.js'
+
+// Below the items: loaded after the first paint.
+const VersionChecker = defineAsyncComponent(() => import('../components/VersionChecker.vue'))
 
 const props = defineProps({ slug: { type: String, default: null } })
 const emit = defineEmits(['title'])
@@ -55,6 +62,9 @@ async function fetchIssue() {
   } catch { archive.value = [] }
 }
 watch(() => props.slug, fetchIssue, { immediate: true })
+loadGuides()
+syncClock()
+startTicking()
 
 const items = computed(() => snap.value?.items ?? [])
 const title = computed(() => (snap.value ? pick(snap.value.issue, 'title', lang.value) : null))
@@ -120,7 +130,10 @@ watch([state, items, () => view.memeRev, () => view.id], () => {
             <ItemCard v-for="i in items" :key="i.id" :item="i" :issue="snap.issue" />
           </div>
         </section>
+        <VersionChecker :items="items" />
+        <DoNow :items="items" />
         <ArchiveList v-if="archive.length" :issues="archive" :current="snap.issue.slug" />
+        <p><Link to="/truth/guides" class="inline-flex min-h-11 items-center font-semibold">{{ t('nav.guides') }}</Link></p>
       </div>
     </template>
   </div>

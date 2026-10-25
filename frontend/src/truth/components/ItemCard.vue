@@ -12,6 +12,9 @@ import Lettermark from './Lettermark.vue'
 import StatusPill from './StatusPill.vue'
 import Msg from './Msg.js'
 import Stamp from './Stamp.vue'
+import Countdown from './Countdown.vue'
+import Link from './Link.vue'
+import { guidesFor, PHASE_KEY } from '../lib/guides.js'
 import { entries as glossary, openTerm, splitTerms } from '../lib/glossary.js'
 import { lang, withLang } from '../lib/lang.js'
 import { anyFallback, pick } from '../lib/content.js'
@@ -55,7 +58,9 @@ const stamp = computed(() => {
   return null
 })
 
-const shareUrl = computed(() => location.origin + withLang(`/truth/${props.issue.slug}#item-${props.item.id}`, lang.value))
+// The share page (/truth/s/…): Open Graph tags for a link preview, and readable without JavaScript.
+const shareUrl = computed(() => location.origin + withLang(`/truth/s/issue/${props.issue.slug}`, lang.value))
+const guides = computed(() => guidesFor(props.item.id))
 const copied = ref(false)
 async function share() {
   try {
@@ -85,6 +90,7 @@ const statusLine = (e) => (e.from ? t('item.statusChange', { from: t(`status.${e
     <p v-if="item.patchScheduledAt" data-testid="patch-time" data-safety="patch" class="mt-3 mb-0 rounded-xl bg-[var(--amber-bg)] px-3 py-2 font-semibold text-[var(--amber-fg)]">
       {{ t('item.patchAt', { time: formatWithUtc(t, lang, item.patchScheduledAt) }) }}
       <span class="block text-sm font-normal">{{ t('time.zoneNote') }}</span>
+      <Countdown v-if="item.status === 'patch_scheduled'" :at="item.patchScheduledAt" class="block text-sm" />
     </p>
 
     <p data-testid="item-summary" data-content :lang="f('summary').lang" class="mt-4 mb-0">
@@ -105,6 +111,11 @@ const statusLine = (e) => (e.from ? t('item.statusChange', { from: t(`status.${e
       <h4 class="m-0 text-sm font-semibold">{{ t('item.whatToDo') }}</h4>
       <p class="m-0" data-content :lang="f('whatToDo').lang">{{ f('whatToDo').text }}</p>
     </section>
+
+    <div v-if="guides.length" class="mt-4 flex flex-wrap gap-2" data-testid="guide-buttons">
+      <Link v-for="g in guides" :key="g.slug" :to="`/truth/guide/${g.slug}`" :data-phase="g.phase"
+        class="inline-flex min-h-11 items-center rounded-full border-2 border-line px-4 font-semibold text-fg no-underline">{{ t(PHASE_KEY[g.phase]) }}</Link>
+    </div>
 
     <section v-if="item.advisories.length" data-safety="advisories" class="mt-5">
       <h4 class="m-0 mb-2 text-sm font-semibold text-muted">{{ t('item.advisories') }}</h4>

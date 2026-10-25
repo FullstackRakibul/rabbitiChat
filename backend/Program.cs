@@ -192,6 +192,19 @@ builder.Services.AddScoped<RabbitIC.Api.Services.IMatrixService, RabbitIC.Api.Se
 
 // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md): the staff side and the snapshots the public reads.
 builder.Services.AddScoped<RabbitIC.Api.Truth.TruthService>();
+builder.Services.AddScoped<RabbitIC.Api.Truth.GuideService>();
+builder.Services.AddSingleton<RabbitIC.Api.Truth.TruthPlatforms>();
+// The public JSON, share pages and feed go out compressed: Vercel's rewrite passes the origin's
+// encoding through. Over HTTPS too: these responses hold no secret and no cookie, so there is
+// nothing for a compression side channel (BREACH) to read.
+builder.Services.AddResponseCompression(o =>
+{
+	o.EnableForHttps = true;
+	o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+	o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+	o.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes.Append("application/rss+xml");
+});
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
 var truthTunnel = builder.Configuration.GetSection(RabbitIC.Api.Truth.TunnelOptions.Section).Get<RabbitIC.Api.Truth.TunnelOptions>()
 	?? new RabbitIC.Api.Truth.TunnelOptions();
 // Per visitor IP — the tunnel's forwarded header, believed only from the tunnel. Held in memory, never logged.
@@ -372,7 +385,9 @@ foreach (var key in droppedSecrets)
 // what a visitor does; routing comes after the rewrite so it matches the rewritten path.
 app.UseTruthTunnelGuard();
 app.UseRewriter(new RewriteOptions()
-	.AddRewrite(@"^truth-api/(.*)$", "public/truth/$1", skipRemainingRules: true));
+	.AddRewrite(@"^truth-api/(.*)$", "public/truth/$1", skipRemainingRules: true)
+	.AddRewrite(@"^truth/s/(.*)$", "public/truth/share/$1", skipRemainingRules: true));
+app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/public/truth"), b => b.UseResponseCompression());
 app.UseRouting();
 
 // Swagger UI at /swagger — enabled in all environments (this is an internal tool).

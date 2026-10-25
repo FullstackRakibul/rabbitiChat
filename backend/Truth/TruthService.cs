@@ -9,6 +9,7 @@
 // Every rule is decided here; TruthApis translates, the Vue tab only shows.
 
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
@@ -78,6 +79,7 @@ public sealed partial class TruthService(AppDbContext db)
         tech.Hue = input.Hue;
         tech.Homepage = string.IsNullOrWhiteSpace(input.Homepage) ? null : input.Homepage.Trim();
         tech.VersionLinesJson = TruthJson.FromStrings(input.VersionLines);
+        tech.EolLinesJson = TruthJson.FromStrings(input.EolLines);
         await db.SaveChangesAsync(ct);
         return TrResult<TrTech>.Ok(tech);
     }
@@ -180,6 +182,7 @@ public sealed partial class TruthService(AppDbContext db)
                 i.Id, i.TechId, i.Severity, i.Status, i.HeadlineBn, i.HeadlineEn, i.SummaryBn, i.SummaryEn,
                 i.ImpactBn, i.ImpactEn, i.WhatToDoBn, i.WhatToDoEn,
                 patchScheduledAt = TruthJson.Utc(i.PatchScheduledAtUtc),
+                i.DoNowCommand, i.DoNowLanguage, rotateKeys = JsonNode.Parse(i.RotateKeysJson),
                 tags = TruthJson.Strings(i.TagsJson), i.AuthorName, i.Order,
                 updatedAt = TruthJson.Utc(i.UpdatedAtUtc),
                 handVerified = TruthJson.Hand(i.HandVerifiedJson).Select(h => new { h.Token, h.Note, by = names.GetValueOrDefault(h.ByUserId), at = TruthJson.Utc(h.AtUtc) }),
@@ -320,6 +323,11 @@ public sealed partial class TruthService(AppDbContext db)
         if (Over(input.ImpactBn, 2000) || Over(input.ImpactEn, 2000) || Over(input.WhatToDoBn, 2000) || Over(input.WhatToDoEn, 2000))
             return "Impact and what-to-do are up to 2000 characters each.";
         if (Over(input.AuthorName, 80)) return "The byline is up to 80 characters.";
+        if (Over(input.DoNowCommand, 2000)) return "The \"do now\" command is up to 2000 characters.";
+        if ((input.RotateKeys?.Count ?? 0) > 10 || input.RotateKeys?.Any(k => string.IsNullOrWhiteSpace(k.Label) || k.Label.Length > 60) == true)
+            return "Up to 10 keys to rotate, each with a label of up to 60 characters.";
+        if (input.RotateKeys?.FirstOrDefault(k => !string.IsNullOrWhiteSpace(k.Url) && !IsHttps(k.Url)) is { } badKey)
+            return $"A key's link must be https: {badKey.Url}";
         if ((input.Tags?.Count ?? 0) > 8 || input.Tags?.Any(t => t.Length > 30) == true) return "Up to 8 tags, 30 characters each.";
         if ((input.Advisories?.Count ?? 0) > 20 || (input.Timeline?.Count ?? 0) > 40 || (input.Sources?.Count ?? 0) > 20)
             return "Up to 20 advisories, 40 timeline entries and 20 sources.";
@@ -350,6 +358,9 @@ public sealed partial class TruthService(AppDbContext db)
         item.WhatToDoEn = Trim(input.WhatToDoEn);
         item.PatchScheduledAtUtc = input.PatchScheduledAt is { } p ? AsUtc(p) : null;
         item.TagsJson = TruthJson.FromStrings(input.Tags);
+        item.DoNowCommand = input.DoNowCommand?.Replace("\r\n", "\n").Trim() is { Length: > 0 } cmd ? cmd : null;
+        item.DoNowLanguage = Trim(input.DoNowLanguage);
+        item.RotateKeysJson = JsonSerializer.Serialize((input.RotateKeys ?? new()).Select(k => new { label = k.Label.Trim(), url = Trim(k.Url) }), TruthJson.Options);
         item.AuthorName = input.AuthorName?.Trim() ?? "";
         item.Order = input.Order;
         item.UpdatedAtUtc = DateTime.UtcNow;
@@ -477,8 +488,15 @@ public sealed partial class TruthService(AppDbContext db)
 
             if (item.Status == TrStatus.PatchScheduled && item.PatchScheduledAtUtc is null)
                 Add("patchTime", "The patch is scheduled but has no time.", "patchScheduledAt");
-            if (TrStatus.IsUrgent(item.Status) && string.IsNullOrWhiteSpace(item.WhatToDoBn))
-                Add("urgentNote", "An urgent item needs a fix guide or a \"what to do\" note.", "whatToDoBn");
+            if (TrStatus.IsUrgent(item.Status) && string.IsNullOrWhiteSpace(item.WhatToDoBn)
+                && !await db.TrGuides.AnyAsync(g => g.ItemId == item.Id && g.Status == TrIssueStatus.Published && g.Phase == TrGuidePhase.BeforePatch, ct))
+                Add("urgentNote", "An urgent item needs a published before-patch guide or a \"what to do\" note.", "whatToDoBn");
+
+            // "Do now" commands are copied too: the same safety check as a guide's steps (§6.4).
+            if (item.DoNowCommand is { } doNow)
+                foreach (var f in SafetyCheck.Run(new[] { new RenderedStep(1, "command", doNow, item.DoNowLanguage) }, new Dictionary<string, string>(), new Dictionary<string, IReadOnlyDictionary<string, SafetyCheck.Directive>>())
+                             .Where(f => f.Level == SafetyFinding.Block))
+                    Add("safetyBlock", $"The \"do now\" command: {f.RuleId} — {f.Message}", "doNowCommand");
 
             // Rule 3: what only an attacker claims is unconfirmed.
             if (sources.Count > 0 && sources.All(s => s.Kind == TrSourceKind.Claim) && item.Status != TrStatus.Unconfirmed)

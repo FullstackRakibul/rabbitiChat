@@ -25,7 +25,7 @@ import zlib from 'node:zlib'
 import crypto from 'node:crypto'
 import net from 'node:net'
 import { spawn, spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { buildApi, startApi, call, startFakeOllama, API_BIN_DIR } from './oddity-eval.mjs'
 import { launchBrowser } from './lib/headless-browser.mjs'
@@ -180,6 +180,12 @@ async function draftIssue(slug, item) {
   return { id: i.json.id }
 }
 
+/** The General account (no truth permissions), signed in once a run. */
+async function generalUser() {
+  ctx.general ??= await login('eval-truth-general', 'start-' + crypto.randomBytes(5).toString('hex'))
+  return ctx.general
+}
+
 const codes = (r) => (r.json?.problems ?? []).map((p) => p.code)
 
 // ═══════════════════════════════ G1.1 ═══════════════════════════════
@@ -269,7 +275,7 @@ check('G1.1', 'patch_scheduled needs a time; an urgent item needs a what-to-do n
 
 check('G1.1', 'only a holder of action:truth.publish publishes; a General account gets 403 on /api/truth', async () => {
   await setup()
-  const general = await login('eval-truth-general', 'start-' + crypto.randomBytes(5).toString('hex'))
+  const general = await generalUser()
   const list = await as(general, 'GET', '/api/truth/issues')
   const publish = await as(general, 'POST', `/api/truth/issues/${ctx.fx.issueId}/publish`)
   const anon = await call(ctx.api.url, 'GET', '/api/truth/issues')
@@ -327,8 +333,9 @@ const ALLOWED = {
   snapshot: ['schema', 'issue', 'urgent', 'siteContentVersion', 'items'],
   issue: ['slug', 'titleBn', 'titleEn', 'subtitleBn', 'subtitleEn', 'weekStart', 'weekEnd', 'firstPublishedAt', 'publishedAt'],
   item: ['id', 'order', 'tech', 'severity', 'status', 'statusSince', 'patchScheduledAt', 'headlineBn', 'headlineEn', 'summaryBn', 'summaryEn',
-    'impactBn', 'impactEn', 'whatToDoBn', 'whatToDoEn', 'tags', 'author', 'advisories', 'timeline', 'statusEvents', 'sources', 'corrections'],
-  tech: ['slug', 'name', 'category', 'monogram', 'hue', 'homepage'],
+    'impactBn', 'impactEn', 'whatToDoBn', 'whatToDoEn', 'tags', 'author', 'advisories', 'timeline', 'statusEvents', 'sources', 'corrections',
+    'doNowCommand', 'doNowLanguage', 'rotateKeys'],   // §3.6
+  tech: ['slug', 'name', 'category', 'monogram', 'hue', 'homepage', 'versionLines', 'eolLines'],   // §3.5
   advisory: ['cveId', 'cvss', 'titleBn', 'titleEn', 'affectedRange', 'fixedVersions', 'exploitedInWild', 'kevListed'],
   timeline: ['at', 'level', 'textBn', 'textEn'],
   statusEvent: ['at', 'from', 'to', 'textBn', 'textEn'],
@@ -775,7 +782,12 @@ check('G1.9', 'CI key check: every key used in code is in bn and en; the schema 
   // Status pills and source kinds are read by prefix; each value the data can hold has its label.
   const labels = [...['active_attack', 'breach_confirmed', 'patch_scheduled', 'ongoing', 'contained', 'unconfirmed', 'patched', 'blocked', 'resolved'].map((s) => `status.${s}`),
     ...['official', 'vendor', 'research', 'community', 'news', 'claim'].map((s) => `refs.${s}`), ...['critical', 'high', 'medium', 'low', 'info'].map((s) => `severity.${s}`),
-    ...['ERR', 'WARN', 'FIX', 'INFO'].map((s) => `log.${s}`)]
+    ...['ERR', 'WARN', 'FIX', 'INFO'].map((s) => `log.${s}`),
+    ...['before_patch', 'after_patch', 'hardening'].map((s) => `phase.${s}`), 'item.guideBefore', 'item.guideAfter', 'item.guideHardening',
+    ...['note', 'command', 'config', 'verify', 'panel', 'waf_rule', 'warning', 'undo'].map((s) => `kind.${s}`),
+    ...['memory_unlimited', 'waf_block_all_multipart', 'tee_overwrite', 'restart_without_verify', 'unknown_ini_directive', 'docker_exec_ephemeral'].map((s) => `safety.${s}`),
+    ...['invalid', 'safe', 'update', 'notYet', 'noFix', 'eol'].map((s) => `checker.${s}`),
+    ...['verified', 'unconfirmed', 'corrected'].map((s) => `stamp.${s}`)]
   for (const k of labels) for (const l of ['bn', 'en']) if (typeof get(def[l], k) !== 'string') missing.push(`${l}.${k}`)
   return ok(keys.length > 40 && missing.length === 0 && drift.length === 0,
     `${keys.length} keys and ${prefixes.length} prefixes in code · missing ${JSON.stringify(missing)} · schema drift ${JSON.stringify(drift)}`)
@@ -1112,20 +1124,32 @@ check('G1.17', 'Lighthouse (mobile) with the theme on: Performance ≥ 90, Acces
   const flags = '--chrome-flags=--headless=new' + (tls ? ' --ignore-certificate-errors' : '')
   const out = []
   try {
+    // Three runs a language, and the median by Performance: Lighthouse's own advice for its run-to-run
+    // variance (on this machine First Contentful Paint alone moves between 1.7 s and 3.0 s on one build).
+    // Every run's score is reported.
     for (const lang of ['bn', 'en']) {
-      const file = path.join(EVAL_ROOT, `lighthouse-${lang}.json`)
-      fs.rmSync(file, { force: true })
-      // Not spawnSync: the stand-ins answer from this same process, and a blocked event loop would never serve Lighthouse's Chrome.
-      const r = await spawnAsync('npx', ['-y', 'lighthouse@13.5.0', `${site.url}/truth?lang=${lang}`, '--quiet', '--output=json', `--output-path=${file}`,
-        '--only-categories=performance,accessibility,best-practices,seo', process.platform === 'win32' ? `"${flags}"` : flags],
-      { shell: process.platform === 'win32', env: { ...process.env, CHROME_PATH: findBrowser() }, timeoutMs: 240_000 })
-      if (!fs.existsSync(file)) { out.push({ lang, error: (r.error?.message ?? '') + (r.stderr || r.stdout).slice(-300) }); continue }
-      const rep = JSON.parse(fs.readFileSync(file, 'utf8'))
-      if (rep.runtimeError) { out.push({ lang, error: rep.runtimeError.code }); continue }
-      const score = (k) => Math.round((rep.categories[k]?.score ?? 0) * 100)
-      const js = rep.audits['network-requests'].details.items.find((i) => i.resourceType === 'Script')
-      out.push({ lang, performance: score('performance'), accessibility: score('accessibility'), bestPractices: score('best-practices'), seo: score('seo'),
-        lcp: rep.audits['largest-contentful-paint'].displayValue, script: `${(js.transferSize / 1024).toFixed(1)} of ${(js.resourceSize / 1024).toFixed(1)} KB on the wire` })
+      const runs = []
+      for (let n = 1; n <= 3; n++) {
+        const file = path.join(EVAL_ROOT, `lighthouse-${lang}-${n}.json`)
+        fs.rmSync(file, { force: true })
+        // Not spawnSync: the stand-ins answer from this same process, and a blocked event loop would never serve Lighthouse's Chrome.
+        const r = await spawnAsync('npx', ['-y', 'lighthouse@13.5.0', `${site.url}/truth?lang=${lang}`, '--quiet', '--output=json', `--output-path=${file}`,
+          '--only-categories=performance,accessibility,best-practices,seo', process.platform === 'win32' ? `"${flags}"` : flags],
+        { shell: process.platform === 'win32', env: { ...process.env, CHROME_PATH: findBrowser() }, timeoutMs: 240_000 })
+        if (!fs.existsSync(file)) { runs.push({ lang, error: (r.error?.message ?? '') + (r.stderr || r.stdout).slice(-300) }); continue }
+        const rep = JSON.parse(fs.readFileSync(file, 'utf8'))
+        if (rep.runtimeError) { runs.push({ lang, error: rep.runtimeError.code }); continue }
+        const score = (k) => Math.round((rep.categories[k]?.score ?? 0) * 100)
+        const js = rep.audits['network-requests'].details.items.filter((i) => i.resourceType === 'Script')
+        const kb = (k) => (js.reduce((a, i) => a + i[k], 0) / 1024).toFixed(1)
+        runs.push({ lang, performance: score('performance'), accessibility: score('accessibility'), bestPractices: score('best-practices'), seo: score('seo'),
+          fcp: rep.audits['first-contentful-paint'].displayValue, lcp: rep.audits['largest-contentful-paint'].displayValue,
+          script: `${kb('transferSize')} of ${kb('resourceSize')} KB on the wire, ${js.length} file(s)`, file })
+      }
+      const done = runs.filter((x) => !x.error).sort((a, b) => a.performance - b.performance)
+      if (done.length < 3) { out.push({ lang, error: runs.find((x) => x.error)?.error }); continue }
+      const { file, ...median } = done[1]
+      out.push({ ...median, runs: runs.map((x) => x.performance) })
       if (ctx.args.shots) fs.copyFileSync(file, path.join(ctx.args.shots, `lighthouse-${lang}.json`))
     }
   } finally {
@@ -1134,6 +1158,438 @@ check('G1.17', 'Lighthouse (mobile) with the theme on: Performance ≥ 90, Acces
   }
   const pass = out.every((o) => !o.error && o.performance >= 90 && o.accessibility >= 95 && o.bestPractices >= 95 && o.seo >= 95)
   return ok(pass, `${tls ? 'over https' : 'over http (no openssl)'} · ${JSON.stringify(out)}`)
+})
+
+check('G1.17', 'the public JSON, share pages and feed arrive compressed, at the tunnel and through Vercel', async () => {
+  await setup()
+  const out = {}
+  for (const [name, base, p] of [['tunnel', `http://127.0.0.1:${ctx.tunnelPort}`, '/public/truth/site-content'], ['vercel', ctx.vercel.url, '/truth-api/site-content'],
+    ['vercel', ctx.vercel.url, '/truth-api/current'], ['vercel', ctx.vercel.url, `/truth/s/issue/${ISSUE.slug}?lang=bn`], ['vercel', ctx.vercel.url, '/truth-api/feed.xml?lang=bn']]) {
+    // Not a browser's user agent: on this machine something inspects plain-HTTP traffic from browsers on
+    // loopback and hands it on decoded, so a Chrome agent would see the stand-in's hop decompressed.
+    const r = await fetch(base + p, { headers: { 'accept-encoding': 'br, gzip', 'user-agent': 'truth-eval' } })
+    await r.arrayBuffer()
+    out[`${name} ${p}`] = `${r.status} ${r.headers.get('content-encoding') ?? 'none'}`
+  }
+  return ok(Object.values(out).every((v) => /^200 (br|gzip)$/.test(v)), JSON.stringify(out))
+})
+
+// ═══════════════════════════════ Phase P2: fix guides (§6) ═══════════════════════════════
+
+/**
+ * The eval's own registries (G2.2): the shipped platforms plus one invented one,
+ * and the invented ExampleLang's directives — handed to the API by
+ * Truth:PlatformsFile and Truth:DirectivesFile, so no code knows them.
+ */
+function registryFiles(runDir) {
+  const platforms = JSON.parse(fs.readFileSync(path.join(WEB, 'src/truth/content/platforms.json'), 'utf8'))
+  platforms.platforms.push({ key: 'demo-os', group: 'linux', bn: 'ডেমো-ওএস', en: 'DemoOS', shell: 'bash', hintBn: 'এটি ইভালের বানানো প্ল্যাটফর্ম।', hintEn: 'A platform the eval made up.' })
+  const directives = JSON.parse(fs.readFileSync(path.join(WEB, 'src/truth/content/directives.json'), 'utf8'))
+  directives.variables.exl = { 'demo.upload_feature': { since: '3.2' }, 'demo.max_upload': {}, 'demo.safe_mode': {} }
+  const files = { platforms: path.join(runDir, 'platforms.json'), directives: path.join(runDir, 'directives.json') }
+  fs.writeFileSync(files.platforms, JSON.stringify(platforms, null, 2))
+  fs.writeFileSync(files.directives, JSON.stringify(directives, null, 2))
+  return files
+}
+
+const EXL_VERSIONS = ['3.1', '3.2', '3.3', '3.4']
+const GUIDE_SOURCE = { url: 'https://example.com/advisories/exl-2026-01', publisher: 'ExampleLang Project', author: null, title: 'Security Advisory EXL-2026-01', publishedOn: '2026-10-19', kind: 'official', fetchedText: EXL_SOURCE }
+const step = (kind, code, over = {}) => ({ kind, platform: 'any', titleBn: `ধাপ: ${kind}`, titleEn: `Step: ${kind}`, bodyBn: null, bodyEn: null, code, language: null, expectedOutput: null, condition: null, sideEffectsBn: null, sideEffectsEn: null, ...over })
+
+function guideInput(slug, steps, over = {}) {
+  return {
+    slug, itemId: ctx.fx.exlItem, techId: ctx.fx.exl, titleBn: 'ExampleLang: demo.upload_feature বন্ধ করুন (অস্থায়ী)', titleEn: 'ExampleLang: turn demo.upload_feature off (temporary)',
+    phase: 'before_patch', introBn: 'প্যাচ না আসা পর্যন্ত আপলোড ফিচারটি বন্ধ রাখুন।', introEn: 'Keep the upload feature off until the patch is out.',
+    variables: { exl: { options: EXL_VERSIONS, default: '3.2', labelBn: 'ExampleLang সংস্করণ', labelEn: 'ExampleLang version' } },
+    platforms: ['debian-ubuntu', 'docker', 'docker-compose', 'cloudflare', 'demo-os'], backupFirst: true, authorName: 'Eval Writer', basedOnSourceOrder: 1,
+    steps, sources: [GUIDE_SOURCE], ...over,
+  }
+}
+
+/** Steps that trip nothing on any variant. */
+const CLEAN_STEPS = [
+  step('command', 'sudo cp /etc/exl/{{exl}}/exl.ini /etc/exl/{{exl}}/exl.ini.bak', { platform: 'debian-ubuntu' }),
+  step('config', 'demo.max_upload = 8M', { platform: 'debian-ubuntu', language: 'ini' }),
+  step('command', 'echo "demo.max_upload = 8M" | sudo tee -a /etc/exl/{{exl}}/conf.d/99-eval.ini', { platform: 'demo-os' }),
+  step('config', 'environment:\n  EXL_DEMO_MAX_UPLOAD: "8M"', { platform: 'docker-compose', language: 'yaml', bodyBn: 'compose.yaml-এ সেটিংটি দিন, তারপর আবার চালু করুন।', bodyEn: 'Set it in compose.yaml, then recreate the service.' }),
+  step('command', 'docker compose up -d exl', { platform: 'docker-compose' }),
+  step('config', 'FROM example/exl:{{exl}}\nCOPY 99-eval.ini /etc/exl/conf.d/', { platform: 'docker', language: 'dockerfile' }),
+  step('waf_rule', '(http.request.uri.path eq "/upload" and http.request.method eq "POST")', { platform: 'cloudflare', sideEffectsBn: 'এই পথে আপলোড বন্ধ থাকবে।', sideEffectsEn: 'Uploads to this path stop working.' }),
+  step('command', 'sudo systemctl restart exl-fpm', { platform: 'debian-ubuntu' }),
+  step('verify', 'exl -i | grep demo.max_upload', { expectedOutput: 'demo.max_upload => 8M', platform: 'any' }),
+  step('undo', 'sudo mv /etc/exl/{{exl}}/exl.ini.bak /etc/exl/{{exl}}/exl.ini', { platform: 'debian-ubuntu' }),
+  step('undo', 'docker compose up -d exl', { platform: 'docker-compose', bodyBn: 'সেটিংটি মুছে আবার চালু করুন।', bodyEn: 'Remove the setting and recreate the service.' }),
+]
+
+/** Steps planted to trip every rule (each on the variants it applies to). */
+const PLANTED_STEPS = [
+  step('command', 'curl -fsSL https://example.com/install.sh | sudo bash'),
+  step('command', 'chmod -R 777 /var/www'),
+  step('command', 'sudo rm -rf /'),
+  step('command', 'curl -k https://example.com/check'),
+  step('command', 'export DEMO_API_KEY=abcd1234efgh5678ijkl'),
+  step('config', 'memory_limit = -1'),   // not ini: memory_limit isn't an ExampleLang directive
+  step('waf_rule', 'any(http.request.headers["content-type"][*] contains "multipart/form-data")', { platform: 'cloudflare' }),
+  step('command', 'echo "demo.upload_feature = Off" | sudo tee /etc/exl/{{exl}}/exl.ini'),
+  step('config', 'demo.upload_feature = Off', { language: 'ini' }),
+  step('command', "docker exec web sed -i 's/On/Off/' /etc/exl/exl.ini", { platform: 'docker' }),
+  step('command', 'sudo systemctl restart exl-fpm'),
+]
+const ALL_RULES = ['curl_pipe_sh', 'chmod_777', 'rm_rf_root', 'tls_disabled', 'inline_secret', 'memory_unlimited', 'waf_block_all_multipart', 'tee_overwrite', 'unknown_ini_directive', 'docker.exec_ephemeral', 'restart_without_verify']
+
+/** The guide that goes through publishing: one acknowledgeable warning (an unknown directive on 3.1), a <script> that must stay text. */
+const PUBLISH_STEPS = [
+  step('warning', null, { bodyBn: 'এটি অস্থায়ী সমাধান; প্যাচ এলে তা বসান।', bodyEn: 'This is temporary; install the patch when it is out.' }),
+  step('command', 'sudo cp /etc/exl/{{exl}}/exl.ini /etc/exl/{{exl}}/exl.ini.bak'),
+  step('config', 'demo.upload_feature = Off', { language: 'ini' }),
+  step('note', "echo '<script>window.__pwned=1</script>' # {{exl}}"),
+  step('command', 'sudo systemctl restart exl-fpm', { platform: 'debian-ubuntu' }),
+  step('verify', 'exl -i | grep demo.upload_feature', { expectedOutput: 'demo.upload_feature => Off' }),
+  step('undo', 'sudo mv /etc/exl/{{exl}}/exl.ini.bak /etc/exl/{{exl}}/exl.ini'),
+]
+
+async function makeGuide(slug, steps, over) {
+  await setup()
+  const r = await admin('POST', '/api/truth/guides', guideInput(slug, steps, over))
+  if (r.status !== 201) throw new Error(`guide ${slug} → ${r.status} ${r.text.slice(0, 300)}`)
+  return r.json.id
+}
+
+/** The publish guide, taken all the way through publishing once a run. */
+async function publishedGuide() {
+  if (ctx.fx.guide) return ctx.fx.guide
+  const id = await makeGuide('exl-upload-off', PUBLISH_STEPS)
+  const grid = (await admin('POST', `/api/truth/guides/${id}/grid`)).json
+  for (const v of grid.variants) for (const f of v.findings) if (f.level === 'warn' && !f.acknowledged)
+    await admin('POST', `/api/truth/guides/${id}/ack`, { findingKey: f.key, note: 'Checked: the directive is new in 3.2; on 3.1 the step is a no-op.' })
+  await admin('PUT', `/api/truth/guides/${id}/checklist`, { tested: true, verify: true, undo: true, sources: true })
+  const p = await admin('POST', `/api/truth/guides/${id}/publish`)
+  if (p.status !== 200) throw new Error(`publish guide → ${p.status} ${p.text.slice(0, 400)}`)
+  ctx.fx.guide = { id, slug: 'exl-upload-off' }
+  return ctx.fx.guide
+}
+
+// ── G2.1 ──
+
+check('G2.1', 'the template renderer: every case, in the browser\'s renderer and the server\'s, including <script> attempts', async () => {
+  await setup()
+  const { cases } = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/truth/template-cases.json'), 'utf8'))
+  const { renderTemplate } = await import(pathToFileURL(path.join(WEB, 'src/truth/lib/template.js')).href)
+  const bad = []
+  for (const c of cases) {
+    const js = renderTemplate(c.template, c.values)
+    const cs = (await admin('POST', '/api/truth/guides/render', { template: c.template, values: c.values })).json
+    if (js.text !== c.text || (js.errors.length > 0) !== c.errors) bad.push(`js: ${c.name} → ${JSON.stringify(js)}`)
+    if (cs?.text !== c.text || (cs?.errors?.length > 0) !== c.errors) bad.push(`server: ${c.name} → ${JSON.stringify(cs)}`)
+  }
+  return ok(cases.length >= 15 && bad.length === 0, `${cases.length} cases × 2 renderers · ${bad.length ? JSON.stringify(bad) : 'all equal'}`)
+})
+
+check('G2.1', 'on the guide page a <script> in a step is shown as text, and never runs', async () => {
+  const g = await publishedGuide()
+  const page = await publicPage(`/truth/guide/${g.slug}`)
+  await page.waitFor('[data-testid="guide-steps"]')
+  const r = await page.eval(`({ pwned: window.__pwned === 1, shown: [...document.querySelectorAll('[data-testid="guide-steps"] code')].some((c) => c.textContent.includes('<script>window.__pwned=1</script>')),
+    scripts: [...document.querySelectorAll('[data-testid="guide-steps"] script')].length })`)
+  return ok(!r.pwned && r.shown && r.scripts === 0, JSON.stringify(r))
+})
+
+// ── G2.2 ──
+
+check('G2.2', 'the variant grid covers every platform × version the guide declares; a platform added in platforms.json works with no code', async () => {
+  const id = await makeGuide('exl-grid-coverage', CLEAN_STEPS)
+  const grid = (await admin('POST', `/api/truth/guides/${id}/grid`)).json
+  const keys = new Set(grid.variants.map((v) => v.key))
+  const want = guideInput('x', []).platforms.flatMap((p) => EXL_VERSIONS.map((v) => `platform=${p};exl=${v}`))
+  const missing = want.filter((k) => !keys.has(k))
+  const unknown = await admin('PUT', `/api/truth/guides/${id}`, guideInput('exl-grid-coverage', CLEAN_STEPS, { platforms: ['debian-ubuntu', 'nope-os'] }))
+  const platforms = (await admin('GET', '/api/truth/platforms')).json.platforms.map((p) => p.key)
+  return ok(missing.length === 0 && grid.variants.length === want.length && platforms.includes('demo-os') && unknown.status === 400,
+    `${grid.variants.length} variants for ${want.length} expected (5 platforms × 4 versions) · missing ${JSON.stringify(missing)} · demo-os from the eval's platforms.json: ${platforms.includes('demo-os')} · an undeclared platform → ${unknown.status}`)
+})
+
+check('G2.2', 'the public guide offers exactly its declared platforms — the made-up one included — and its versions', async () => {
+  const g = await publishedGuide()
+  const page = await publicPage(`/truth/guide/${g.slug}`, { lang: 'en' })
+  await page.waitFor('[data-testid="select-platform"]')
+  const r = await page.eval(`({ platforms: [...document.querySelectorAll('[data-testid="select-platform"] option')].map((o) => o.value),
+    names: [...document.querySelectorAll('[data-testid="select-platform"] option')].map((o) => o.textContent.trim()),
+    versions: [...document.querySelectorAll('[data-testid="select-exl"] option')].map((o) => o.value) })`)
+  return ok(JSON.stringify(r.platforms) === JSON.stringify(guideInput('x', []).platforms) && r.names.includes('DemoOS') && JSON.stringify(r.versions) === JSON.stringify(EXL_VERSIONS), JSON.stringify(r))
+})
+
+// ── G2.3 ──
+
+check('G2.3', 'the safety check finds every rule (docker.exec_ephemeral included) in the planted guide, each where it applies', async () => {
+  const id = ctx.fx.planted = await makeGuide('exl-planted', PLANTED_STEPS)
+  const grid = (await admin('POST', `/api/truth/guides/${id}/grid`)).json
+  const found = new Set(grid.variants.flatMap((v) => v.findings.map((f) => f.ruleId)))
+  const missing = ALL_RULES.filter((r) => !found.has(r))
+  const level = Object.fromEntries(grid.variants.flatMap((v) => v.findings.map((f) => [f.ruleId, f.level])))
+  const blocks = ['curl_pipe_sh', 'chmod_777', 'rm_rf_root', 'tls_disabled', 'inline_secret'].filter((r) => level[r] !== 'block')
+  // Variant by variant: the unknown directive only on 3.1, the docker rule only on docker, the multipart rule only on cloudflare.
+  const wrong = grid.variants.flatMap((v) => {
+    const has = (r) => v.findings.some((f) => f.ruleId === r)
+    const out = []
+    if (has('unknown_ini_directive') !== (v.values.exl === '3.1')) out.push(`${v.key}: unknown_ini_directive`)
+    if (has('docker.exec_ephemeral') !== (v.values.platform === 'docker')) out.push(`${v.key}: docker.exec_ephemeral`)
+    if (has('waf_block_all_multipart') !== (v.values.platform === 'cloudflare')) out.push(`${v.key}: waf_block_all_multipart`)
+    if (!has('curl_pipe_sh')) out.push(`${v.key}: curl_pipe_sh missing`)
+    return out
+  })
+  return ok(missing.length === 0 && blocks.length === 0 && wrong.length === 0 && grid.summary.blocks > 0,
+    `rules found ${found.size}/${ALL_RULES.length} · missing ${JSON.stringify(missing)} · not block-level ${JSON.stringify(blocks)} · wrong variant ${JSON.stringify(wrong.slice(0, 5))} · ${grid.variants.length} variants checked`)
+})
+
+check('G2.3', 'nothing in the clean guide, on any of its variants; and a "do now" command is checked the same way', async () => {
+  const id = await makeGuide('exl-clean', CLEAN_STEPS)
+  const grid = (await admin('POST', `/api/truth/guides/${id}/grid`)).json
+  const any = grid.variants.flatMap((v) => v.findings.map((f) => `${v.key}: ${f.ruleId}`))
+  const d = await draftIssue('eval-donow', exlItem(ctx.fx.exl, { doNowCommand: 'curl -k https://example.com/version' }))
+  const r = await admin('POST', `/api/truth/issues/${d.id}/publish`)
+  return ok(any.length === 0 && grid.summary.templateErrors === 0 && r.status === 400 && codes(r).includes('safetyBlock'),
+    `${grid.variants.length} variants, findings ${JSON.stringify(any)} · a "do now" command with curl -k → ${r.status} ${JSON.stringify(codes(r))}`)
+})
+
+// ── G2.4 ──
+
+check('G2.4', 'a guide publishes only after the grid is opened since the last edit, every warning acknowledged, and the 4 ticks', async () => {
+  const id = await makeGuide('exl-gating', PUBLISH_STEPS)
+  const steps = []
+  const attempt = async (label) => { const r = await admin('POST', `/api/truth/guides/${id}/publish`); steps.push(`${label}: ${r.status}${r.status === 400 ? ' ' + JSON.stringify([...new Set(codes(r))]) : ''}`); return r }
+  const a = await attempt('fresh')
+  const grid = (await admin('POST', `/api/truth/guides/${id}/grid`)).json
+  const b = await attempt('grid opened')
+  const warns = grid.variants.flatMap((v) => v.findings.filter((f) => f.level === 'warn'))
+  const shortNote = await admin('POST', `/api/truth/guides/${id}/ack`, { findingKey: warns[0]?.key, note: 'ok' })
+  for (const f of warns) await admin('POST', `/api/truth/guides/${id}/ack`, { findingKey: f.key, note: 'Checked on a test server: harmless on 3.1.' })
+  const c = await attempt('warnings acknowledged')
+  await admin('PUT', `/api/truth/guides/${id}/checklist`, { tested: true, verify: true, undo: false, sources: true })
+  const d = await attempt('3 of 4 ticks')
+  await admin('PUT', `/api/truth/guides/${id}/checklist`, { tested: true, verify: true, undo: true, sources: true })
+  const e = await attempt('all 4 ticks')
+  // Edit a step: the grid and the ticks must be done again.
+  const edited = PUBLISH_STEPS.map((s, n) => (n === 1 ? { ...s, titleEn: 'Step: back up the file' } : s))
+  await admin('PUT', `/api/truth/guides/${id}`, guideInput('exl-gating', edited))
+  const after = (await admin('GET', `/api/truth/guides/${id}/check`)).json
+  const general = await generalUser()
+  const notAllowed = await as(general, 'POST', `/api/truth/guides/${id}/publish`)
+  const c1 = codes(a), c2 = codes(b), c3 = codes(c), c4 = codes(d)
+  return ok(a.status === 400 && c1.includes('gridNotOpened') && b.status === 400 && !c2.includes('gridNotOpened') && c2.includes('safetyWarn')
+    && warns.length > 0 && shortNote.status === 400 && c.status === 400 && !c3.includes('safetyWarn') && c3.includes('checklist')
+    && d.status === 400 && c4.includes('checklist') && e.status === 200
+    && after.problems.some((p) => p.code === 'gridNotOpened') && after.problems.some((p) => p.code === 'checklist') && notAllowed.status === 403,
+  `${steps.join(' → ')} · a 2-letter note → ${shortNote.status} · after editing a step: ${JSON.stringify([...new Set(after.problems.map((p) => p.code))])} · a General account publishing → ${notAllowed.status}`)
+})
+
+check('G2.4', 'a block-level finding can be neither acknowledged nor published past; the public guide shows warnings, never the notes', async () => {
+  const id = await makeGuide('exl-blocked', PLANTED_STEPS)
+  const grid = (await admin('POST', `/api/truth/guides/${id}/grid`)).json
+  const block = grid.variants.flatMap((v) => v.findings).find((f) => f.level === 'block')
+  const ack = await admin('POST', `/api/truth/guides/${id}/ack`, { findingKey: block.key, note: 'trying to acknowledge a block' })
+  await admin('PUT', `/api/truth/guides/${id}/checklist`, { tested: true, verify: true, undo: true, sources: true })
+  const p = await admin('POST', `/api/truth/guides/${id}/publish`)
+  const g = await publishedGuide()
+  const pub = await pub2(`/public/truth/guides/${g.slug}`)
+  const leaked = [/Checked: the directive/, /acknowledg/i, /"note"\s*:/i, /byUserId/i].filter((re) => re.test(pub.text)).map((re) => `${re} near ${JSON.stringify(pub.text.slice(Math.max(0, pub.text.search(re) - 60), pub.text.search(re) + 40))}`)
+  return ok(ack.status === 400 && p.status === 400 && codes(p).includes('safetyBlock') && pub.status === 200 && pub.json.warnings.length > 0 && leaked.length === 0,
+    `ack a block → ${ack.status} · publish → ${p.status} ${JSON.stringify([...new Set(codes(p))])} · the published guide's warnings ${pub.json?.warnings?.length} · a note in its JSON: ${JSON.stringify(leaked)}`)
+})
+
+const pub2 = (p) => call(ctx.api.url, 'GET', p)
+
+// ── G2.5 ──
+
+/** Counts every network call a page makes from here on: fetch, XHR, beacons — and new resource entries. */
+const NET_SPY = `(() => { window.__net = 0; const f = window.fetch; window.fetch = (...a) => { window.__net++; return f(...a) };
+  const o = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (...a) { window.__net++; return o.apply(this, a) };
+  if (navigator.sendBeacon) { const b = navigator.sendBeacon.bind(navigator); navigator.sendBeacon = (...a) => { window.__net++; return b(...a) } }
+  window.__resources = performance.getEntriesByType('resource').length; return 0 })()`
+
+check('G2.5', 'paste-to-compare and the version checker make no network request', async () => {
+  const g = await publishedGuide()
+  const page = await publicPage(`/truth/guide/${g.slug}`, { lang: 'en', settle: 2500 })
+  await page.waitFor('[data-testid="paste-compare"]')
+  await page.eval(NET_SPY)
+  await page.type('[data-testid="paste-compare"]', 'demo.upload_feature => Off\nsomething else')
+  await sleep(400)
+  const compare = await page.eval(`({ result: document.querySelector('[data-testid="compare-result"]')?.textContent.trim(), net: window.__net, res: performance.getEntriesByType('resource').length - window.__resources })`)
+  const issue = await publicPage('/truth', { lang: 'en', settle: 2500 })
+  await issue.waitFor('[data-testid="checker-input"]')
+  await issue.eval(NET_SPY)
+  const results = []
+  for (const v of ['3.1.5', '3.2.4', '9.9', 'nonsense']) {
+    await issue.type('[data-testid="checker-input"]', v)
+    await issue.click('[data-testid="checker-submit"]')
+    results.push(await issue.eval(`document.querySelector('[data-testid="checker-result"]')?.dataset.kind`))
+  }
+  const checker = await issue.eval(`({ net: window.__net, res: performance.getEntriesByType('resource').length - window.__resources })`)
+  return ok(compare.net === 0 && compare.res === 0 && compare.result === 'Matches' && checker.net === 0 && checker.res === 0
+    && JSON.stringify(results) === JSON.stringify(['update', 'safe', 'safe', 'invalid']),
+  `compare: "${compare.result}", requests ${compare.net}, new resources ${compare.res} · checker results ${JSON.stringify(results)}, requests ${checker.net}, new resources ${checker.res}`)
+})
+
+// ── G2.6 ──
+
+check('G2.6', 'the countdown runs on the server\'s clock: right with the visitor\'s clock 2 hours fast', async () => {
+  const f = await setup()
+  // A patch 3 h 20 min from now, with its date and time in the source, as rule 4 wants.
+  const at = new Date(Math.ceil((Date.now() + (3 * 60 + 20) * 60_000) / 60_000) * 60_000)
+  const iso = at.toISOString().replace('.000', '')
+  const src = { ...exlItem(f.exl).sources[0], fetchedText: `${EXL_SOURCE} The release is set for ${iso.slice(0, 10)} at ${iso.slice(11, 16)} UTC.` }
+  const d = await draftIssue('eval-countdown', exlItem(f.exl, { patchScheduledAt: iso, sources: [src] }))
+  const p = await admin('POST', `/api/truth/issues/${d.id}/publish`)
+  const page = await ctx.browser.page()
+  await page.viewport(390, 800)
+  await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const R = Date, shift = 2 * 3600 * 1000;
+    class Shifted extends R { constructor(...a) { a.length ? super(...a) : super(R.now() + shift) } static now() { return R.now() + shift } }
+    window.Date = Shifted })()` })
+  await page.goto(`${ctx.vercel.url}/truth/eval-countdown?lang=en`, 2500)
+  await page.waitFor('[data-testid="countdown"]')
+  const shown = await page.eval(`({ text: document.querySelector('[data-testid="countdown"]').textContent.trim(), skew: Date.now() - performance.timeOrigin - performance.now() })`)
+  await page.type('[data-testid="checker-input"]', '3.1.5')
+  await page.click('[data-testid="checker-submit"]')
+  const checker = await page.eval(`document.querySelector('[data-testid="checker-result"]')?.dataset.kind`)
+  const mins = Math.ceil((at.getTime() - Date.now()) / 60_000)
+  const want = [mins, mins - 1, mins + 1].map((m) => `in ${Math.floor(m / 60)} h ${m % 60} min`)
+  return ok(p.status === 200 && want.includes(shown.text) && Math.abs(shown.skew - 2 * 3600_000) < 60_000 && checker === 'notYet',
+    `version checker for 3.1.5 → ${checker} · visitor clock ${(shown.skew / 3600_000).toFixed(2)} h fast · shown "${shown.text}" · expected one of ${JSON.stringify(want)} (by the device clock it would say about ${Math.floor((mins - 120) / 60)} h ${(mins - 120) % 60} min)`)
+})
+
+// ── G2.7 ──
+
+check('G2.7', '/truth/s/issue/:slug: readable HTML with Open Graph tags in the requested language, no JavaScript', async () => {
+  await setup()
+  const out = {}
+  for (const lang of ['bn', 'en']) {
+    const r = await viaVercel(`/truth/s/issue/${ISSUE.slug}?lang=${lang}`)
+    const og = Object.fromEntries([...r.text.matchAll(/<meta property="og:([a-z:_]+)" content="([^"]*)"/g)].map((m) => [m[1], m[2]]))
+    out[lang] = { status: r.status, type: r.headers.get('content-type'), csp: !!r.headers.get('content-security-policy'), og,
+      htmlLang: (r.text.match(/<html lang="(\w+)"/) ?? [])[1], scripts: (r.text.match(/<script/g) ?? []).length,
+      refs: (r.text.match(/class="refs"/g) ?? []).length, title: r.text.includes(lang === 'en' ? ISSUE.titleEn : ISSUE.titleBn) }
+  }
+  const current = await viaVercel('/truth/s/issue/current?lang=en')
+  const page = await ctx.browser.page()
+  await page.cdp('Emulation.setScriptExecutionDisabled', { value: true })
+  await page.goto(`${ctx.vercel.url}/truth/s/issue/${ISSUE.slug}?lang=en`, 800)
+  const noJs = await page.eval('document.body.innerText')
+  const noscript = fs.readFileSync(path.join(DIST, 'truth.html'), 'utf8').includes('/truth/s/issue/current?lang=')
+  const good = (o, lang) => o.status === 200 && /text\/html/.test(o.type) && o.csp && o.og.title && o.og.description && o.og.url?.includes(`/truth/s/issue/${ISSUE.slug}?lang=${lang}`)
+    && o.og.locale === (lang === 'bn' ? 'bn_BD' : 'en_US') && o.htmlLang === lang && o.scripts === 0 && o.refs >= 2 && o.title
+  return ok(good(out.bn, 'bn') && good(out.en, 'en') && current.status === 200 && noJs.includes(ISSUE.titleEn) && noscript,
+    `${JSON.stringify(out)} · /current ${current.status} · readable with JavaScript off: ${noJs.includes(ISSUE.titleEn)} · the shell's <noscript> points here: ${noscript}`)
+})
+
+check('G2.7', '/truth/s/guide/:slug: the steps for the default platform and versions, OG tags, both languages, no JavaScript', async () => {
+  const g = await publishedGuide()
+  const out = {}
+  for (const lang of ['bn', 'en']) {
+    const r = await viaVercel(`/truth/s/guide/${g.slug}?lang=${lang}`)
+    out[lang] = { status: r.status, ogTitle: (r.text.match(/<meta property="og:title" content="([^"]*)"/) ?? [])[1], htmlLang: (r.text.match(/<html lang="(\w+)"/) ?? [])[1],
+      scripts: (r.text.match(/<script(?![^<]*__pwned)/g) ?? []).length, rendered: r.text.includes('/etc/exl/3.2/exl.ini') && !r.text.includes('{{'),
+      escaped: r.text.includes('&lt;script&gt;window.__pwned=1&lt;/script&gt;'), steps: (r.text.match(/<li class="step /g) ?? []).length }
+  }
+  const ok2 = (o, lang) => o.status === 200 && o.htmlLang === lang && o.ogTitle && o.scripts === 0 && o.rendered && o.escaped && o.steps >= 5
+  return ok(ok2(out.bn, 'bn') && ok2(out.en, 'en') && out.en.ogTitle.startsWith('ExampleLang: turn'), JSON.stringify(out))
+})
+
+// ── G2.8 ──
+
+check('G2.8', 'references are numbered 1…n, and every [n] in a summary points to a reference that exists', async () => {
+  await setup()
+  const page = await publicPage('/truth', { lang: 'en' })
+  await page.waitFor('[data-item-id]')
+  const r = await page.eval(`[...document.querySelectorAll('[data-item-id]')].map((card) => {
+    const id = card.dataset.itemId
+    const refs = [...card.querySelectorAll('[data-safety="references"] li')].map((li) => li.id)
+    const numbered = refs.every((x, n) => x === 'ref-' + id + '-' + (n + 1))
+    const cites = [...card.querySelectorAll('[data-testid="item-summary"] a[href^="#ref-"]')].map((a) => a.getAttribute('href').slice(1))
+    return { id, refs: refs.length, numbered, cites, dangling: cites.filter((c) => !document.getElementById(c)) }
+  })`)
+  const d = await draftIssue('eval-cite', exlItem(ctx.fx.exl, { summaryBn: 'দেখুন [1] আর [3]।' }))
+  const refused = await admin('POST', `/api/truth/issues/${d.id}/publish`)
+  return ok(r.length > 0 && r.every((c) => c.numbered && c.refs > 0 && c.dangling.length === 0) && r.some((c) => c.cites.length > 0) && codes(refused).includes('citation'),
+    `${JSON.stringify(r)} · a summary citing [3] with one source → ${refused.status} ${JSON.stringify([...new Set(codes(refused))])}`)
+})
+
+// ── G2.9 ──
+
+check('G2.9', 'corrections keep their history: append-only, in order, on items and guides', async () => {
+  const f = await setup()
+  await admin('POST', `/api/truth/items/${f.demoItem}/corrections`, { textBn: 'প্রথম সংশোধন: সময় ঠিক করা হয়েছে।' })
+  await sleep(1100)
+  await admin('POST', `/api/truth/items/${f.demoItem}/corrections`, { textBn: 'দ্বিতীয় সংশোধন: অঞ্চল ঠিক করা হয়েছে।' })
+  await admin('POST', `/api/truth/issues/${f.issueId}/publish`)
+  const item = (await pub2('/public/truth/current')).json.items.find((i) => i.id === f.demoItem)
+  const texts = item.corrections.map((c) => c.textBn)
+  const ordered = item.corrections.every((c, n, a) => n === 0 || a[n - 1].at <= c.at)
+  const rows = await sql('SELECT COUNT(*) n FROM TrCorrections WHERE ItemId = ?', f.demoItem)
+  const edit = await admin('PUT', `/api/truth/items/${f.demoItem}/corrections`, { textBn: 'x' })
+  const del = await admin('DELETE', `/api/truth/items/${f.demoItem}/corrections`)
+  const g = await publishedGuide()
+  await admin('POST', `/api/truth/guides/${g.id}/corrections`, { textBn: 'গাইডের একটি সংশোধন।' })
+  const gc = (await admin('GET', `/api/truth/guides/${g.id}`)).json.corrections.length
+  return ok(texts.includes('প্রথম সংশোধন: সময় ঠিক করা হয়েছে।') && texts.includes('দ্বিতীয় সংশোধন: অঞ্চল ঠিক করা হয়েছে।') && ordered && rows[0].n === item.corrections.length
+    && [404, 405].includes(edit.status) && [404, 405].includes(del.status) && gc >= 1,
+  `${item.corrections.length} corrections in public, in order: ${ordered} · rows ${rows[0].n} · edit → ${edit.status}, delete → ${del.status} · guide corrections ${gc}`)
+})
+
+check('G2.9', 'RSS is valid in both languages: issues and guides, each with title, link, guid and date', async () => {
+  await publishedGuide()
+  const page = await ctx.browser.page()
+  await page.goto(`${ctx.vercel.url}/truth?lang=bn`, 300)
+  const out = {}
+  for (const lang of ['bn', 'en']) {
+    const r = await viaVercel(`/truth-api/feed.xml?lang=${lang}`)
+    const parsed = await page.eval(`(() => { const d = new DOMParser().parseFromString(${JSON.stringify(r.text)}, 'application/xml');
+      if (d.querySelector('parsererror')) return { error: d.querySelector('parsererror').textContent.slice(0, 120) }
+      const ch = d.querySelector('rss > channel'), items = [...d.querySelectorAll('item')]
+      return { version: d.documentElement.getAttribute('version'), title: ch?.querySelector('title')?.textContent, language: ch?.querySelector('language')?.textContent,
+        items: items.length, complete: items.every((i) => ['title', 'link', 'guid', 'pubDate'].every((k) => i.querySelector(k)?.textContent) && !isNaN(Date.parse(i.querySelector('pubDate').textContent))),
+        links: items.map((i) => i.querySelector('link').textContent), firstTitle: items[0]?.querySelector('title')?.textContent } })()`)
+    out[lang] = { status: r.status, type: r.headers.get('content-type'), ...parsed }
+  }
+  const good = (o, lang) => o.status === 200 && /rss\+xml/.test(o.type) && !o.error && o.version === '2.0' && o.items >= 2 && o.complete
+    && o.links.every((l) => l.includes(`lang=${lang}`)) && o.links.some((l) => l.includes('/truth/guide/'))
+  return ok(good(out.bn, 'bn') && good(out.en, 'en') && /[ঀ-৿]/.test(out.bn.title) && !/[ঀ-৿]/.test(out.en.title), JSON.stringify(out))
+})
+
+check('G2.x', 'screenshots: the guide page and the admin variant grid at 360 px, both themes and both languages', async () => {
+  const g = await publishedGuide()
+  const shots = ctx.args.shots ?? path.join(EVAL_ROOT, 'shots')
+  fs.mkdirSync(shots, { recursive: true })
+  const taken = []
+  for (const theme of ['dark', 'light']) for (const lang of ['bn', 'en']) {
+    const page = await publicPage(`/truth/guide/${g.slug}`, { lang })
+    await page.eval(`localStorage.setItem('rabbitic-theme', '${theme}'); 0`)
+    await page.reload()
+    await page.waitFor('[data-testid="guide-steps"]')
+    const sw = await page.eval(`document.documentElement.scrollWidth <= document.documentElement.clientWidth
+      && [...document.querySelectorAll('[data-testid="guide-steps"] code')].every((c) => getComputedStyle(c).fontVariantLigatures === 'none')`)
+    const file = path.join(shots, `guide-360-${theme}-${lang}.png`)
+    await page.shot(file, { full: true })
+    taken.push({ file: path.basename(file), noScroll: sw })
+  }
+  // The grid of the planted guide (G2.3): blocks and warnings to show. Its row for one variant opened.
+  const planted = ctx.fx.planted ?? await makeGuide('exl-planted', PLANTED_STEPS)
+  const admin360 = await ctx.browser.page()
+  await admin360.viewport(360, 800)
+  await admin360.goto(`${ctx.api.url}/settings`, 300)
+  await admin360.eval(`localStorage.setItem('rabbitic.token', ${JSON.stringify(ctx.admin.token)}); localStorage.setItem('rabbitic.username', ${JSON.stringify(ctx.admin.username)}); localStorage.setItem('rabbitic-theme', 'dark'); 0`)
+  await admin360.goto(`${ctx.api.url}/ministry-of-truth?section=guides&guide=${planted}`, 2500)
+  await admin360.click('[data-truth-open-grid]')
+  await admin360.waitFor('[data-truth-variant-grid]')
+  await sleep(600)
+  await admin360.eval(`document.querySelector('[data-truth-variant-grid]').scrollIntoView({ block: 'start' }); 0`)
+  await sleep(300)
+  await admin360.shot(path.join(shots, 'admin-variant-grid-360-dark.png'))
+  await admin360.eval(`document.querySelector('[data-variant="platform=docker;exl=3.1"] button').click(); 0`)
+  await sleep(400)
+  await admin360.eval(`document.querySelector('[data-variant="platform=docker;exl=3.1"]').scrollIntoView({ block: 'start' }); 0`)
+  await sleep(300)
+  await admin360.shot(path.join(shots, 'admin-variant-grid-360-dark-row-open.png'))
+  const rows = await admin360.eval(`document.querySelectorAll('[data-truth-variant-grid] [data-variant]').length`)
+  return ok(taken.every((x) => x.noScroll) && rows === 20, `${JSON.stringify(taken)} · admin grid rows ${rows} · in ${shots}`)
 })
 
 // ─────────────────────────────── runner ───────────────────────────────
@@ -1161,7 +1617,7 @@ async function main() {
   ctx.args = parseArgs(process.argv.slice(2))
   const user = process.env.TRUTH_EVAL_ADMIN_USER, secret = process.env.TRUTH_EVAL_ADMIN_SECRET
   if (!user || !secret) { console.error('Set TRUTH_EVAL_ADMIN_USER and TRUTH_EVAL_ADMIN_SECRET to the seeded administrator.'); process.exit(2) }
-  const selected = checks.filter((c) => !ctx.args.only || c.id === ctx.args.only)
+  const selected = checks.filter((c) => !ctx.args.only || c.id === ctx.args.only || c.id.startsWith(ctx.args.only + '.'))
   if (!selected.length) { console.error('No checks match.'); process.exit(2) }
   if (ctx.args.shots) fs.mkdirSync(ctx.args.shots, { recursive: true })
 
@@ -1180,7 +1636,8 @@ async function main() {
   ctx.tunnelPort = await freePort()
   let failed = 0
   try {
-    ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir, env: { Truth__Tunnel__Port: String(ctx.tunnelPort) } })
+    const files = registryFiles(runDir)
+    ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir, env: { Truth__Tunnel__Port: String(ctx.tunnelPort), Truth__PlatformsFile: files.platforms, Truth__DirectivesFile: files.directives } })
     ctx.admin = await login(user, secret)
     ctx.vercel = await startVercelLocal({ dist: DIST, config: path.join(WEB, 'vercel.json'), tunnel: `http://127.0.0.1:${ctx.tunnelPort}` })
     ctx.browser = await launchBrowser({ base: ctx.vercel.url, profileRoot: path.join(EVAL_ROOT, 'profiles') })

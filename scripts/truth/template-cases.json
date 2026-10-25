@@ -1,0 +1,25 @@
+{
+  "description": "G2.1: the guide template renderer, case by case. scripts/truth-eval.mjs runs every case through frontend/src/truth/lib/template.js and through the backend's GuideTemplate (POST /api/truth/guides/render); both must give `text` exactly, and errors exactly when `errors` is true.",
+  "cases": [
+    { "name": "plain text passes through", "template": "sudo systemctl restart php-fpm", "values": {}, "text": "sudo systemctl restart php-fpm", "errors": false },
+    { "name": "a placeholder", "template": "php{{php}}-fpm", "values": { "php": "8.4" }, "text": "php8.4-fpm", "errors": false },
+    { "name": "two placeholders and spaces inside the braces", "template": "/etc/php/{{ php }}/{{sapi}}/php.ini", "values": { "php": "8.3", "sapi": "fpm" }, "text": "/etc/php/8.3/fpm/php.ini", "errors": false },
+    { "name": "an unknown placeholder stays and is reported", "template": "echo {{nope}}", "values": {}, "text": "echo {{nope}}", "errors": true },
+    { "name": "if, true", "template": "a{{#if php>=8.5}}b{{/if}}c", "values": { "php": "8.5" }, "text": "abc", "errors": false },
+    { "name": "if, false", "template": "a{{#if php>=8.5}}b{{/if}}c", "values": { "php": "8.4" }, "text": "ac", "errors": false },
+    { "name": "versions compare as versions, not as text", "template": "{{#if php>8.9}}new{{else}}old{{/if}}", "values": { "php": "8.10" }, "text": "new", "errors": false },
+    { "name": "else", "template": "{{#if platform==docker}}image{{else}}host{{/if}}", "values": { "platform": "rhel" }, "text": "host", "errors": false },
+    { "name": "a line that is only a tag goes whole", "template": "one\n{{#if php>=8.5}}\ntwo\n{{/if}}\nthree\n", "values": { "php": "8.4" }, "text": "one\nthree\n", "errors": false },
+    { "name": "the same lines, condition true", "template": "one\n{{#if php>=8.5}}\ntwo\n{{/if}}\nthree\n", "values": { "php": "8.5" }, "text": "one\ntwo\nthree\n", "errors": false },
+    { "name": "nested ifs", "template": "{{#if platform==docker}}D{{#if php<8.3}}-old{{/if}}{{/if}}", "values": { "platform": "docker", "php": "8.2" }, "text": "D-old", "errors": false },
+    { "name": "an inner if of a false branch prints nothing", "template": "{{#if platform==docker}}D{{#if php<8.3}}-old{{/if}}{{/if}}x", "values": { "platform": "rhel", "php": "8.2" }, "text": "x", "errors": false },
+    { "name": "&& binds before ||", "template": "{{#if php==8.2 && platform==docker || platform==alpine}}y{{else}}n{{/if}}", "values": { "php": "8.4", "platform": "alpine" }, "text": "y", "errors": false },
+    { "name": "not", "template": "{{#if !fpm}}cli{{/if}}", "values": { "fpm": "false" }, "text": "cli", "errors": false },
+    { "name": "a quoted value", "template": "{{#if sapi==\"apache 2\"}}mod{{/if}}", "values": { "sapi": "apache 2" }, "text": "mod", "errors": false },
+    { "name": "an unclosed if is reported", "template": "{{#if php>=8.5}}x", "values": { "php": "9" }, "text": "x", "errors": true },
+    { "name": "a stray /if is reported", "template": "x{{/if}}", "values": {}, "text": "x", "errors": true },
+    { "name": "a <script> in the template stays text", "template": "echo '<script>window.__pwned=1</script>' # {{php}}", "values": { "php": "8.4" }, "text": "echo '<script>window.__pwned=1</script>' # 8.4", "errors": false },
+    { "name": "a <script> in a value stays text", "template": "set {{v}}", "values": { "v": "<script>alert(1)</script>" }, "text": "set <script>alert(1)</script>", "errors": false },
+    { "name": "no eval: an expression is not run", "template": "{{#if constructor}}x{{/if}}{{__proto__}}", "values": {}, "text": "{{__proto__}}", "errors": true }
+  ]
+}

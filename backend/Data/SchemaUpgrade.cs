@@ -42,6 +42,12 @@ public static class SchemaUpgrade
         EnsureTablesFromModel(db, "Tr");
         // Memes and the glossary joined the site text as content kinds (docs/TRUTH_PROMPT.md v4).
         AddColumnIfMissing(db, "TrSiteContents", "Kind", @"ALTER TABLE ""TrSiteContents"" ADD COLUMN ""Kind"" TEXT NOT NULL DEFAULT 'site';");
+        // Fix guides (P2): guide sources, "do now" and EOL lines, on tables P1 made.
+        AddColumnIfMissing(db, "TrSources", "GuideId", @"ALTER TABLE ""TrSources"" ADD COLUMN ""GuideId"" INTEGER NULL;");
+        AddColumnIfMissing(db, "TrItems", "DoNowCommand", @"ALTER TABLE ""TrItems"" ADD COLUMN ""DoNowCommand"" TEXT NULL;");
+        AddColumnIfMissing(db, "TrItems", "DoNowLanguage", @"ALTER TABLE ""TrItems"" ADD COLUMN ""DoNowLanguage"" TEXT NULL;");
+        AddColumnIfMissing(db, "TrItems", "RotateKeysJson", @"ALTER TABLE ""TrItems"" ADD COLUMN ""RotateKeysJson"" TEXT NOT NULL DEFAULT '[]';");
+        AddColumnIfMissing(db, "TrTechs", "EolLinesJson", @"ALTER TABLE ""TrTechs"" ADD COLUMN ""EolLinesJson"" TEXT NOT NULL DEFAULT '[]';");
         AddColumnIfMissing(db, "Conversations", "Scope", @"ALTER TABLE ""Conversations"" ADD COLUMN ""Scope"" TEXT NULL;");
         AddColumnIfMissing(db, "Messages", "MetaJson", @"ALTER TABLE ""Messages"" ADD COLUMN ""MetaJson"" TEXT NULL;");
         EnsureRoleModelPolicyTable(db);

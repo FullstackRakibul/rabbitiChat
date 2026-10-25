@@ -47,6 +47,8 @@ public static class TruthSnapshot
                     ["monogram"] = tech.Monogram,
                     ["hue"] = tech.Hue,
                     ["homepage"] = tech.Homepage,
+                    ["versionLines"] = new JsonArray(TruthJson.Strings(tech.VersionLinesJson).Select(v => (JsonNode?)v).ToArray()),
+                    ["eolLines"] = new JsonArray(TruthJson.Strings(tech.EolLinesJson).Select(v => (JsonNode?)v).ToArray()),
                 },
                 ["severity"] = item.Severity,
                 ["status"] = item.Status,
@@ -60,6 +62,9 @@ public static class TruthSnapshot
                 ["impactEn"] = Blank(item.ImpactEn),
                 ["whatToDoBn"] = Blank(item.WhatToDoBn),
                 ["whatToDoEn"] = Blank(item.WhatToDoEn),
+                ["doNowCommand"] = Blank(item.DoNowCommand),
+                ["doNowLanguage"] = Blank(item.DoNowLanguage),
+                ["rotateKeys"] = JsonNode.Parse(string.IsNullOrWhiteSpace(item.RotateKeysJson) ? "[]" : item.RotateKeysJson),
                 ["tags"] = new JsonArray(TruthJson.Strings(item.TagsJson).Select(t => (JsonNode?)t).ToArray()),
                 ["author"] = item.AuthorName,
                 ["advisories"] = new JsonArray(c.Advisories[item.Id].OrderBy(a => a.Order).Select(a => (JsonNode?)new JsonObject

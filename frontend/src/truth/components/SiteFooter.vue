@@ -28,6 +28,7 @@ watch(() => [view.id, view.mood, view.memeRev, view.footerSlot], () => {
       <div class="mt-2"><SeriousSwitch /></div>
       <ul class="m-0 mt-3 flex list-none flex-wrap gap-x-4 p-0">
         <li><Link to="/truth" class="inline-flex min-h-11 items-center">{{ t('nav.home') }}</Link></li>
+        <li><Link to="/truth/guides" class="inline-flex min-h-11 items-center">{{ t('nav.guides') }}</Link></li>
         <li><Link to="/truth/glossary" class="inline-flex min-h-11 items-center">{{ t('nav.glossary') }}</Link></li>
         <li><Link to="/truth/about" class="inline-flex min-h-11 items-center">{{ t('nav.about') }}</Link></li>
         <li><a :href="rssUrl(lang)" class="inline-flex min-h-11 items-center">{{ t('footer.rss') }}</a></li>

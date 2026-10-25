@@ -5,20 +5,24 @@
 // until then, and whenever the backend can't be reached, the built-in ones keep
 // the page readable. Each route is a new view for the theme: a fresh mood and
 // mascot pose, and memes that don't repeat within it.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useI18n } from './lib/i18n.js'
 import SiteHeader from './components/SiteHeader.vue'
 import SiteFooter from './components/SiteFooter.vue'
 import GlossarySheet from './components/GlossarySheet.vue'
 import IssuePage from './pages/IssuePage.vue'
-import AboutPage from './pages/AboutPage.vue'
-import GlossaryPage from './pages/GlossaryPage.vue'
 import Room101 from './pages/Room101.vue'
 import { route } from './lib/router.js'
 import { applySiteText } from './lib/i18n.js'
 import { applyGlossary, closeTerm } from './lib/glossary.js'
 import { applyMemes, newView } from './lib/theme.js'
 import { load, rssUrl } from './lib/api.js'
+
+// The issue page is the first paint; the other pages load when they are opened.
+const AboutPage = defineAsyncComponent(() => import('./pages/AboutPage.vue'))
+const GlossaryPage = defineAsyncComponent(() => import('./pages/GlossaryPage.vue'))
+const GuidePage = defineAsyncComponent(() => import('./pages/GuidePage.vue'))
+const GuidesPage = defineAsyncComponent(() => import('./pages/GuidesPage.vue'))
 
 const { t, locale } = useI18n()
 const pageTitle = ref(null)
@@ -65,6 +69,8 @@ watch([docTitle, locale], () => {
   <main id="main" class="min-h-screen">
     <AboutPage v-if="route.name === 'about'" @title="pageTitle = $event" />
     <GlossaryPage v-else-if="route.name === 'glossary'" @title="pageTitle = $event" />
+    <GuidesPage v-else-if="route.name === 'guides'" @title="pageTitle = $event" />
+    <GuidePage v-else-if="route.name === 'guide'" :slug="route.slug" @title="pageTitle = $event" />
     <Room101 v-else-if="route.name === 'notFound'" />
     <IssuePage v-else :slug="route.slug" @title="pageTitle = $event" />
   </main>

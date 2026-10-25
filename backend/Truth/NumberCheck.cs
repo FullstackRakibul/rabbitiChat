@@ -212,11 +212,16 @@ public static partial class NumberCheck
     /// <summary>Every number the item shows, whether a source has it, and any hand verification.</summary>
     public static List<NumberFinding> Run(
         TrItem item, IReadOnlyList<TrAdvisory> advisories, IReadOnlyList<TrTimelineEvent> timeline,
-        IReadOnlyList<TrSource> sources, IReadOnlyDictionary<string, string> handVerified)
+        IReadOnlyList<TrSource> sources, IReadOnlyDictionary<string, string> handVerified) =>
+        Run(PublicFields(item, advisories, timeline), sources, handVerified);
+
+    /// <summary>The same check over any public fields — a guide's title, intro and step texts.</summary>
+    public static List<NumberFinding> Run(
+        IEnumerable<(string Field, string Text)> publicFields, IReadOnlyList<TrSource> sources, IReadOnlyDictionary<string, string> handVerified)
     {
         var corpus = new Corpus(sources.SelectMany(s => new[] { s.Title, s.FetchedText }));
         var byToken = new Dictionary<(string, string), List<string>>();
-        foreach (var (field, text) in PublicFields(item, advisories, timeline))
+        foreach (var (field, text) in publicFields)
         foreach (var key in Extract(Normalise(text)))
         {
             if (!byToken.TryGetValue(key, out var fields)) byToken[key] = fields = new List<string>();

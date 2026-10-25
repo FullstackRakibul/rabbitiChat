@@ -6,7 +6,8 @@
 //   /truth/glossary    the Newspeak Dictionary
 //   /truth/:slug       one published issue
 //   anything else      Room 101
-//   /truth/guides, /truth/guide/:slug arrive with the guides (P2).
+//   /truth/guides      every fix guide
+//   /truth/guide/:slug one fix guide
 
 import { reactive } from 'vue'
 
@@ -17,7 +18,9 @@ function parse() {
   if (parts[0] !== 'truth' || parts.length === 1) return { name: 'home', slug: null }
   if (parts.length === 2 && parts[1] === 'about') return { name: 'about', slug: null }
   if (parts.length === 2 && parts[1] === 'glossary') return { name: 'glossary', slug: null }
-  if (parts.length === 2 && /^[a-z0-9][a-z0-9-]{0,39}$/.test(parts[1]) && !['guides', 'guide'].includes(parts[1])) return { name: 'issue', slug: parts[1] }
+  if (parts.length === 2 && parts[1] === 'guides') return { name: 'guides', slug: null }
+  if (parts.length === 3 && parts[1] === 'guide' && /^[a-z0-9][a-z0-9-]{0,59}$/.test(parts[2])) return { name: 'guide', slug: parts[2] }
+  if (parts.length === 2 && /^[a-z0-9][a-z0-9-]{0,39}$/.test(parts[1]) && parts[1] !== 'guide') return { name: 'issue', slug: parts[1] }
   return { name: 'notFound', slug: null }
 }
 

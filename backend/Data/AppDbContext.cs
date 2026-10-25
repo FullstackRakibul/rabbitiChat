@@ -48,6 +48,11 @@ public class AppDbContext : DbContext
     public DbSet<TrCorrection> TrCorrections => Set<TrCorrection>();
     public DbSet<TrSnapshot> TrSnapshots => Set<TrSnapshot>();
     public DbSet<TrSiteContent> TrSiteContents => Set<TrSiteContent>();
+    public DbSet<TrGuide> TrGuides => Set<TrGuide>();
+    public DbSet<TrGuideStep> TrGuideSteps => Set<TrGuideStep>();
+    public DbSet<TrSafetyFinding> TrSafetyFindings => Set<TrSafetyFinding>();
+    public DbSet<TrGuideSnapshot> TrGuideSnapshots => Set<TrGuideSnapshot>();
+    public DbSet<TrGuideCorrection> TrGuideCorrections => Set<TrGuideCorrection>();
 
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
@@ -141,6 +146,13 @@ public class AppDbContext : DbContext
         b.Entity<TrCorrection>().HasIndex(c => c.ItemId);
         b.Entity<TrSnapshot>().HasIndex(s => new { s.IssueId, s.CreatedAtUtc });
         b.Entity<TrSiteContent>().HasIndex(c => new { c.Kind, c.Status, c.Version });
+        b.Entity<TrSource>().HasIndex(s => s.GuideId);
+        b.Entity<TrGuide>().HasIndex(g => g.Slug).IsUnique();
+        b.Entity<TrGuide>().HasIndex(g => g.ItemId);
+        b.Entity<TrGuideStep>().HasIndex(s => new { s.GuideId, s.Order });
+        b.Entity<TrSafetyFinding>().HasIndex(f => new { f.GuideId, f.FindingKey }).IsUnique();
+        b.Entity<TrGuideSnapshot>().HasIndex(s => new { s.GuideId, s.CreatedAtUtc });
+        b.Entity<TrGuideCorrection>().HasIndex(c => c.GuideId);
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)
