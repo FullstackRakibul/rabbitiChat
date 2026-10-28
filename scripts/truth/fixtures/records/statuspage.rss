@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>DemoCDN Status - Incident History</title>
+    <link>https://status.democdn.example</link>
+    <description>Statuspage</description>
+    <pubDate>{{rfc:-10m}}</pubDate>
+    <item>
+      <title>Cache purges are slow</title>
+      <description>
+&lt;p&gt; &lt;small&gt;{{sp:-10m}}&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Monitoring&lt;/strong&gt; - A fix is out and we are watching purge times. &lt;/p&gt; &lt;p&gt; &lt;small&gt;{{sp:-40m}}&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Investigating&lt;/strong&gt; - Purges take several minutes. &lt;/p&gt;      </description>
+      <pubDate>{{rfc:-40m}}</pubDate>
+      <link>https://status.democdn.example/incidents/cdn77?utm_campaign=x</link>
+      <guid>https://status.democdn.example/incidents/cdn77</guid>
+    </item>
+    <item>
+      <title>Edge nodes upgrade</title>
+      <description>
+&lt;p&gt; &lt;small&gt;{{sp:-5d}}&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Completed&lt;/strong&gt; - The upgrade is done. &lt;/p&gt; &lt;p&gt; &lt;small&gt;{{sp:-5d}}&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Scheduled&lt;/strong&gt; - Edge nodes will be upgraded. &lt;/p&gt;      </description>
+      <pubDate>{{rfc:-5d}}</pubDate>
+      <link>https://status.democdn.example/incidents/cdn70</link>
+      <guid>https://status.democdn.example/incidents/cdn70</guid>
+    </item>
+  </channel>
+</rss>

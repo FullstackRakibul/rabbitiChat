@@ -30,6 +30,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { buildApi, startApi, call, startFakeOllama, API_BIN_DIR } from './oddity-eval.mjs'
 import { launchBrowser } from './lib/headless-browser.mjs'
 import { startVercelLocal } from './truth/vercel-local.mjs'
+import { startFakeFeeds } from './truth/fake-feeds.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const WEB = path.join(REPO, 'frontend')
@@ -1592,6 +1593,480 @@ check('G2.x', 'screenshots: the guide page and the admin variant grid at 360 px,
   return ok(taken.every((x) => x.noScroll) && rows === 20, `${JSON.stringify(taken)} · admin grid rows ${rows} · in ${shots}`)
 })
 
+// ═══════════════════════════════ Phase P5: the Records Department ═══════════════════════════════
+
+/** Where the fake feed server answers, under invented names the API maps to it (Truth:Records:TestHosts). */
+const FEEDS = 'https://feeds.example.test'
+const FEED_FILES = {
+  '/demoai/feed.rss': 'incidentio-1.rss', '/demohost/history.atom': 'statuspage.atom', '/democdn/history.rss': 'statuspage.rss',
+  '/demoqueue/history.rss': 'statuspage.rss', '/kev.json': 'kev.json', '/exl/news.rss': 'project-news.rss',
+  '/community/feed.atom': 'community.atom', '/news/feed.rss': 'news.rss', '/gh/advisories.json': 'advisories.json',
+  '/eol/examplelang.json': 'eol.json', '/polite.rss': 'news.rss', '/blog/notes-324.html': 'blog-post.html',
+  '/private/draft.html': 'blog-post.html',
+}
+
+/**
+ * The eval's registry: invented status pages, advisories, news and the sources G5.4 and G5.5 need to
+ * fail. Status pages and the bulk feed are on, so the collector's own loop fetches them at start;
+ * the rest are off and collected by hand ("Collect now") when a check needs them.
+ */
+function recordsFiles(runDir, port) {
+  const src = (id, name, kind, adapter, url, over = {}) => ({ id, name, kind, adapter, url, tech: [], tier: 'official', everyMinutes: 5, enabled: false, ...over })
+  const sources = [
+    src('demoai-status', 'DemoAI', 'status', 'incidentio-rss', `${FEEDS}/demoai/feed.rss`, { tech: ['demoai'], enabled: true, monogram: 'DA', homepage: 'https://status.demoai.example' }),
+    src('demohost-status', 'DemoHost', 'status', 'statuspage-feed', `${FEEDS}/demohost/history.atom`, { tech: ['demohost'], enabled: true }),
+    src('democdn-status', 'DemoCDN', 'status', 'statuspage-feed', `${FEEDS}/democdn/history.rss`, { enabled: true }),
+    src('demoqueue-status', 'DemoQueue', 'status', 'statuspage-feed', `${FEEDS}/demoqueue/history.rss`, { enabled: true }),
+    src('bulk', 'Invented bulletins', 'release', 'rss-atom', `${FEEDS}/bulk/feed.rss`, { enabled: true }),
+    src('gh-adv', 'Invented advisory database', 'advisory', 'github-advisories', `${FEEDS}/gh/advisories.json`, { tier: 'authority', enabled: true, tech: ['node'] }),
+    src('kev', 'Invented KEV', 'advisory', 'cisa-kev-json', `${FEEDS}/kev.json`, { tier: 'authority', options: { days: 30 } }),
+    src('exl-news', 'ExampleLang project', 'advisory', 'rss-atom', `${FEEDS}/exl/news.rss`, { tech: ['examplelang'] }),
+    // No "publish": community and news default to the inbox (§2).
+    src('community', 'Example community blog', 'news', 'rss-atom', `${FEEDS}/community/feed.atom`, { tier: 'community' }),
+    src('news', 'Example Tech News', 'news', 'rss-atom', `${FEEDS}/news/feed.rss`, { tier: 'news' }),
+    src('eol-exl', 'endoflife · ExampleLang', 'release', 'endoflife-json', `${FEEDS}/eol/examplelang.json`, { tier: 'community', tech: ['examplelang'] }),
+    src('polite', 'Politeness', 'news', 'rss-atom', `${FEEDS}/polite.rss`, { tier: 'news' }),
+    src('slow', 'Slow', 'news', 'rss-atom', `${FEEDS}/slow.rss`),
+    src('big', 'Big', 'news', 'rss-atom', `${FEEDS}/big.xml`, { maxKB: 64 }),
+    src('fail', 'Failing', 'news', 'rss-atom', `${FEEDS}/fail.rss`),
+    src('bad-xml', 'Malformed XML', 'news', 'rss-atom', `${FEEDS}/bad.xml`),
+    src('bad-json', 'Malformed JSON', 'advisory', 'cisa-kev-json', `${FEEDS}/bad.json`),
+    src('redirect-other', 'Redirect elsewhere', 'news', 'rss-atom', `${FEEDS}/redirect-other`),
+    src('redirect-private', 'Redirect inside', 'news', 'rss-atom', `${FEEDS}/redirect-private`),
+    src('redirect-http', 'Redirect to http', 'news', 'rss-atom', `${FEEDS}/redirect-http`),
+    src('localhost-feed', 'A name for loopback', 'news', 'rss-atom', `https://localhost:${port}/news/feed.rss`),
+    src('literal-ip', 'A private address', 'news', 'rss-atom', `https://127.0.0.1:${port}/news/feed.rss`),
+    src('too-often', 'Too often', 'news', 'rss-atom', `${FEEDS}/news/feed.rss`, { everyMinutes: 1 }),
+    src('plain-http', 'Plain http', 'news', 'rss-atom', 'http://feeds.example.test/news/feed.rss'),
+    src('url-drop', 'URL drop', 'news', 'url-drop', '', { tier: 'community', publish: 'inbox' }),
+  ]
+  const keywords = { examplelang: ['examplelang', 'exl'], demohost: ['demohost'], demoai: ['demoai'], node: ['node', 'node.js', 'npm'] }
+  const files = { sources: path.join(runDir, 'truth-sources.json'), keywords: path.join(runDir, 'tech-keywords.json') }
+  fs.writeFileSync(files.sources, JSON.stringify({ sources }, null, 2))
+  fs.writeFileSync(files.keywords, JSON.stringify(keywords, null, 2))
+  return files
+}
+
+/** Fake routes that misbehave on purpose (G5.4, G5.5), and a 60-item feed for "load more". */
+function misbehave(feeds) {
+  const now = Date.now()
+  const items = Array.from({ length: 60 }, (_, i) => `<item><title>Bulletin ${String(i + 1).padStart(3, '0')}: invented note number ${i + 1}</title>`
+    + `<link>https://bulletins.example/${i + 1}</link><guid>bulletin-${i + 1}</guid><pubDate>${new Date(now - (i + 1) * 3_600_000).toUTCString()}</pubDate>`
+    + `<description>An invented bulletin for the eval.</description></item>`).join('')
+  const bulk = `<?xml version="1.0"?><rss version="2.0"><channel><title>Bulletins</title><link>https://bulletins.example</link><description>x</description>${items}</channel></rss>`
+  feeds.route('/bulk/feed.rss', (req, res) => { res.writeHead(200, { 'Content-Type': 'application/rss+xml' }); res.end(bulk) })
+  feeds.route('/slow.rss', (req, res) => setTimeout(() => { res.writeHead(200, { 'Content-Type': 'application/rss+xml' }); res.end(bulk) }, 4000))
+  feeds.route('/big.xml', (req, res) => { res.writeHead(200, { 'Content-Type': 'application/xml' }); res.end('<rss>' + ' '.repeat(100 * 1024) + '</rss>') })
+  feeds.route('/fail.rss', (req, res) => { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('fake failure') })
+  feeds.route('/bad.xml', (req, res) => { res.writeHead(200, { 'Content-Type': 'application/xml' }); res.end('<rss><channel><item><title>broken') })
+  feeds.route('/bad.json', (req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{ "vulnerabilities": [ not json') })
+  feeds.route('/redirect-other', (req, res) => { res.writeHead(302, { Location: 'https://other.example.test/news/feed.rss' }); res.end() })
+  feeds.route('/redirect-private', (req, res) => { res.writeHead(302, { Location: `https://127.0.0.1:${feeds.port}/news/feed.rss` }); res.end() })
+  feeds.route('/redirect-http', (req, res) => { res.writeHead(301, { Location: 'http://feeds.example.test/news/feed.rss' }); res.end() })
+  feeds.route('/robots.txt', (req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('User-agent: *\nDisallow: /private/\n') })
+}
+
+const records = (method, p, body) => admin(method, `/api/truth/records${p}`, body)
+const collect = async (id) => (await records('POST', `/sources/${id}/run`)).json
+const sourceView = async (id) => (await records('GET', '/sources')).json.sources.find((s) => s.definition.id === id)
+const minutesUntil = (iso) => (Date.parse(iso) - Date.now()) / 60_000
+
+async function sqlWrite(query, ...params) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(ctx.api.dbPath)
+  try { return db.prepare(query).run(...params) } finally { db.close() }
+}
+
+/** The public wire, every page. */
+async function wireRows() {
+  let rows = [], cursor = null
+  do {
+    const r = (await pub2(`/public/truth/wire${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`)).json
+    rows = rows.concat(r.rows)
+    cursor = r.next
+  } while (cursor)
+  return rows
+}
+
+/** The CVE story (G5.3): the project's release note, the KEV entry and the community write-up — the last published from the inbox. */
+async function cveStory() {
+  if (ctx.fx.cveCluster) return ctx.fx.cveCluster
+  await setup()
+  for (const id of ['exl-news', 'kev', 'community']) await collect(id)
+  const [w] = await sql("SELECT Id FROM TrWireEntries WHERE SourceId = 'community'")
+  await records('POST', `/entries/${w.Id}/visibility`, { visibility: 'public' })
+  const [c] = await sql("SELECT ClusterId FROM TrWireEntries WHERE SourceId = 'kev' AND ExternalId = 'CVE-0000-0001'")
+  ctx.fx.cveCluster = c.ClusterId
+  return c.ClusterId
+}
+
+// ── G5.1 ──
+
+check('G5.1', "the collector's own loop fetched the status sources on its own, at start", async () => {
+  const end = Date.now() + 40_000
+  let pending
+  do {
+    const view = (await records('GET', '/sources')).json.sources
+    pending = view.filter((s) => s.definition.enabled && !s.health.lastSuccess).map((s) => s.definition.id)
+    if (!pending.length) break
+    await sleep(1000)
+  } while (Date.now() < end)
+  const fetched = ctx.feeds.requests('/demoai/feed.rss')
+  return ok(pending.length === 0 && fetched.length >= 1, `still waiting on ${JSON.stringify(pending)} · the fake server saw ${fetched.length} request(s) for DemoAI's feed`)
+})
+
+check('G5.1', 'incident.io RSS: titles, UTC times, links normalised ("//" and tracking parameters), states and components', async () => {
+  const rows = await sql("SELECT ExternalId, Title, Url, State, ComponentsJson, PublishedAtUtc FROM TrWireEntries WHERE SourceId = 'demoai-status' ORDER BY ExternalId")
+  const a = rows.find((r) => r.ExternalId.endsWith('01EVALA'))
+  // The fixture's times were filled in when the fake server started: "30 minutes before" that.
+  const age = (ctx.feeds.startedAt - Date.parse(a.PublishedAtUtc + 'Z')) / 60_000
+  return ok(rows.length === 3 && a.Title === 'Elevated errors on DemoAI chat' && a.Url === 'https://status.demoai.example/incidents/01EVALA'
+    && a.State === 'investigating' && a.ComponentsJson === '["Chat API","Playground"]' && Math.abs(age - 30) < 3
+    && rows.find((r) => r.ExternalId.endsWith('01EVALC')).State === 'identified' && rows.find((r) => r.ExternalId.endsWith('01EVALB')).State === 'resolved',
+  JSON.stringify(rows.map((r) => ({ id: r.ExternalId.slice(-6), url: r.Url, state: r.State, components: r.ComponentsJson, at: r.PublishedAtUtc }))) + ` · 01EVALA ${age.toFixed(1)} min before the fixture was served (30 expected)`)
+})
+
+check('G5.1', 'Statuspage Atom and RSS: every update parsed, the newest gives the state; maintenance and "Completed" mapped', async () => {
+  const atom = await sql("SELECT ExternalId, State, UpdatesJson, Url, PublishedAtUtc FROM TrWireEntries WHERE SourceId = 'demohost-status' ORDER BY ExternalId")
+  const rss = await sql("SELECT ExternalId, State, UpdatesJson, Url FROM TrWireEntries WHERE SourceId = 'democdn-status' ORDER BY ExternalId")
+  const build = atom.find((r) => r.ExternalId.endsWith('9001'))
+  const states = JSON.parse(build.UpdatesJson).map((u) => u.state)
+  const cdn = rss.find((r) => r.ExternalId.endsWith('cdn77'))
+  return ok(build.State === 'resolved' && JSON.stringify(states) === '["resolved","identified","investigating"]'
+    && atom.find((r) => r.ExternalId.endsWith('9002')).State === 'maintenance'
+    && cdn.State === 'monitoring' && cdn.Url === 'https://status.democdn.example/incidents/cdn77'
+    && rss.find((r) => r.ExternalId.endsWith('cdn70')).State === 'resolved',
+  JSON.stringify({ atom: atom.map((r) => [r.ExternalId.slice(-4), r.State, JSON.parse(r.UpdatesJson).length]), rss: rss.map((r) => [r.ExternalId.slice(-5), r.State, r.Url]) }))
+})
+
+check('G5.1', 'KEV JSON (30-day window), the advisory database (withdrawn skipped), endoflife.date (EOL lines skipped) and plain RSS', async () => {
+  await setup()
+  const reports = {}
+  for (const id of ['kev', 'eol-exl', 'exl-news']) reports[id] = await collect(id)
+  const kev = await sql("SELECT ExternalId, Severity, Url, Kind FROM TrWireEntries WHERE SourceId = 'kev'")
+  const gh = await sql("SELECT ExternalId, Severity, FactsJson, Excerpt, TechsJson FROM TrWireEntries WHERE SourceId = 'gh-adv'")
+  const eol = await sql("SELECT ExternalId FROM TrWireEntries WHERE SourceId = 'eol-exl' ORDER BY ExternalId")
+  const news = await sql("SELECT Url FROM TrWireEntries WHERE SourceId = 'exl-news' ORDER BY Url")
+  return ok(kev.length === 1 && kev[0].ExternalId === 'CVE-0000-0001' && kev[0].Severity === 'critical' && kev[0].Url === 'https://www.cve.org/CVERecord?id=CVE-0000-0001'
+    && gh.length === 1 && gh[0].Severity === 'high' && JSON.parse(gh[0].FactsJson).fixed.includes('2.1.3') && !gh[0].Excerpt.includes('## Details') && gh[0].TechsJson.includes('node')
+    && JSON.stringify(eol.map((e) => e.ExternalId)) === '["examplelang-3.2.4","examplelang-3.4.9","examplelang-3.5.0"]'
+    && news.every((n) => !n.Url.includes('ref=')),
+  JSON.stringify({ reports: Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, `${r.parsed} parsed, ${r.added} new`])), kev, gh: gh.map((g) => ({ ...g, Excerpt: g.Excerpt.slice(0, 60) })), eol, news }))
+})
+
+check('G5.1', 'malformed XML or JSON: the source records an error; nothing crashes', async () => {
+  const x = await collect('bad-xml')
+  const j = await collect('bad-json')
+  const alive = await pub2('/public/truth/status')
+  const view = await sourceView('bad-xml')
+  return ok(!x.ok && /Malformed XML/.test(x.error) && !j.ok && /Malformed JSON/.test(j.error) && alive.status === 200 && view.health.failures === 1 && /Malformed/.test(view.health.lastError),
+    `XML → ${x.error} · JSON → ${j.error} · /status ${alive.status} · the source: ${view.health.failures} failure, "${view.health.lastError}"`)
+})
+
+// ── G5.2 ──
+
+check('G5.2', 'the same guid fetched twice is one entry; an updated incident is one entry plus one history row', async () => {
+  const again = await collect('demoai-status')
+  const before = await sql("SELECT COUNT(*) n FROM TrWireEntries WHERE SourceId = 'demoai-status'")
+  ctx.feeds.serve('/demoai/feed.rss', 'incidentio-2.rss')
+  const updated = await collect('demoai-status')
+  const [a] = await sql("SELECT Id, State, ClusterId, (SELECT COUNT(*) FROM TrWireEntries WHERE SourceId = 'demoai-status' AND ExternalId LIKE '%01EVALA') n FROM TrWireEntries WHERE SourceId = 'demoai-status' AND ExternalId LIKE '%01EVALA'")
+  const history = await sql('SELECT State FROM TrWireEntryHistories WHERE EntryId = ?', a.Id)
+  const detail = (await pub2(`/public/truth/wire/${a.ClusterId}`)).json
+  const shown = detail.entries[0].history.map((h) => h.state)
+  return ok(again.added === 0 && again.parsed === 3 && before[0].n === 3 && updated.updated === 1 && updated.added === 0 && a.n === 1
+    && a.State === 'resolved' && history.length === 1 && history[0].State === 'investigating' && JSON.stringify(shown) === '["investigating","resolved"]',
+  `second fetch: ${again.parsed} parsed, ${again.added} new · after the update: ${updated.updated} updated, ${updated.added} new · entries for the incident ${a.n}, state ${a.State} · history ${JSON.stringify(history)} · shown ${JSON.stringify(shown)}`)
+})
+
+// ── G5.3 ──
+
+check('G5.3', 'three sources sharing a CVE are one row, "3 sources"; their different fixed versions and patch times show as "Sources differ"', async () => {
+  const id = await cveStory()
+  const row = (await wireRows()).find((r) => r.clusterId === id)
+  const detail = (await pub2(`/public/truth/wire/${id}`)).json
+  const fixed = detail.conflicts.find((c) => c.field === 'fixed' && c.line === '3.2')
+  const time = detail.conflicts.find((c) => c.field === 'patchTime')
+  const names = (c) => Object.fromEntries(c?.values.map((v) => [v.value, v.sources.map((s) => s.name).sort()]) ?? [])
+  return ok(row?.sources === 3 && detail.entries.length === 3
+    && JSON.stringify(names(fixed)) === JSON.stringify({ '3.2.4': ['ExampleLang project', 'Invented KEV'], '3.2.5': ['Example community blog'] })
+    && JSON.stringify(names(time)) === JSON.stringify({ '13:30 UTC': ['Example community blog'], '14:00 UTC': ['ExampleLang project'] }),
+  `row: ${row?.sources} sources, best title "${row?.title}" from ${row?.source.name} (${row?.source.tier}) · fixed ${JSON.stringify(names(fixed))} · patch time ${JSON.stringify(names(time))}`)
+})
+
+check('G5.3', 'without a CVE: the same tech, within 72 hours, similar titles (Jaccard ≥ 0.5) cluster; unrelated ones do not', async () => {
+  await collect('news')
+  const rows = await sql("SELECT SourceId, Title, ClusterId FROM TrWireEntries WHERE SourceId IN ('exl-news', 'news')")
+  const outage = rows.filter((r) => /DemoHost build service outage/.test(r.Title))
+  const other = rows.find((r) => /conference/.test(r.Title))
+  return ok(outage.length === 2 && outage[0].ClusterId === outage[1].ClusterId && other.ClusterId !== outage[0].ClusterId,
+    JSON.stringify(rows))
+})
+
+check('G5.3', 'suggestions for a person: possible urgent (KEV for a tracked tech, a major outage, 3 sources in 24 h) and a new version line — approving it is what changes VersionLines', async () => {
+  await cveStory()
+  const list = (await records('GET', '/suggestions')).json.suggestions
+  const has = (re) => list.find((s) => re.test(s.reason))
+  const line = list.find((s) => s.kind === 'versionLine' && s.payload.line === '3.5')
+  const before = JSON.parse((await admin('GET', '/api/truth/techs')).json.techs.find((t) => t.slug === 'examplelang').versionLinesJson)
+  const approve = await records('POST', `/suggestions/${line?.id}`, { decision: 'approve' })
+  const after = JSON.parse((await admin('GET', '/api/truth/techs')).json.techs.find((t) => t.slug === 'examplelang').versionLinesJson)
+  return ok(has(/KEV entry for examplelang: CVE-0000-0001/) && has(/major outage/i) && has(/3 sources on one story/) && line
+    && !before.includes('3.5') && approve.status === 200 && after.includes('3.5'),
+  `${list.map((s) => `${s.kind}: ${s.reason}`).join(' | ')} · VersionLines before ${JSON.stringify(before)}, after approving ${JSON.stringify(after)}`)
+})
+
+// ── G5.4 ──
+
+check('G5.4', 'polite fetching: our User-Agent; the second fetch is conditional and a 304 is handled', async () => {
+  const first = await collect('polite')
+  const second = await collect('polite')
+  const seen = ctx.feeds.requests('/polite.rss')
+  const ua = seen.every((r) => r.headers['user-agent'] === 'MinistryOfTruthBot/1.0 (+https://mostisko.vercel.app/truth/about)')
+  return ok(first.ok && first.status === 200 && !seen[0].headers['if-none-match'] && seen[1]?.headers['if-none-match'] && seen[1]?.headers['if-modified-since']
+    && second.ok && second.notModified && second.status === 304 && ua,
+  `first ${first.status}, second ${second.status} (notModified ${second.notModified}) · second request sent If-None-Match ${seen[1]?.headers['if-none-match']} and If-Modified-Since ${seen[1]?.headers['if-modified-since']} · UA ${seen[0]?.headers['user-agent']}`)
+})
+
+check('G5.4', 'the timeout, the size cap, backoff 5 → 10 → 20 min, and a source stopped and flagged after 10 failures in a row', async () => {
+  const slow = await collect('slow')
+  const big = await collect('big')
+  const waits = []
+  for (let n = 1; n <= 10; n++) {
+    await collect('fail')
+    if (n <= 4) waits.push(Math.round(minutesUntil((await sourceView('fail')).health.nextRun)))
+  }
+  const fail = await sourceView('fail')
+  return ok(!slow.ok && /Timed out/.test(slow.error) && slow.ms < 3500 && !big.ok && /cap/.test(big.error)
+    && JSON.stringify(waits) === '[5,10,20,40]' && fail.health.flagged && fail.health.failures === 10,
+  `slow → "${slow.error}" in ${slow.ms} ms (timeout set to 2 s) · big → "${big.error}" · minutes to the next try after failures 1–4: ${JSON.stringify(waits)} · after 10: flagged ${fail.health.flagged}, failures ${fail.health.failures}`)
+})
+
+check('G5.4', 'every source at most every 5 minutes: the file\'s 1 is raised to 5, an admin\'s 2 is refused, and the next run is 4–6 minutes out', async () => {
+  const tooOften = await sourceView('too-often')
+  const def = { ...tooOften.definition, everyMinutes: 2 }
+  const refused = await records('PUT', '/sources', def)
+  await collect('news')
+  const next = minutesUntil((await sourceView('news')).health.nextRun)
+  return ok(tooOften.definition.everyMinutes === 5 && refused.status === 400 && next >= 3.9 && next <= 6.1,
+    `the file's 1 → ${tooOften.definition.everyMinutes} · an admin's 2 → ${refused.status} "${refused.json?.error}" · next run in ${next.toFixed(1)} min`)
+})
+
+// ── G5.5 ──
+
+check('G5.5', 'the fetcher refuses http://, private and loopback addresses (by name or number), and redirects to another host, to http or to a private address', async () => {
+  const out = {}
+  for (const id of ['redirect-other', 'redirect-private', 'redirect-http', 'localhost-feed', 'literal-ip']) out[id] = (await collect(id)).error
+  const unknown = await collect('no-such-source')
+  const httpSave = await records('PUT', '/sources', { id: 'http-try', name: 'x', kind: 'news', adapter: 'rss-atom', url: 'http://feeds.example.test/news/feed.rss', tier: 'news', everyMinutes: 30 })
+  const loadErrors = (await records('GET', '/sources')).json.loadErrors
+  return ok(/not in the registry/.test(out['redirect-other']) && /private/.test(out['redirect-private']) && /https/.test(out['redirect-http'])
+    && /private/.test(out['localhost-feed']) && /private/.test(out['literal-ip']) && /Not in the registry/.test(unknown.error)
+    && httpSave.status === 400 && loadErrors.some((e) => e.startsWith('plain-http') && /https/.test(e)),
+  `${JSON.stringify(out)} · an id not in the registry → "${unknown.error}" · an admin's http:// source → ${httpSave.status} · the file's: ${JSON.stringify(loadErrors)}`)
+})
+
+check('G5.5', 'URL drop: robots.txt honoured; the page text is kept privately; only the title and link reach the inbox', async () => {
+  const disallowed = await records('POST', '/drop', { url: 'https://blog.example.test/private/draft.html' })
+  const plain = await records('POST', '/drop', { url: 'http://blog.example.test/blog/notes-324.html' })
+  const inside = await records('POST', '/drop', { url: `https://127.0.0.1:${ctx.feeds.port}/blog/notes-324.html` })
+  const dropped = await records('POST', '/drop', { url: 'https://blog.example.test/blog/notes-324.html' })
+  const [e] = await sql('SELECT Title, Visibility, Excerpt, LENGTH(PageText) n, PageText FROM TrWireEntries WHERE Id = ?', dropped.json?.id ?? 0)
+  return ok(disallowed.status === 400 && /robots/.test(disallowed.json.error) && plain.status === 400 && inside.status === 400 && dropped.status === 201
+    && e.Visibility === 'inbox' && e.Title === 'Notes on the ExampleLang 3.2.4 release — Example Security Blog' && e.n > 100
+    && e.PageText.includes('CVE-0000-0001') && !e.PageText.includes('__shouldNeverRun') && !e.PageText.includes('Home · About'),
+  `disallowed → ${disallowed.status} "${disallowed.json?.error}" · http:// → ${plain.status} · loopback → ${inside.status} "${inside.json?.error}" · allowed → ${dropped.status}: "${e?.Title}", ${e?.Visibility}, page text ${e?.n} chars`)
+})
+
+// ── G5.6 ──
+
+check('G5.6', 'news and community default to the inbox; every public row is marked auto-collected; staff without the publish permission are refused', async () => {
+  await collect('news')
+  const view = (await records('GET', '/sources')).json.sources
+  const pubOf = (id) => view.find((s) => s.definition.id === id).definition.publish
+  const inbox = await sql("SELECT COUNT(*) n FROM TrWireEntries WHERE SourceId = 'news' AND Visibility = 'inbox'")
+  const rows = await wireRows()
+  const fromNews = rows.filter((r) => r.source.id === 'news')
+  const general = await generalUser()
+  const refused = [await as(general, 'POST', '/api/truth/records/sources/news/run'), await as(general, 'GET', '/api/truth/records/inbox'),
+    await as(general, 'POST', '/api/truth/records/suggestions/1', { decision: 'ignore' })].map((r) => r.status)
+  return ok(pubOf('news') === 'inbox' && pubOf('community') === 'inbox' && pubOf('demoai-status') === 'auto' && inbox[0].n === 2 && fromNews.length === 0
+    && rows.length > 0 && rows.every((r) => r.auto === true) && refused.every((s) => s === 403),
+  `publish: news ${pubOf('news')}, community ${pubOf('community')}, status ${pubOf('demoai-status')} · news entries in the inbox ${inbox[0].n}, on the wire ${fromNews.length} · ${rows.length} public rows, all auto: ${rows.every((r) => r.auto === true)} · a General account → ${JSON.stringify(refused)}`)
+})
+
+check('G5.6', "a model's digest stays a draft; an item made from it is a draft item; nothing public carries model text; the collector sends no mail", async () => {
+  const id = await cveStory()
+  ctx.fake.setChatScript((body) => JSON.stringify(body.format ?? {}).includes('summaryBn')
+    ? { words: [JSON.stringify({ summaryBn: 'ডেমো খসড়া সারাংশ: ExampleLang 3.2.4-এ ঠিক হয়েছে।', summaryEn: 'Demo draft summary: fixed in 3.2.9.' })] } : null)
+  const digest = await records('POST', `/clusters/${id}/digest`)
+  ctx.fake.setChatScript(null)
+  const cluster = (await records('GET', `/clusters/${id}`)).json
+  const d = cluster.digests.find((x) => x.id === digest.json?.id)
+  const draft = await draftIssue('eval-wire-item')
+  const item = await records('POST', `/clusters/${id}/item`, { issueId: draft.id, digestId: d?.id })
+  const [made] = await sql('SELECT WireClusterId, SummaryBn FROM TrItems WHERE Id = ?', item.json?.id ?? 0)
+  const publicText = (await pub2('/public/truth/wire')).text + (await pub2(`/public/truth/wire/${id}`)).text + (await pub2('/public/truth/current')).text
+  const detail = (await pub2(`/public/truth/wire/${id}`)).json
+  const mailCode = fs.readdirSync(path.join(REPO, 'backend/Truth/Records')).filter((f) => /smtp|mailkit|sendmail|MailJob/i.test(fs.readFileSync(path.join(REPO, 'backend/Truth/Records', f), 'utf8')))
+  const mailTables = await sql("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%Mail%'")
+  let queued = 0
+  for (const t of mailTables) queued += (await sql(`SELECT COUNT(*) n FROM "${t.name}"`))[0].n
+  return ok(digest.status === 201 && d && d.numberProblems.includes('3.2.9') && item.status === 201 && made?.WireClusterId === id
+    && made.SummaryBn.startsWith('ডেমো খসড়া') && !publicText.includes('Demo draft summary') && !publicText.includes('ডেমো খসড়া') && detail.verified == null
+    && mailCode.length === 0 && queued === 0,
+  `digest ${digest.status}, numbers not in a source ${JSON.stringify(d?.numberProblems)} · draft item ${item.json?.id} in draft issue eval-wire-item, cluster ${made?.WireClusterId} · model text in public JSON: ${publicText.includes('Demo draft summary')} · verified link before publishing: ${detail.verified ?? null} · mail code in Records: ${JSON.stringify(mailCode)} · mail tables ${JSON.stringify(mailTables.map((t) => t.name))}, rows ${queued}`)
+})
+
+// ── G5.7 ──
+
+check('G5.7', 'a source with no good check for over 30 minutes shows "data stale" — never "operational", never its old incident', async () => {
+  const before = (await pub2('/public/truth/status')).json.sources.find((s) => s.id === 'demoqueue-status')
+  ctx.feeds.route('/demoqueue/history.rss', (req, res) => { res.writeHead(503, { 'Content-Type': 'text/plain' }); res.end('down') })
+  await collect('demoqueue-status')
+  await sqlWrite("UPDATE TrWireSourceStates SET LastSuccessAtUtc = ? WHERE SourceId = 'demoqueue-status'", new Date(Date.now() - 40 * 60_000).toISOString().replace('T', ' ').replace('Z', ''))
+  const after = (await pub2('/public/truth/status')).json.sources.find((s) => s.id === 'demoqueue-status')
+  const page = await publicPage('/truth', { lang: 'en', settle: 2500 })
+  await page.waitFor('[data-testid="live-chip"][data-source="demoqueue-status"]')
+  const chip = await page.eval(`(() => { const c = document.querySelector('[data-testid="live-chip"][data-source="demoqueue-status"]'); return { state: c.dataset.state, text: c.innerText } })()`)
+  return ok(before.state === 'incident' && after.state === 'stale' && after.open === null && chip.state === 'stale' && /Data stale/.test(chip.text) && !/Operational/.test(chip.text),
+    `before: ${before.state} · 40 min without a good check: ${after.state}, open incident shown ${after.open !== null} · the chip on the page: ${chip.state}, "${chip.text.replace(/\s+/g, ' ')}"`)
+})
+
+// ── G5.8 ──
+
+const WIRE_ROW_KEYS = ['clusterId', 'kind', 'title', 'at', 'publishedAt', 'source', 'sources', 'severity', 'state', 'cves', 'techs', 'auto', 'verified']
+const WIRE_SOURCE_KEYS = ['id', 'name', 'monogram', 'hue', 'tier', 'homepage']
+const WIRE_ENTRY_KEYS = ['source', 'kind', 'title', 'excerpt', 'url', 'at', 'updatedAt', 'state', 'severity', 'components', 'history']
+const STATUS_CHIP_KEYS = [...WIRE_SOURCE_KEYS, 'state', 'lastChecked', 'open', 'recent']
+
+check('G5.8', 'the public wire and status JSON: only allow-listed fields; no hidden rows, stored page text, notes or error text', async () => {
+  await cveStory()
+  // Hide one public row, with a note.
+  const [victim] = await sql("SELECT Id, Title, ClusterId FROM TrWireEntries WHERE SourceId = 'bulk' ORDER BY Id LIMIT 1")
+  const hidden = await records('POST', `/entries/${victim.Id}/visibility`, { visibility: 'hidden', note: 'eval-hide-note-7c1 for the audit' })
+  const rows = await wireRows()
+  const status = (await pub2('/public/truth/status')).json
+  const details = []
+  for (const r of rows.slice(0, 15)) details.push((await pub2(`/public/truth/wire/${r.clusterId}`)).json)
+  const extraKeys = new Set()
+  const keysOf = (o, allowed, where) => Object.keys(o).filter((k) => !allowed.includes(k)).forEach((k) => extraKeys.add(`${where}.${k}`))
+  rows.forEach((r) => { keysOf(r, WIRE_ROW_KEYS, 'row'); keysOf(r.source, WIRE_SOURCE_KEYS, 'row.source') })
+  details.forEach((d) => d.entries.forEach((e) => { keysOf(e, WIRE_ENTRY_KEYS, 'entry'); keysOf(e.source, WIRE_SOURCE_KEYS, 'entry.source') }))
+  status.sources.forEach((s) => keysOf(s, STATUS_CHIP_KEYS, 'chip'))
+  const all = JSON.stringify(rows) + JSON.stringify(details) + JSON.stringify(status)
+  const leaks = ['This whole paragraph is the page text', 'eval-hide-note-7c1', 'fake failure', 'HTTP 500', 'HTTP 503', 'Timed out', 'Malformed', 'pageText', 'PageText', 'visibility', victim.Title]
+    .filter((s) => all.includes(s))
+  const audit = (await records('GET', '/audit')).json.audit
+  return ok(hidden.status === 200 && extraKeys.size === 0 && leaks.length === 0 && !rows.some((r) => r.clusterId === victim.ClusterId)
+    && audit.some((a) => a.action === 'entry.hidden' && a.note.includes('eval-hide-note-7c1')),
+  `${rows.length} rows, ${details.length} details, ${status.sources.length} chips · fields outside the allow-list ${JSON.stringify([...extraKeys])} · leaked ${JSON.stringify(leaks)} · the hidden row is in the audit with its note: ${audit.some((a) => a.action === 'entry.hidden')}`)
+})
+
+// ── G5.9 ──
+
+check('G5.9', 'the wire at 360 px: rows open and close by tap and by keyboard (aria-expanded, one at a time), no horizontal scroll, filters and search make no request, "load more" uses the cursor', async () => {
+  const id = await cveStory()
+  const page = await publicPage('/truth', { lang: 'en', settle: 3000 })
+  await page.waitFor('[data-testid="wire-row"]')
+  const rowCount = () => page.eval(`document.querySelectorAll('[data-testid="wire-row"]').length`)
+  const before = await rowCount()
+  const btn = (cluster) => `[data-testid="wire-row"][data-cluster="${cluster}"] > button`
+  await page.click(btn(id))
+  await page.waitFor('[data-testid="sources-differ"]')
+  const tapped = await page.eval(`document.querySelector('${btn(id)}').getAttribute('aria-expanded')`)
+  const differ = await page.eval(`document.querySelector('[data-testid="sources-differ"]').innerText`)
+  // Keyboard: focus another row, press Enter — the first closes, this one opens; Space closes it.
+  const other = await page.eval(`document.querySelectorAll('[data-testid="wire-row"]')[1].dataset.cluster`)
+  const key = async (k, code, vk) => {
+    await page.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: k === ' ' ? ' ' : '\r' })
+    await page.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk })
+    await sleep(500)
+  }
+  await page.eval(`document.querySelector('${btn(other)}').focus(); 0`)
+  await key('Enter', 'Enter', 13)
+  const afterEnter = await page.eval(`[document.querySelector('${btn(id)}').getAttribute('aria-expanded'), document.querySelector('${btn(other)}').getAttribute('aria-expanded'), document.querySelectorAll('[aria-expanded="true"][aria-controls^="wire-"]').length]`)
+  await key(' ', 'Space', 32)
+  const afterSpace = await page.eval(`document.querySelector('${btn(other)}').getAttribute('aria-expanded')`)
+  const noScroll = await page.eval('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
+  // Filters and search: in the browser only.
+  await page.eval(NET_SPY)
+  await page.click('[data-filter-type="advisory"]')
+  const advisories = await page.eval(`[...document.querySelectorAll('[data-testid="wire-row"]')].every((r) => r.dataset.kind === 'advisory')`)
+  await page.click('[data-filter-type="all"]')
+  await page.type('[data-testid="wire-search"]', 'CVE-0000-0001')
+  await sleep(300)
+  const searched = await rowCount()
+  const net = await page.eval(`({ net: window.__net, res: performance.getEntriesByType('resource').length - window.__resources })`)
+  await page.type('[data-testid="wire-search"]', '')
+  await sleep(300)
+  // Load more: the next page by cursor.
+  const shownBefore = await rowCount()
+  await page.click('[data-testid="wire-more"]')
+  await sleep(1500)
+  const shownAfter = await rowCount()
+  const cursorUsed = await page.eval(`performance.getEntriesByType('resource').some((e) => e.name.includes('/truth-api/wire?cursor='))`)
+  return ok(tapped === 'true' && /Sources differ/.test(differ) && JSON.stringify(afterEnter) === '["false","true",1]' && afterSpace === 'false' && noScroll
+    && advisories && searched === 1 && net.net === 0 && net.res === 0 && shownAfter > shownBefore && cursorUsed,
+  `rows ${before} · tap → aria-expanded ${tapped}, "Sources differ" shown · Enter on another → ${JSON.stringify(afterEnter)} (first, second, open count) · Space → ${afterSpace} · no sideways scroll ${noScroll} · type filter kept only advisories ${advisories} · search → ${searched} row · requests during filtering ${net.net}, new resources ${net.res} · load more ${shownBefore} → ${shownAfter}, by cursor ${cursorUsed}`)
+})
+
+check('G5.9', 'new rows drop in once — and not in serious mode or with reduced motion; every row carries the auto stamp and a worded pill or none', async () => {
+  const seenNone = async (page) => { await page.eval(`localStorage.setItem('truth-wire-seen', '[]'); 0`) }
+  const anim = async (opts) => {
+    const page = await publicPage('/truth', { lang: 'en', settle: 300, ...opts })
+    await seenNone(page)
+    if (opts.serious) await page.eval(`localStorage.setItem('truth-serious', '1'); 0`)
+    await page.reload()
+    await page.waitFor('[data-testid="wire-row"]')
+    return page.eval(`(() => { const r = document.querySelector('[data-testid="wire-row"].capsule-in') ?? document.querySelector('[data-testid="wire-row"]');
+      return { fresh: document.querySelectorAll('.capsule-in').length, name: getComputedStyle(r).animationName, ms: parseFloat(getComputedStyle(r).animationDuration) * 1000,
+        stamps: [...document.querySelectorAll('[data-testid="wire-row"]')].every((x) => x.querySelector('[data-stamp="auto"]')) } })()`)
+  }
+  const moving = await anim({})
+  const reduced = await anim({ before: (p) => motion(p, 'reduce') })
+  const serious = await anim({ serious: true })
+  return ok(moving.fresh > 0 && moving.name === 'capsule-drop' && moving.ms <= 400 && reduced.name === 'none' && serious.name === 'none' && moving.stamps,
+    `motion allowed: ${moving.fresh} new rows, "${moving.name}" ${moving.ms} ms · reduced motion: "${reduced.name}" · serious mode: "${serious.name}" · auto stamp on every row ${moving.stamps}`)
+})
+
+check('G5.9', 'screenshots: the Telescreen strip and the expanded wire at 360 px, both themes and both languages', async () => {
+  const id = await cveStory()
+  const shots = ctx.args.shots ?? path.join(EVAL_ROOT, 'shots')
+  fs.mkdirSync(shots, { recursive: true })
+  const taken = []
+  for (const theme of ['dark', 'light']) for (const lang of ['bn', 'en']) {
+    const page = await publicPage('/truth', { lang, settle: 300 })
+    await page.eval(`localStorage.setItem('rabbitic-theme', '${theme}'); localStorage.setItem('truth-wire-seen', JSON.stringify([${id}])); 0`)
+    await page.reload()
+    await page.waitFor('[data-testid="live-chip"]')
+    await page.click('[data-testid="live-chip"][data-source="demoai-status"]')
+    await sleep(400)
+    await page.eval(`document.getElementById('live').scrollIntoView({ block: 'start' }); 0`)
+    await sleep(300)
+    const live = path.join(shots, `p5-telescreen-360-${theme}-${lang}.png`)
+    await page.shot(live)
+    await page.click(`[data-testid="wire-row"][data-cluster="${id}"] > button`)
+    await page.waitFor('[data-testid="wire-detail"]')
+    await sleep(400)
+    await page.eval(`document.querySelector('[data-testid="wire-row"][data-cluster="${id}"]').scrollIntoView({ block: 'start' }); 0`)
+    await sleep(300)
+    const wire = path.join(shots, `p5-wire-expanded-360-${theme}-${lang}.png`)
+    await page.shot(wire)
+    const noScroll = await page.eval('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
+    taken.push({ theme, lang, noScroll })
+  }
+  return ok(taken.every((x) => x.noScroll), `${JSON.stringify(taken)} · in ${shots}`)
+})
+
+// ── G5.11 ──
+
+check('G5.11', 'licence check: no new package; every npm and NuGet dependency on the allow-list', async () => {
+  const r = spawnSync('node', [path.join(REPO, 'scripts/license-check.mjs')], { cwd: REPO, encoding: 'utf8' })
+  const summary = (r.stdout.trim().split('\n').slice(-2).join(' ') || r.stderr.slice(-300))
+  return ok(r.status === 0 && /PASS/.test(r.stdout), summary)
+})
+
 // ─────────────────────────────── runner ───────────────────────────────
 
 function parseArgs(argv) {
@@ -1637,7 +2112,19 @@ async function main() {
   let failed = 0
   try {
     const files = registryFiles(runDir)
-    ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir, env: { Truth__Tunnel__Port: String(ctx.tunnelPort), Truth__PlatformsFile: files.platforms, Truth__DirectivesFile: files.directives } })
+    // The Records Department's feeds (P5): a fake server on loopback the API knows under invented names.
+    const tls = selfSignedTls()
+    if (!tls) throw new Error('openssl is needed for the fake feed server (HTTPS)')
+    ctx.feeds = await startFakeFeeds(tls, FEED_FILES, new Set(['/demoai/feed.rss']))
+    misbehave(ctx.feeds)
+    const rec = recordsFiles(runDir, ctx.feeds.port)
+    const hosts = ['feeds.example.test', 'blog.example.test', 'other.example.test'].map((h) => `${h}=127.0.0.1:${ctx.feeds.port}`).join(',')
+    ctx.api = await startApi({ fakeUrl: ctx.fake.url, runDir, env: {
+      Truth__Tunnel__Port: String(ctx.tunnelPort), Truth__PlatformsFile: files.platforms, Truth__DirectivesFile: files.directives,
+      Truth__Records__Enabled: 'true', Truth__Records__SourcesFile: rec.sources, Truth__Records__KeywordsFile: rec.keywords,
+      Truth__Records__TestHosts: hosts, Truth__Records__TestCertFile: path.join(EVAL_ROOT, 'tls', 'cert.pem'),
+      Truth__Records__TimeoutSeconds: '2', Truth__Records__DigestModel: 'fake-ok',
+    } })
     ctx.admin = await login(user, secret)
     ctx.vercel = await startVercelLocal({ dist: DIST, config: path.join(WEB, 'vercel.json'), tunnel: `http://127.0.0.1:${ctx.tunnelPort}` })
     ctx.browser = await launchBrowser({ base: ctx.vercel.url, profileRoot: path.join(EVAL_ROOT, 'profiles') })
@@ -1654,6 +2141,7 @@ async function main() {
     await ctx.browser?.close()
     await ctx.vercel?.stop()
     await ctx.api?.stop()
+    await ctx.feeds?.stop()
     await ctx.fake.stop()
   }
   process.exit(failed ? 1 : 0)

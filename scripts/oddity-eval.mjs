@@ -296,6 +296,9 @@ export async function startApi({ fakeUrl, runDir, port, env: extraEnv, binDir = 
     OllamaCloud__BaseUrl: fakeUrl,
     Logging__LogLevel__Default: 'Warning',
     Logging__LogLevel__Microsoft__AspNetCore: 'Warning',
+    // The Ministry of Truth's Records collector fetches public feeds; no eval may reach the live network.
+    // truth-eval turns it back on, pointed at its own fake feed server.
+    Truth__Records__Enabled: 'false',
 
     // A caller's own settings, applied last so a suite can configure a source
     // this one blanks (model-policy-eval points the cloud source at its fake,

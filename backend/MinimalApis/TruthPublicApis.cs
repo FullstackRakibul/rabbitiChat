@@ -10,6 +10,9 @@
 //   GET /public/truth/share/issue/{slug|current}?lang=   a plain HTML page with OG tags, no JS (/truth/s/issue/…)
 //   GET /public/truth/share/guide/{slug}?lang=           the same for a guide, at its default platform and versions
 //   GET /public/truth/feed.xml?lang=bn|en                RSS 2.0: issues and guides
+//   GET /public/truth/status           the Records Department's live status chips (P5 §4.1), 60 s
+//   GET /public/truth/wire?cursor=&tech=&type=&severity=&tier=&open=   public wire rows, 50 a page (§4.2), 60 s
+//   GET /public/truth/wire/{clusterId} one row expanded: every source, history, "Sources differ"
 //
 // The only routes the tunnel lets through (Truth/TunnelGuard.cs); on Vercel they
 // are /truth-api/*, and the backend answers that spelling too (Program.cs), so
@@ -18,6 +21,7 @@
 // visitor IP (truth-public policy, Program.cs).
 
 using RabbitIC.Api.Truth;
+using RabbitIC.Api.Truth.Records;
 
 namespace RabbitIC.Api.MinimalApis
 {
@@ -93,6 +97,24 @@ namespace RabbitIC.Api.MinimalApis
                 Common(ctx);
                 ctx.Response.Headers.CacheControl = "public, max-age=300";
                 return Results.Text(TruthShare.Feed(issues, guideDocs, await SiteTextAsync(svc, ct), l, BaseUrl(config)), "application/rss+xml; charset=utf-8");
+            });
+
+            g.MapGet("/status", async (HttpContext ctx, RecordsService rec, CancellationToken ct) =>
+            {
+                var json = (await rec.PublicStatusAsync(DateTime.UtcNow, ct)).ToJsonString();
+                return Serve(ctx, json, RecordsService.ETagOf(json), 60);
+            });
+            g.MapGet("/wire", async (string? cursor, string? tech, string? type, string? severity, string? tier, bool? open,
+                HttpContext ctx, RecordsService rec, CancellationToken ct) =>
+            {
+                var json = (await rec.PublicWireAsync(cursor, new RecordsService.WireFilter(tech, type, severity, tier, open ?? false), DateTime.UtcNow, ct)).ToJsonString();
+                return Serve(ctx, json, RecordsService.ETagOf(json), 60);
+            });
+            g.MapGet("/wire/{clusterId:int}", async (int clusterId, HttpContext ctx, RecordsService rec, CancellationToken ct) =>
+            {
+                if (await rec.PublicClusterAsync(clusterId, ct) is not { } cluster) return NotFound(ctx);
+                var json = cluster.ToJsonString();
+                return Serve(ctx, json, RecordsService.ETagOf(json), 60);
             });
 
             g.MapGet("/time", (HttpContext ctx) =>

@@ -58,7 +58,10 @@
         "countdown",
         "checker",
         "donow",
-        "share"
+        "share",
+        "live",
+        "ago",
+        "wire"
       ],
       "properties": {
         "site": {
@@ -1086,7 +1089,9 @@
             "sleeping",
             "privacy",
             "donow",
-            "checker"
+            "checker",
+            "live",
+            "wire"
           ],
           "properties": {
             "board": {
@@ -1148,6 +1153,16 @@
               "type": "string",
               "maxLength": 600,
               "x-placeholders": []
+            },
+            "live": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "wire": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
             }
           }
         },
@@ -1171,7 +1186,8 @@
           "required": [
             "verified",
             "unconfirmed",
-            "corrected"
+            "corrected",
+            "auto"
           ],
           "properties": {
             "verified": {
@@ -1185,6 +1201,11 @@
               "x-placeholders": []
             },
             "corrected": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "auto": {
               "type": "string",
               "maxLength": 600,
               "x-placeholders": []
@@ -1826,6 +1847,430 @@
               "x-placeholders": []
             },
             "openGuide": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "live": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "intro",
+            "operational",
+            "incident",
+            "maintenance",
+            "stale",
+            "checked",
+            "never",
+            "open",
+            "latest",
+            "recent",
+            "none",
+            "viewSource",
+            "staleNote",
+            "staleNever",
+            "checkedNow"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "intro": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "operational": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "incident": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "maintenance": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "stale": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "checked": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "ago"
+              ]
+            },
+            "never": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "open": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "latest": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "recent": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "none": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "viewSource": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "staleNote": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            },
+            "staleNever": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "checkedNow": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            }
+          }
+        },
+        "ago": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "now",
+            "minutes",
+            "hours",
+            "days"
+          ],
+          "properties": {
+            "now": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "minutes": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            },
+            "hours": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            },
+            "days": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            }
+          }
+        },
+        "wire": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title",
+            "intro",
+            "status",
+            "advisory",
+            "release",
+            "news",
+            "official",
+            "authority",
+            "community",
+            "newsTier",
+            "investigating",
+            "identified",
+            "monitoring",
+            "resolved",
+            "maintenanceState",
+            "scheduled",
+            "sources",
+            "fromSource",
+            "history",
+            "allSources",
+            "open",
+            "differ",
+            "differFixed",
+            "differPatchTime",
+            "readVerified",
+            "components",
+            "viewSource",
+            "loadMore",
+            "quiet",
+            "lastCollected",
+            "neverCollected",
+            "filters",
+            "all",
+            "tech",
+            "type",
+            "severity",
+            "tier",
+            "onlyOpen",
+            "search",
+            "searchHint",
+            "noMatch",
+            "filterNote",
+            "loading",
+            "loadError"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "intro": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "status": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "advisory": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "release": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "news": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "official": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "authority": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "community": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "newsTier": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "investigating": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "identified": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "monitoring": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "resolved": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "maintenanceState": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "scheduled": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "sources": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "count"
+              ]
+            },
+            "fromSource": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "history": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "allSources": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "open": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "differ": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "differFixed": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "line"
+              ]
+            },
+            "differPatchTime": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "readVerified": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "components": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "viewSource": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "loadMore": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "quiet": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "lastCollected": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": [
+                "time"
+              ]
+            },
+            "neverCollected": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "filters": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "all": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "tech": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "type": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "severity": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "tier": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "onlyOpen": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "search": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "searchHint": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "noMatch": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "filterNote": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "loading": {
+              "type": "string",
+              "maxLength": 600,
+              "x-placeholders": []
+            },
+            "loadError": {
               "type": "string",
               "maxLength": 600,
               "x-placeholders": []

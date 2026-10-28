@@ -35,6 +35,13 @@ import { pickMeme, setIssueState, view } from '../lib/theme.js'
 
 // Below the items: loaded after the first paint.
 const VersionChecker = defineAsyncComponent(() => import('../components/VersionChecker.vue'))
+const RecordsSection = defineAsyncComponent(() => import('../components/RecordsSection.vue'))
+// The Records Department comes once the page has loaded and the browser is idle: it never competes with the issue.
+const recordsReady = ref(false)
+const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 300))
+const showRecords = () => idle(() => { recordsReady.value = true }, { timeout: 2000 })
+if (document.readyState === 'complete') showRecords()
+else window.addEventListener('load', showRecords, { once: true })
 
 const props = defineProps({ slug: { type: String, default: null } })
 const emit = defineEmits(['title'])
@@ -98,6 +105,7 @@ watch([state, items, () => view.memeRev, () => view.id], () => {
       <p class="text-muted">{{ t('empty.body') }}</p>
       <a :href="rssUrl(lang)" class="inline-flex min-h-11 items-center">{{ t('footer.rss') }}</a>
       <MemeBanner v-if="emptyMeme" :meme="emptyMeme" class="mt-8" />
+      <RecordsSection v-if="!slug && recordsReady" class="mt-10 text-left" />
     </section>
 
     <template v-else>
@@ -122,6 +130,7 @@ watch([state, items, () => view.memeRev, () => view.id], () => {
       <ChipNav :items="items" :archive="archive.length > 0" />
       <div class="mx-auto max-w-3xl space-y-10 px-4 pt-6">
         <StatusBoard :items="items" />
+        <RecordsSection v-if="!slug && recordsReady" />
         <WeekLog :items="items" />
         <MemeBanner v-if="divider" :meme="divider" data-testid="divider-meme" />
         <section id="details" aria-labelledby="details-title" class="scroll-mt-20">

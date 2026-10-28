@@ -1,0 +1,30 @@
+[
+  {
+    "ghsa_id": "GHSA-0000-eval-0001",
+    "cve_id": "CVE-0000-0002",
+    "html_url": "https://github.example/advisories/GHSA-0000-eval-0001",
+    "summary": "demo-parser: crafted input makes the parser loop forever",
+    "description": "The invented npm package demo-parser loops on a crafted input.\n\n## Details\nA long section that the excerpt must not copy.",
+    "type": "reviewed",
+    "severity": "high",
+    "published_at": "{{iso:-5h}}",
+    "updated_at": "{{iso:-5h}}",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      { "package": { "ecosystem": "npm", "name": "demo-parser" }, "vulnerable_version_range": "< 2.1.3", "first_patched_version": "2.1.3" }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-0000-eval-0002",
+    "cve_id": null,
+    "html_url": "https://github.example/advisories/GHSA-0000-eval-0002",
+    "summary": "A withdrawn invented advisory",
+    "description": "Withdrawn.",
+    "type": "reviewed",
+    "severity": "low",
+    "published_at": "{{iso:-9h}}",
+    "updated_at": "{{iso:-8h}}",
+    "withdrawn_at": "{{iso:-8h}}",
+    "vulnerabilities": []
+  }
+]

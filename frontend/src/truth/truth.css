@@ -181,6 +181,17 @@ html:not(.dark) .crack path { stroke: #141410; opacity: 0.35; }
 .redact::after { content: ""; position: absolute; inset: 0; background: #0b0b09; transition: transform .45s ease; }
 .redact:hover::after, .redact.shown::after { transform: translateX(101%); }
 
+/* ---- the Records Department's wire: a teleprinter strip with perforated edges (decoration) ---- */
+.teleprinter { position: relative; padding: 1rem 1.25rem; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); }
+.perforation { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background:
+    radial-gradient(circle at 6px 10px, var(--bg) 3px, transparent 3.5px) left top / 12px 20px repeat-y,
+    radial-gradient(circle at 6px 10px, var(--bg) 3px, transparent 3.5px) right top / 12px 20px repeat-y; }
+/* A new row drops in like a pneumatic-tube capsule: once, under 400 ms; serious mode and reduced motion stop it (below). */
+.capsule-in { animation: capsule-drop 360ms cubic-bezier(.2, .9, .3, 1.2) both; }
+@keyframes capsule-drop { from { opacity: 0; transform: translateY(-14px) scale(.98); } to { opacity: 1; transform: none; } }
+.stamp-auto, .dark .stamp-auto { color: var(--muted); font-size: .6875rem; }
+
 /* ---- the serious-mode switch ---- */
 .switch-track { position: relative; width: 2.1rem; height: 1.2rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
 .switch-knob { position: absolute; top: 1px; left: 1px; width: 1rem; height: 1rem; border-radius: 999px; background: var(--muted); transition: transform .2s; }

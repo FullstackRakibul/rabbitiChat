@@ -62,4 +62,7 @@ export {
   listTruthPlatforms, listTruthGuides, createTruthGuide, getTruthGuide, updateTruthGuide, deleteTruthGuide, openTruthGuideGrid,
   checkTruthGuide, ackTruthFinding, setTruthGuideChecklist, withdrawTruthGuide, addTruthGuideCorrection, verifyTruthGuideNumber,
   publishTruthGuide,
+  listRecordsSources, testRecordsSource, runRecordsSource, setRecordsSourceEnabled, saveRecordsSource, removeRecordsOverride,
+  getRecordsInbox, getRecordsCluster, setRecordsVisibility, listRecordsSuggestions, decideRecordsSuggestion, listRecordsAudit,
+  dropRecordsUrl, draftRecordsDigest, itemFromRecordsCluster,
 } from './truth.service.js'

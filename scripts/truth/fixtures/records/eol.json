@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.2.1",
+  "result": {
+    "name": "examplelang",
+    "label": "ExampleLang",
+    "releases": [
+      { "name": "3.5", "isEol": false, "latest": { "name": "3.5.0", "date": "{{date:-2d}}", "link": "https://examplelang.example/news/3.5.0" } },
+      { "name": "3.4", "isEol": false, "latest": { "name": "3.4.9", "date": "{{date:-2d}}", "link": "https://examplelang.example/news/3.4.9" } },
+      { "name": "3.2", "isEol": false, "latest": { "name": "3.2.4", "date": "{{date:-6d}}", "link": "https://examplelang.example/news/3.2.4" } },
+      { "name": "3.0", "isEol": true, "latest": { "name": "3.0.30", "date": "2025-01-01", "link": "https://examplelang.example/news/3.0.30" } }
+    ]
+  }
+}

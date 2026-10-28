@@ -50,6 +50,23 @@ icons are our own lettermarks (inline SVG), never vendor logos.
 | Tailscale Funnel (default) or Cloudflare Tunnel | `tailscale` / `cloudflared` | BSD-3-Clause / Apache-2.0 | Exposing `/public/truth/*` from the LAN backend to Vercel (docs/truth-deploy.md). |
 | Vercel | — | — | Hosting the frontend (already in use). |
 
+## Ministry of Truth, Phase P5: Records Department (2026-10-25)
+
+No new package. The collector reuses what the backend already has:
+
+| Package | Version | Licence | Purpose in P5 |
+|---|---|---|---|
+| AngleSharp (already a dependency) | 1.8.2 | MIT | The URL drop's readable text (`Truth/Records/RecordsService.cs`), and HTML-to-text for feed descriptions (`Truth/Records/Adapters.cs`). Parsed, never rendered. |
+
+RSS and Atom are read with `System.Xml.Linq` (DTDs prohibited), JSON with `System.Text.Json`,
+and response compression for `/public/truth/*` comes from the ASP.NET Core 8 shared framework.
+
+### Public feeds read (not dependencies; listed in `backend/config/truth-sources.json`)
+
+Each one is a public feed or documented API that was opened, with its robots.txt read, on
+2026-10-25 (see the P5 report). Only titles, links, times, states and the feed's own short
+description (at most 300 characters) are kept.
+
 ## Named exception (confirmed by the owner, 2026-10-23)
 
 | Package | Version | Licence | Why |

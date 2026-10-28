@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Tech News</title>
+    <link>https://news.example/</link>
+    <description>An invented news site</description>
+    <item>
+      <title>DemoHost build service outage on 20 Oct</title>
+      <link>https://news.example/2026/10/demohost-outage?utm_source=rss</link>
+      <guid>https://news.example/2026/10/demohost-outage</guid>
+      <pubDate>{{rfc:-25h}}</pubDate>
+      <description>Customers of DemoHost saw failed builds for about two hours.</description>
+    </item>
+    <item>
+      <title>A conference about invented languages</title>
+      <link>https://news.example/2026/10/conference</link>
+      <guid>https://news.example/2026/10/conference</guid>
+      <pubDate>{{rfc:-4h}}</pubDate>
+      <description>Talks about languages nobody ships.</description>
+    </item>
+  </channel>
+</rss>

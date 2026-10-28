@@ -105,6 +105,9 @@ public class TrItem
     public int IssueId { get; set; }
     public int TechId { get; set; }
 
+    /// <summary>The Records cluster this item was made from (P5): the wire row links to it once published.</summary>
+    public int? WireClusterId { get; set; }
+
     /// <summary><see cref="TrSeverity.All"/>.</summary>
     public string Severity { get; set; } = "medium";
 

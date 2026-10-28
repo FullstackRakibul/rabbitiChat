@@ -1,0 +1,32 @@
+{
+  "title": "Invented catalogue for the eval",
+  "catalogVersion": "2026.10.25",
+  "dateReleased": "{{iso:-1d}}",
+  "count": 2,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-0000-0001",
+      "vendorProject": "ExampleLang Project",
+      "product": "ExampleLang",
+      "vulnerabilityName": "ExampleLang Upload Feature Code Execution",
+      "dateAdded": "{{date:-1d}}",
+      "shortDescription": "ExampleLang with demo.upload_feature on lets a remote attacker run code on the server. Fixed in 3.2.4.",
+      "requiredAction": "Apply the vendor update.",
+      "dueDate": "{{date:+20d}}",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": ""
+    },
+    {
+      "cveID": "CVE-0000-0009",
+      "vendorProject": "DemoHost",
+      "product": "DemoHost Agent",
+      "vulnerabilityName": "DemoHost Agent Path Traversal",
+      "dateAdded": "{{date:-90d}}",
+      "shortDescription": "An old invented entry that is outside the 30-day window.",
+      "requiredAction": "Apply the vendor update.",
+      "dueDate": "{{date:-60d}}",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>urn:example:community-blog</id>
+  <title>Example community security blog</title>
+  <updated>{{iso:-3h}}</updated>
+  <entry>
+    <id>urn:example:community-blog:exl-writeup</id>
+    <title>Write-up: CVE-0000-0001 in ExampleLang upload handling</title>
+    <link rel="alternate" href="https://blog.example.test/writeups/exl-upload"/>
+    <published>{{iso:-3h}}</published>
+    <updated>{{iso:-3h}}</updated>
+    <summary type="html">&lt;p&gt;The patch is due at 13:30 UTC. Fixed in 3.2.5 according to our reading of the maintainers' notes.&lt;/p&gt;</summary>
+  </entry>
+</feed>

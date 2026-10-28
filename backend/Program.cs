@@ -194,6 +194,13 @@ builder.Services.AddScoped<RabbitIC.Api.Services.IMatrixService, RabbitIC.Api.Se
 builder.Services.AddScoped<RabbitIC.Api.Truth.TruthService>();
 builder.Services.AddScoped<RabbitIC.Api.Truth.GuideService>();
 builder.Services.AddSingleton<RabbitIC.Api.Truth.TruthPlatforms>();
+// রেকর্ড বিভাগ (Records Department, docs/TRUTH_PROMPT_P5.md): public feeds collected in the background.
+builder.Services.AddSingleton<RabbitIC.Api.Truth.Records.SourceRegistry>();
+builder.Services.AddSingleton<RabbitIC.Api.Truth.Records.SafeFetcher>();
+builder.Services.AddSingleton<RabbitIC.Api.Truth.Records.TechKeywords>();
+builder.Services.AddScoped<RabbitIC.Api.Truth.Records.WireStore>();
+builder.Services.AddScoped<RabbitIC.Api.Truth.Records.RecordsService>();
+builder.Services.AddHostedService<RabbitIC.Api.Truth.Records.RecordsCollector>();
 // The public JSON, share pages and feed go out compressed: Vercel's rewrite passes the origin's
 // encoding through. Over HTTPS too: these responses hold no secret and no cookie, so there is
 // nothing for a compression side channel (BREACH) to read.

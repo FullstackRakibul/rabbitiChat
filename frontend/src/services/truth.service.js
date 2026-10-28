@@ -73,3 +73,21 @@ export async function publishTruthGuide(id) {
   const res = await http.raw(`/truth/guides/${id}/publish`, { method: 'POST' }).catch((e) => e)
   return publishOutcome(res)
 }
+
+// ─────────── Records Department (docs/TRUTH_PROMPT_P5.md §5) ───────────
+export const listRecordsSources = () => http.get('/truth/records/sources')
+/** Fetch and parse now, nothing saved: what the source returns today. */
+export const testRecordsSource = (id) => http.post(`/truth/records/sources/${id}/test`)
+export const runRecordsSource = (id) => http.post(`/truth/records/sources/${id}/run`)
+export const setRecordsSourceEnabled = (id, enabled) => http.put(`/truth/records/sources/${id}/enabled`, { enabled })
+export const saveRecordsSource = (definition) => http.put('/truth/records/sources', definition)
+export const removeRecordsOverride = (id) => http.del(`/truth/records/sources/${id}/override`)
+export const getRecordsInbox = () => http.get('/truth/records/inbox')
+export const getRecordsCluster = (id) => http.get(`/truth/records/clusters/${id}`)
+export const setRecordsVisibility = (entryId, visibility, note) => http.post(`/truth/records/entries/${entryId}/visibility`, { visibility, note })
+export const listRecordsSuggestions = () => http.get('/truth/records/suggestions')
+export const decideRecordsSuggestion = (id, decision) => http.post(`/truth/records/suggestions/${id}`, { decision })
+export const listRecordsAudit = () => http.get('/truth/records/audit')
+export const dropRecordsUrl = (url) => http.post('/truth/records/drop', { url })
+export const draftRecordsDigest = (clusterId) => http.post(`/truth/records/clusters/${clusterId}/digest`)
+export const itemFromRecordsCluster = (clusterId, body) => http.post(`/truth/records/clusters/${clusterId}/item`, body)

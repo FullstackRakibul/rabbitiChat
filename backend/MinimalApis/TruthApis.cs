@@ -37,6 +37,20 @@
 //   PUT  /api/truth/guides/{id}/checklist          the publisher's 4 ticks                    action:truth.publish
 //   POST /api/truth/guides/{id}/publish · withdraw                                            action:truth.publish
 //
+// Records Department (docs/TRUTH_PROMPT_P5.md §5):
+//   GET  /api/truth/records/sources                every source with its health               tab:truth
+//   POST /api/truth/records/sources/{id}/test      fetch + parse preview, nothing saved       tab:truth
+//   POST /api/truth/records/sources/{id}/run       one real collection now                    action:truth.publish
+//   PUT  /api/truth/records/sources/{id}/enabled   { enabled } the switch                      action:truth.publish
+//   PUT  /api/truth/records/sources                a definition added or edited (override)    action:truth.publish
+//   DELETE /api/truth/records/sources/{id}/override back to the file's definition             action:truth.publish
+//   GET  /api/truth/records/inbox · /clusters/{id} · /suggestions · /audit                     tab:truth
+//   POST /api/truth/records/entries/{id}/visibility { visibility, note }: publish / hide       action:truth.publish
+//   POST /api/truth/records/suggestions/{id}       { decision }: ignore / done / approve      action:truth.publish
+//   POST /api/truth/records/drop                   { url }: a page with no feed, to the inbox  tab:truth
+//   POST /api/truth/records/clusters/{id}/digest   a model's draft summary                    tab:truth
+//   POST /api/truth/records/clusters/{id}/item     { issueId, techId?, digestId? }: a draft item  tab:truth
+//
 // The whole of /api/truth is gated by the `truth` tab in TabAccessMiddleware;
 // each route asks AccessPolicy for its own key. TruthService decides.
 
@@ -46,6 +60,7 @@ using RabbitIC.Api.DTOs.Truth;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Rbac;
 using RabbitIC.Api.Truth;
+using RabbitIC.Api.Truth.Records;
 
 namespace RabbitIC.Api.MinimalApis
 {
@@ -145,8 +160,44 @@ namespace RabbitIC.Api.MinimalApis
             c.MapPost("/rollback/{version:int}", async (string kind, int version, HttpContext ctx, AppDbContext db, AccessPolicy access, TruthService svc, CancellationToken ct) =>
                 await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Map(await svc.RollbackContentAsync(kind, version, Me(ctx), ct)));
 
+            var r = g.MapGroup("/records");
+            r.MapGet("/sources", async (HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : Results.Ok(await rec.SourcesViewAsync(ct)));
+            r.MapPost("/sources/{id}/test", async (string id, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : Results.Ok(await rec.RunAsync(id, save: false, ct)));
+            r.MapPost("/sources/{id}/run", async (string id, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Results.Ok(await rec.RunAsync(id, save: true, ct)));
+            r.MapPut("/sources/{id}/enabled", async (string id, EnabledInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Map(await rec.SetEnabledAsync(id, input.Enabled, Me(ctx), ct)));
+            r.MapPut("/sources", async (System.Text.Json.Nodes.JsonObject definition, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Map(await rec.SaveOverrideAsync(definition, Me(ctx), ct)));
+            r.MapDelete("/sources/{id}/override", async (string id, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Map(await rec.RemoveOverrideAsync(id, Me(ctx), ct)));
+            r.MapGet("/inbox", async (HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : Results.Ok(await rec.InboxAsync(ct)));
+            r.MapGet("/clusters/{id:int}", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused
+                    : await rec.ClusterAdminAsync(id, ct) is { } cluster ? Results.Ok(cluster) : Results.NotFound(new { error = "No such cluster." }));
+            r.MapGet("/suggestions", async (HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : Results.Ok(new { suggestions = await rec.SuggestionsAsync(ct) }));
+            r.MapGet("/audit", async (HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : Results.Ok(new { audit = await rec.AuditAsync(ct) }));
+            r.MapPost("/entries/{id:int}/visibility", async (int id, VisibilityInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Map(await rec.SetVisibilityAsync(id, input.Visibility, input.Note, Me(ctx), ct)));
+            r.MapPost("/suggestions/{id:int}", async (int id, DecisionInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TruthPublish, ct) is { } refused ? refused : Map(await rec.DecideAsync(id, input.Decision, Me(ctx), ct)));
+            r.MapPost("/drop", async (DropInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : MapId(await rec.DropAsync(input.Url, Me(ctx), ct)));
+            r.MapPost("/clusters/{id:int}/digest", async (int id, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : MapId(await rec.DigestAsync(id, Me(ctx), ct)));
+            r.MapPost("/clusters/{id:int}/item", async (int id, ClusterItemInput input, HttpContext ctx, AppDbContext db, AccessPolicy access, RecordsService rec, CancellationToken ct) =>
+                await Caller(ctx, db, access, PermissionKeys.TabTruth, ct) is { } refused ? refused : MapId(await rec.ItemFromClusterAsync(id, input.IssueId, input.TechId, input.DigestId, Me(ctx), ct)));
+
             return app;
         }
+
+        private static IResult MapId(TrResult<int> r) =>
+            r.Outcome == TrOutcome.Ok ? Results.Json(new { id = r.Value }, statusCode: StatusCodes.Status201Created) : Map(r);
 
         private const string UserKey = "truth:user";
 

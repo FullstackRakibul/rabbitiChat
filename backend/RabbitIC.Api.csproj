@@ -42,6 +42,8 @@
     <EmbeddedResource Include="..\frontend\src\truth\content\glossary.default.json" LogicalName="Truth.glossary.default.json" />
     <EmbeddedResource Include="..\frontend\src\truth\content\glossary.schema.json" LogicalName="Truth.glossary.schema.json" />
     <EmbeddedResource Include="..\frontend\src\truth\content\platforms.json" LogicalName="Truth.platforms.json" />
+    <Content Update="config\truth-sources.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="config\tech-keywords.json" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="..\frontend\src\truth\content\directives.json" LogicalName="Truth.directives.json" />
   </ItemGroup>
 

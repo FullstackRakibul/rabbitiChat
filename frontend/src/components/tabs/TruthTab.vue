@@ -9,7 +9,7 @@
  *
  * Two permissions, kept minimal: the tab opens it and edits drafts;
  * action:truth.publish puts anything in front of the public. The server checks
- * every route again. The view is in the URL: ?issue=, ?section=guides (&guide=), techs, site-text, memes, glossary.
+ * every route again. The view is in the URL: ?issue=, ?section=guides (&guide=), records, techs, site-text, memes, glossary.
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -18,6 +18,7 @@ import TruthIssues from '@/components/truth/TruthIssues.vue'
 import TruthIssueEditor from '@/components/truth/TruthIssueEditor.vue'
 import TruthTechs from '@/components/truth/TruthTechs.vue'
 import TruthGuides from '@/components/truth/TruthGuides.vue'
+import TruthRecords from '@/components/truth/TruthRecords.vue'
 import TruthGuideEditor from '@/components/truth/TruthGuideEditor.vue'
 import TruthSiteText from '@/components/truth/TruthSiteText.vue'
 import TruthMemes from '@/components/truth/TruthMemes.vue'
@@ -39,6 +40,7 @@ const section = computed(() => {
   const s = String(route.query.section ?? '')
   if (s === 'techs') return 'techs'
   if (s === 'guides') return 'guides'
+  if (s === 'records') return 'records'
   if (PUBLISH_ONLY.includes(s) && can.value.publish) return s
   return 'issues'
 })
@@ -48,6 +50,7 @@ const guideId = computed(() => (route.query.guide === 'new' ? 'new' : Number(rou
 const SECTIONS = computed(() => [
   ['issues', 'সংখ্যা ও বিষয়', 'Issues & items', {}, true],
   ['guides', 'সমাধান গাইড', 'Fix guides', { section: 'guides' }, true],
+  ['records', 'রেকর্ড বিভাগ', 'Records', { section: 'records' }, true],
   ['techs', 'প্রযুক্তি', 'Technologies', { section: 'techs' }, true],
   ['site-text', 'সাইটের লেখা', 'Site text', { section: 'site-text' }, can.value.publish],
   ['memes', 'মিম', 'Memes', { section: 'memes' }, can.value.publish],
@@ -75,6 +78,7 @@ const go = (query) => router.push({ path: route.path, query })
     </div>
 
     <TruthTechs v-if="section === 'techs'" :can-edit="can.edit" />
+    <TruthRecords v-else-if="section === 'records'" :can="can" @open-issue="(id) => go({ issue: id })" />
     <TruthGuideEditor v-else-if="section === 'guides' && guideId" :id="guideId" :key="String(guideId)" :can="can"
       @close="go({ section: 'guides' })" @created="(id) => go({ section: 'guides', guide: id })" />
     <TruthGuides v-else-if="section === 'guides'" :can-edit="can.edit" @open="(id) => go({ section: 'guides', guide: id })" />

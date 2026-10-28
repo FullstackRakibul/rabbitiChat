@@ -53,6 +53,13 @@ public class AppDbContext : DbContext
     public DbSet<TrSafetyFinding> TrSafetyFindings => Set<TrSafetyFinding>();
     public DbSet<TrGuideSnapshot> TrGuideSnapshots => Set<TrGuideSnapshot>();
     public DbSet<TrGuideCorrection> TrGuideCorrections => Set<TrGuideCorrection>();
+    public DbSet<TrWireSourceState> TrWireSourceStates => Set<TrWireSourceState>();
+    public DbSet<TrWireEntry> TrWireEntries => Set<TrWireEntry>();
+    public DbSet<TrWireEntryHistory> TrWireEntryHistories => Set<TrWireEntryHistory>();
+    public DbSet<TrWireCluster> TrWireClusters => Set<TrWireCluster>();
+    public DbSet<TrWireAudit> TrWireAudits => Set<TrWireAudit>();
+    public DbSet<TrWireSuggestion> TrWireSuggestions => Set<TrWireSuggestion>();
+    public DbSet<TrWireDigest> TrWireDigests => Set<TrWireDigest>();
 
     public DbSet<ExtractionRun> ExtractionRuns => Set<ExtractionRun>();
 
@@ -153,6 +160,14 @@ public class AppDbContext : DbContext
         b.Entity<TrSafetyFinding>().HasIndex(f => new { f.GuideId, f.FindingKey }).IsUnique();
         b.Entity<TrGuideSnapshot>().HasIndex(s => new { s.GuideId, s.CreatedAtUtc });
         b.Entity<TrGuideCorrection>().HasIndex(c => c.GuideId);
+        b.Entity<TrWireSourceState>().HasIndex(s => s.SourceId).IsUnique();
+        b.Entity<TrWireEntry>().HasIndex(e => new { e.SourceId, e.ExternalId }).IsUnique();
+        b.Entity<TrWireEntry>().HasIndex(e => e.ClusterId);
+        b.Entity<TrWireEntry>().HasIndex(e => e.PublishedAtUtc);
+        b.Entity<TrWireEntryHistory>().HasIndex(h => h.EntryId);
+        b.Entity<TrWireCluster>().HasIndex(c => c.Key);
+        b.Entity<TrWireSuggestion>().HasIndex(s => s.Key).IsUnique();
+        b.Entity<TrWireDigest>().HasIndex(d => d.ClusterId);
 
         b.Entity<Conversation>()
             .HasOne(c => c.User)

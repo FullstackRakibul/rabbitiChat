@@ -185,7 +185,9 @@
       "sleeping": "টেলিস্ক্রিন ঘুমাচ্ছে",
       "privacy": "ছোট ভাই আপনাকে দেখছে না",
       "donow": "নির্দেশ দপ্তর",
-      "checker": "সংস্করণ যাচাই কক্ষ"
+      "checker": "সংস্করণ যাচাই কক্ষ",
+      "live": "টেলিস্ক্রিন",
+      "wire": "রেকর্ড বিভাগ"
     },
     "serious": {
       "label": "সিরিয়াস মোড"
@@ -193,7 +195,8 @@
     "stamp": {
       "verified": "যাচাইকৃত",
       "unconfirmed": "নিশ্চিত না",
-      "corrected": "সংশোধিত"
+      "corrected": "সংশোধিত",
+      "auto": "স্বয়ংক্রিয় · যাচাই হয়নি"
     },
     "glossary": {
       "title": "শব্দকোষ",
@@ -303,6 +306,76 @@
     "share": {
       "open": "পুরো পাতাটি খুলুন",
       "openGuide": "নিজের প্ল্যাটফর্মের ধাপগুলো খুলুন"
+    },
+    "live": {
+      "title": "লাইভ অবস্থা",
+      "intro": "সেবাগুলোর নিজেদের স্ট্যাটাস পেজ থেকে, স্বয়ংক্রিয়ভাবে।",
+      "operational": "চালু",
+      "incident": "সমস্যা",
+      "maintenance": "রক্ষণাবেক্ষণ",
+      "stale": "তথ্য পুরনো",
+      "checked": "{ago} আগে দেখা",
+      "never": "এখনও দেখা হয়নি",
+      "open": "চলমান ঘটনা",
+      "latest": "সর্বশেষ আপডেট",
+      "recent": "সাম্প্রতিক সমাধান হওয়া ঘটনা",
+      "none": "সাম্প্রতিক কোনো ঘটনা নেই।",
+      "viewSource": "উৎস দেখুন",
+      "staleNote": "{time}-এর পর থেকে নতুন তথ্য পাওয়া যায়নি। অবস্থা অনুমান করা হচ্ছে না।",
+      "staleNever": "এই উৎস থেকে এখনও তথ্য পাওয়া যায়নি।",
+      "checkedNow": "এইমাত্র দেখা হয়েছে"
+    },
+    "ago": {
+      "now": "এইমাত্র",
+      "minutes": "{count} মিনিট",
+      "hours": "{count} ঘণ্টা",
+      "days": "{count} দিন"
+    },
+    "wire": {
+      "title": "তারবার্তা",
+      "intro": "পাবলিক সূত্র থেকে স্বয়ংক্রিয়ভাবে সংগ্রহ: শিরোনাম, সূত্রের নিজের ছোট বিবরণ আর লিংক। এগুলো যাচাই করা হয়নি।",
+      "status": "অবস্থা",
+      "advisory": "সতর্কবার্তা",
+      "release": "রিলিজ",
+      "news": "সংবাদ",
+      "official": "দাপ্তরিক",
+      "authority": "কর্তৃপক্ষ",
+      "community": "কমিউনিটি",
+      "newsTier": "সংবাদমাধ্যম",
+      "investigating": "খতিয়ে দেখা হচ্ছে",
+      "identified": "কারণ পাওয়া গেছে",
+      "monitoring": "নজর রাখা হচ্ছে",
+      "resolved": "সমাধান হয়েছে",
+      "maintenanceState": "রক্ষণাবেক্ষণ",
+      "scheduled": "নির্ধারিত",
+      "sources": "{count}টি সূত্র",
+      "fromSource": "সূত্র থেকে",
+      "history": "আপডেটের ইতিহাস",
+      "allSources": "সব সূত্র",
+      "open": "খুলুন",
+      "differ": "সূত্রে অমিল",
+      "differFixed": "ঠিক করা সংস্করণ ({line})",
+      "differPatchTime": "প্যাচের সময়",
+      "readVerified": "যাচাইকৃত সংবাদ পড়ুন",
+      "components": "যে অংশগুলোতে প্রভাব",
+      "viewSource": "উৎস দেখুন",
+      "loadMore": "আরও লোড করুন",
+      "quiet": "রেকর্ড বিভাগ এখন চুপচাপ।",
+      "lastCollected": "শেষ সংগ্রহ: {time}",
+      "neverCollected": "এখনও কিছু সংগ্রহ হয়নি।",
+      "filters": "ছাঁকনি",
+      "all": "সব",
+      "tech": "প্রযুক্তি",
+      "type": "ধরন",
+      "severity": "গুরুত্ব",
+      "tier": "সূত্রের ধরন",
+      "onlyOpen": "শুধু অমীমাংসিত",
+      "search": "খুঁজুন",
+      "searchHint": "শিরোনাম বা প্রযুক্তির নাম",
+      "noMatch": "এই বাছাইয়ে কিছু নেই।",
+      "filterNote": "ছাঁকনি আর খোঁজ এই ব্রাউজারেই চলে।",
+      "loading": "লোড হচ্ছে…",
+      "loadError": "এখন তারবার্তা আনা যাচ্ছে না।"
     }
   },
   "en": {
@@ -491,7 +564,9 @@
       "sleeping": "THE TELESCREEN IS SLEEPING",
       "privacy": "LITTLE BROTHER IS NOT WATCHING YOU",
       "donow": "MINISTRY ORDERS",
-      "checker": "VERSION CHECKPOINT"
+      "checker": "VERSION CHECKPOINT",
+      "live": "TELESCREEN",
+      "wire": "RECORDS DEPT."
     },
     "serious": {
       "label": "Serious mode"
@@ -499,7 +574,8 @@
     "stamp": {
       "verified": "VERIFIED",
       "unconfirmed": "UNCONFIRMED",
-      "corrected": "CORRECTED"
+      "corrected": "CORRECTED",
+      "auto": "AUTO-COLLECTED · NOT YET VERIFIED"
     },
     "glossary": {
       "title": "Glossary",
@@ -609,6 +685,76 @@
     "share": {
       "open": "Open the full page",
       "openGuide": "Open the steps for your platform"
+    },
+    "live": {
+      "title": "Live status",
+      "intro": "From the services' own status pages, collected automatically.",
+      "operational": "Operational",
+      "incident": "Incident",
+      "maintenance": "Maintenance",
+      "stale": "Data stale",
+      "checked": "checked {ago} ago",
+      "never": "not checked yet",
+      "open": "Open incident",
+      "latest": "Latest update",
+      "recent": "Recently resolved",
+      "none": "No recent incidents.",
+      "viewSource": "View on source",
+      "staleNote": "No fresh data since {time}. We don't guess the state.",
+      "staleNever": "Nothing has come from this source yet.",
+      "checkedNow": "checked just now"
+    },
+    "ago": {
+      "now": "moments",
+      "minutes": "{count} min",
+      "hours": "{count} h",
+      "days": "{count} d"
+    },
+    "wire": {
+      "title": "The Wire",
+      "intro": "Collected automatically from public sources: headlines, the source's own short description and the link. Not verified.",
+      "status": "STATUS",
+      "advisory": "ADVISORY",
+      "release": "RELEASE",
+      "news": "NEWS",
+      "official": "Official",
+      "authority": "Authority",
+      "community": "Community",
+      "newsTier": "News",
+      "investigating": "Investigating",
+      "identified": "Identified",
+      "monitoring": "Monitoring",
+      "resolved": "Resolved",
+      "maintenanceState": "Maintenance",
+      "scheduled": "Scheduled",
+      "sources": "{count} sources",
+      "fromSource": "From the source",
+      "history": "Update history",
+      "allSources": "All sources",
+      "open": "Open",
+      "differ": "Sources differ",
+      "differFixed": "Fixed version ({line})",
+      "differPatchTime": "Patch time",
+      "readVerified": "Read the verified item",
+      "components": "Affected components",
+      "viewSource": "View on source",
+      "loadMore": "Load more",
+      "quiet": "The Records Department is quiet right now.",
+      "lastCollected": "Last collected: {time}",
+      "neverCollected": "Nothing collected yet.",
+      "filters": "Filters",
+      "all": "All",
+      "tech": "Technology",
+      "type": "Type",
+      "severity": "Severity",
+      "tier": "Source type",
+      "onlyOpen": "Only unresolved",
+      "search": "Search",
+      "searchHint": "Title, CVE or technology",
+      "noMatch": "Nothing matches.",
+      "filterNote": "Filters and search run in this browser.",
+      "loading": "Loading…",
+      "loadError": "The wire can't be reached right now."
     }
   }
 }

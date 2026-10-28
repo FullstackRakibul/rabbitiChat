@@ -1,0 +1,17 @@
+{
+  "php": ["php", "php-fpm", "composer", "laravel", "wordpress"],
+  "node": ["node", "node.js", "nodejs", "npm", "express"],
+  "npm": ["npm", "npmjs"],
+  "vercel": ["vercel", "next.js", "nextjs"],
+  "openai": ["openai", "chatgpt", "gpt"],
+  "anthropic": ["anthropic", "claude"],
+  "github": ["github", "github actions", "copilot"],
+  "cloudflare": ["cloudflare", "workers"],
+  "dotnet": [".net", "dotnet", "asp.net", "nuget"],
+  "python": ["python", "pip", "pypi", "django"],
+  "java": ["java", "maven", "spring"],
+  "railway": ["railway"],
+  "openrouter": ["openrouter"],
+  "nginx": ["nginx"],
+  "apache": ["apache httpd", "httpd"]
+}

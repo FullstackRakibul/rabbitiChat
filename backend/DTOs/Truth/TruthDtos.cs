@@ -56,3 +56,10 @@ public sealed record ChecklistInput(bool Tested, bool Verify, bool Undo, bool So
 public sealed record RenderInput(string? Template, Dictionary<string, string>? Values);
 
 public sealed record RotateKeyInput(string Label, string? Url);
+
+// ─── Records Department (P5) ───
+public sealed record EnabledInput(bool Enabled);
+public sealed record VisibilityInput(string Visibility, string? Note);
+public sealed record DecisionInput(string Decision);
+public sealed record DropInput(string Url);
+public sealed record ClusterItemInput(int IssueId, int? TechId, int? DigestId);

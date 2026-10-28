@@ -159,3 +159,43 @@ when the built frontend is there, as in the Docker image) and `/truth-api/*`.
 Staff can preview at `http://<lan-host>:<port>/truth` exactly as visitors see it.
 The staff side is the **সত্য মন্ত্রণালয় · Ministry of Truth** tab
 (`/ministry-of-truth`), for SystemAdmin by default (Access → Roles to grant it).
+
+## 7. Records Department (P5): automatic collection
+
+`RecordsCollector` (`backend/Truth/Records/`) reads the public feeds listed in
+`backend/config/truth-sources.json` and fills the live status strip and the wire
+on `/truth` (docs/TRUTH_PROMPT_P5.md).
+
+- **Outbound internet.** The backend machine needs outbound HTTPS to the hosts
+  in that file. Nothing new is exposed inbound: the public reads
+  `/public/truth/status` and `/public/truth/wire*`, which the existing tunnel
+  mount and Vercel rewrite (`/truth-api/*`) already cover.
+- **On by default.** `Truth:Records:Enabled` (default `true`) turns the
+  background loop off. Every eval suite sets it to `false`, except the truth
+  eval, which points it at a fake feed server.
+- **Adding or changing a source.** Edit the JSON file (it is copied next to
+  the binary on build), or use **Records → Sources** in the admin tab. An admin
+  edit is stored in the database and laid over the file. Each source is fetched
+  at most every 5 minutes, over https only. Its URL must be in the registry, and
+  a redirect must stay on the same host.
+- **Settings:**
+  - `Truth:Records:SourcesFile` and `Truth:Records:KeywordsFile` move the two
+    files.
+  - `Truth:Records:TimeoutSeconds` (default 15) is the fetch timeout.
+  - `Truth:Records:DigestModel` is the Ollama model for draft summaries
+    (default: `Ollama:DefaultModel`).
+  - `Truth:Records:TestHosts` and `Truth:Records:TestCertFile` work only in the
+    `Eval` environment.
+
+Live check, once the backend runs with the real hosts:
+
+```bash
+curl -s "$SITE/truth-api/status" | head -c 400            # one chip per status source: state, lastChecked
+curl -s "$SITE/truth-api/wire" | head -c 400              # rows, newest first; "next" is the cursor
+curl -s -o /dev/null -w '%{http_code}\n' "$TUNNEL/public/truth/wire"   # 200
+```
+
+A source that fails 10 times in a row stops and shows as flagged under
+**Records → Sources**. Switching it back on clears the failures. A status
+source with no good check for 30 minutes shows "data stale" on the page; it
+never shows a guessed state.

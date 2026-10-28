@@ -46,6 +46,7 @@ public static class SchemaUpgrade
         AddColumnIfMissing(db, "TrSources", "GuideId", @"ALTER TABLE ""TrSources"" ADD COLUMN ""GuideId"" INTEGER NULL;");
         AddColumnIfMissing(db, "TrItems", "DoNowCommand", @"ALTER TABLE ""TrItems"" ADD COLUMN ""DoNowCommand"" TEXT NULL;");
         AddColumnIfMissing(db, "TrItems", "DoNowLanguage", @"ALTER TABLE ""TrItems"" ADD COLUMN ""DoNowLanguage"" TEXT NULL;");
+        AddColumnIfMissing(db, "TrItems", "WireClusterId", @"ALTER TABLE ""TrItems"" ADD COLUMN ""WireClusterId"" INTEGER NULL;");
         AddColumnIfMissing(db, "TrItems", "RotateKeysJson", @"ALTER TABLE ""TrItems"" ADD COLUMN ""RotateKeysJson"" TEXT NOT NULL DEFAULT '[]';");
         AddColumnIfMissing(db, "TrTechs", "EolLinesJson", @"ALTER TABLE ""TrTechs"" ADD COLUMN ""EolLinesJson"" TEXT NOT NULL DEFAULT '[]';");
         AddColumnIfMissing(db, "Conversations", "Scope", @"ALTER TABLE ""Conversations"" ADD COLUMN ""Scope"" TEXT NULL;");

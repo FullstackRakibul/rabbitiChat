@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ExampleLang project news</title>
+    <link>https://examplelang.example/news</link>
+    <description>Invented release notes</description>
+    <item>
+      <title>ExampleLang 3.2.4 security release fixes CVE-0000-0001</title>
+      <link>https://examplelang.example/news/3.2.4?ref=feed</link>
+      <guid isPermaLink="false">exl-news-324</guid>
+      <pubDate>{{rfc:-6h}}</pubDate>
+      <description><![CDATA[<p>The security release ships at 14:00 UTC. <strong>CVE-0000-0001</strong> is fixed in 3.2.4 and in 3.1.7.</p>]]></description>
+    </item>
+    <item>
+      <title>DemoHost build service outage on 20 October</title>
+      <link>https://examplelang.example/news/demohost-outage</link>
+      <guid isPermaLink="false">exl-news-demohost</guid>
+      <pubDate>{{rfc:-26h}}</pubDate>
+      <description>Our CI runs on DemoHost; builds were delayed while its build service was down.</description>
+    </item>
+  </channel>
+</rss>
