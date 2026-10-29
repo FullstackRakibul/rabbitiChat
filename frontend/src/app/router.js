@@ -37,6 +37,8 @@ export const MODULE_ROUTES = [
   // মানব সম্পদ (HR Assistant).
   { key: 'hr', path: '/hr' },
   { key: 'matrix', path: '/matrix' },
+  // এইচআর ওয়ার্কস্পেস · HRIS Workspace (docs/HRIS_WORKSPACE_PROMPT.md).
+  { key: 'hris', path: '/hris' },
   // The staff side. Not /truth: that is the public page (truth.html), on Vercel and on the LAN.
   { key: 'truth', path: '/ministry-of-truth' },
   { key: 'todo', path: '/todo' },

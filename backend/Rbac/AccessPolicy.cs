@@ -33,6 +33,16 @@ public static class AccessReason
     public const string Allow = "allow";
     public const string Deny = "deny";
     public const string ParentMissing = "parent missing";
+    public const string FeatureOff = "feature off";
+}
+
+/// <summary>
+/// The HRIS Workspace's flag (Hris:Enabled, docs/HRIS_WORKSPACE_PROMPT.md §0 rule 10), read once
+/// at start-up. Off: no tab:hris for anyone, and no /api/hris routes are mapped.
+/// </summary>
+public static class HrisFeature
+{
+    public static bool Enabled { get; set; }
 }
 
 public sealed record AccessDecision(bool Allowed, string Reason);
@@ -155,7 +165,9 @@ public sealed class AccessPolicy(AppDbContext db, IMemoryCache cache)
         {
             overrides.TryGetValue(p.Key, out var effect);
             raw[p.Key] =
-                super || IsAlwaysOn(p.Key) ? new(true, AccessReason.Invariant)
+                // Hris:Enabled off: the tab does not exist for anyone (its children follow as "parent missing").
+                p.Key == PermissionKeys.TabHris && !HrisFeature.Enabled ? new(false, AccessReason.FeatureOff)
+                : super || IsAlwaysOn(p.Key) ? new(true, AccessReason.Invariant)
                 : effect == UserPermissionOverride.Deny ? new(false, AccessReason.Deny)
                 : effect == UserPermissionOverride.Allow ? new(true, AccessReason.Allow)
                 : new(preset.TryGetValue(p.Key, out var allowed) && allowed, AccessReason.Role);

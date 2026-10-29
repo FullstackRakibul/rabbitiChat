@@ -189,6 +189,11 @@ builder.Services.AddScoped<RabbitIC.Api.Repositories.IMatrixRepository, RabbitIC
 builder.Services.AddScoped<RabbitIC.Api.Matrix.MatrixModel>();
 builder.Services.AddScoped<RabbitIC.Api.Matrix.TemplateMatcher>();
 builder.Services.AddScoped<RabbitIC.Api.Services.IMatrixService, RabbitIC.Api.Services.MatrixService>();
+// এইচআর ওয়ার্কস্পেস · HRIS Workspace (docs/HRIS_WORKSPACE_PROMPT.md): a front door over Matrix and HR, behind Hris:Enabled.
+RabbitIC.Api.Rbac.HrisFeature.Enabled = builder.Configuration.GetValue<bool>("Hris:Enabled");
+builder.Services.AddScoped<RabbitIC.Api.Hris.HrisService>();
+// মানব সম্পদ: the HR chat as a service (moved out of HrChatEndpoint unchanged), for /api/hr/chat and HRIS Ask.
+builder.Services.AddScoped<RabbitIC.Api.Hr.IHrChatService, RabbitIC.Api.Hr.HrChatService>();
 
 // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md): the staff side and the snapshots the public reads.
 builder.Services.AddScoped<RabbitIC.Api.Truth.TruthService>();
@@ -436,6 +441,7 @@ app.ApplicationNoteApis();
 app.ApplicationOddityApis();
 app.ApplicationHrApis();
 app.ApplicationMatrixApis();
+app.ApplicationHrisApis();
 app.ApplicationTruthApis();
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
@@ -505,6 +511,8 @@ using (var scope = app.Services.CreateScope())
 	// Matrix: how report kinds join, and the KPI library's editable definitions — missing rows only.
 	RabbitIC.Api.Repositories.MatrixRepository.SeedRelations(db);
 	RabbitIC.Api.Repositories.MatrixRepository.SeedKpis(db);
+	// HRIS Workspace: the shared board's 8 starter pins, once.
+	if (RabbitIC.Api.Rbac.HrisFeature.Enabled) RabbitIC.Api.Hris.HrisService.Seed(db, app.Logger);
 
 	// মানব সম্পদ. The hr-assistant account, only when it does not exist and only
 	// from HR_ASSISTANT_SECRET; then the HR library from docs/hr/, only files not

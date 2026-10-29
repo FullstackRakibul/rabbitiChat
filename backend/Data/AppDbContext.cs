@@ -37,6 +37,10 @@ public class AppDbContext : DbContext
     public DbSet<MxSummary> MxSummaries => Set<MxSummary>();
     public DbSet<MxKpiDefinition> MxKpiDefinitions => Set<MxKpiDefinition>();
 
+    // এইচআর ওয়ার্কস্পেস · HRIS Workspace (docs/HRIS_WORKSPACE_PROMPT.md §3.2): pins over Matrix, nothing of its own to compute.
+    public DbSet<HrisPin> HrisPins => Set<HrisPin>();
+    public DbSet<HrisBoardSeed> HrisBoardSeeds => Set<HrisBoardSeed>();
+
     // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md §2). The public reads TrSnapshots only.
     public DbSet<TrTech> TrTechs => Set<TrTech>();
     public DbSet<TrIssue> TrIssues => Set<TrIssue>();
@@ -142,6 +146,9 @@ public class AppDbContext : DbContext
         b.Entity<MxQualityIssue>().HasIndex(i => i.DatasetId);
         b.Entity<MxFixLog>().HasIndex(f => f.DatasetId);
         b.Entity<MxKpiDefinition>().HasKey(k => k.Key);
+
+        b.Entity<HrisPin>().HasIndex(p => new { p.Board, p.OwnerUserId, p.Order });
+        b.Entity<HrisBoardSeed>().HasKey(s => s.Board);
 
         b.Entity<TrTech>().HasIndex(t => t.Slug).IsUnique();
         b.Entity<TrIssue>().HasIndex(i => i.Slug).IsUnique();

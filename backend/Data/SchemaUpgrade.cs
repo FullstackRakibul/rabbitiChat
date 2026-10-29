@@ -40,6 +40,7 @@ public static class SchemaUpgrade
         EnsureAccessSchema(db);
         EnsureTablesFromModel(db, "Mx");
         EnsureTablesFromModel(db, "Tr");
+        EnsureTablesFromModel(db, "Hris");
         // Memes and the glossary joined the site text as content kinds (docs/TRUTH_PROMPT.md v4).
         AddColumnIfMissing(db, "TrSiteContents", "Kind", @"ALTER TABLE ""TrSiteContents"" ADD COLUMN ""Kind"" TEXT NOT NULL DEFAULT 'site';");
         // Fix guides (P2): guide sources, "do now" and EOL lines, on tables P1 made.

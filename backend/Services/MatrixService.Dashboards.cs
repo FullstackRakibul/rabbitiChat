@@ -171,7 +171,7 @@ public partial class MatrixService
     private static readonly Regex IsoDay = new(@"^\d{4}-\d{2}-\d{2}$");
 
     /// <summary>The filters as scope conditions; null and an error when a value is not acceptable.</summary>
-    private static (List<MxScopeFilter> Scope, string? Error) ScopeOf(MxDashboardFilters? f)
+    internal static (List<MxScopeFilter> Scope, string? Error) ScopeOf(MxDashboardFilters? f)
     {
         var s = new List<MxScopeFilter>();
         if (f is null) return (s, null);
@@ -220,7 +220,7 @@ public partial class MatrixService
         return MxResult<MxDashboardRun>.Success(await RunWidgetsAsync(user, d.Id, d.Name, DashboardLibrary.ReportWidgets(d), scope, input, ct));
     }
 
-    private async Task<MxDashboardRun> RunWidgetsAsync(User user, int id, string name, List<JsonObject> widgets, List<MxScopeFilter> scope,
+    public async Task<MxDashboardRun> RunWidgetsAsync(User user, int id, string name, List<JsonObject> widgets, List<MxScopeFilter> scope,
         MxDashboardRunInput input, CancellationToken ct)
     {
         var ctx = await QueryContextAsync(user, ct);

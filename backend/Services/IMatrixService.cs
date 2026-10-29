@@ -93,6 +93,13 @@ public interface IMatrixService
     /// <summary>A dataset's Report page charts: its kind's automatic charts, run on this dataset (tiles come from the card).</summary>
     Task<MxResult<MxDashboardRun>> RunReportAsync(User user, int datasetId, MxDashboardRunInput input, CancellationToken ct = default);
 
+    /// <summary>
+    /// Widgets that belong to no saved dashboard (the HRIS Workspace's pins), run exactly as a
+    /// dashboard runs its own: the same KPIs and queries for this user, with <paramref name="scope"/> added.
+    /// </summary>
+    Task<MxDashboardRun> RunWidgetsAsync(User user, int id, string name, List<System.Text.Json.Nodes.JsonObject> widgets,
+        List<RabbitIC.Api.Matrix.MxScopeFilter> scope, MxDashboardRunInput input, CancellationToken ct = default);
+
     /// <summary>A dataset as xlsx or csv (no sensitive columns; personal and salary only when permitted), or a dashboard layout as json.</summary>
     Task<MxResult<MxExportFile>> ExportAsync(User user, string kind, int id, CancellationToken ct = default);
 }

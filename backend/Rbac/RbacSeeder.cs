@@ -133,7 +133,8 @@ public static class RbacSeeder
             // General, HrAssistant and DevOps start on the one default model
             // (docs/HR_MODULE_PROMPT.md §3.1, docs/HR_PROCEDURE_ANALYZER_PROMPT.md
             // §3.7); every other role unrestricted.
-            var restricted = role is UserRoles.General or UserRoles.HrAssistant or UserRoles.DevOps;
+            // Executive too (docs/HRIS_WORKSPACE_PROMPT.md §3.1).
+            var restricted = role is UserRoles.General or UserRoles.HrAssistant or UserRoles.DevOps or UserRoles.Executive;
             db.RoleModelPolicies.Add(new RoleModelPolicy
             {
                 Role = role,

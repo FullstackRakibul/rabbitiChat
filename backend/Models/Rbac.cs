@@ -35,8 +35,15 @@ public static class UserRoles
     /// </summary>
     public const string DevOps = "DevOps";
 
+    /// <summary>
+    /// Top management (DMD Sir) opening the HRIS Workspace (docs/HRIS_WORKSPACE_PROMPT.md
+    /// §3.1): its Reports and Ask, and Settings. Narrow, like HrAssistant: no Matrix tab,
+    /// so no names and no salary unless an administrator says so.
+    /// </summary>
+    public const string Executive = "Executive";
+
     /// <summary>Least to most privileged — the order the admin picker lists them in.</summary>
-    public static readonly string[] All = { General, HrAssistant, DevOps, System, GroundControl, SystemAdmin };
+    public static readonly string[] All = { General, HrAssistant, DevOps, Executive, System, GroundControl, SystemAdmin };
 
     /// <summary>
     /// Maps arbitrary input to a known role. Anything unrecognised — including a

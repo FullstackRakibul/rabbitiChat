@@ -47,8 +47,28 @@ public static class RolePresetSeeds
     private static readonly string[] MatrixActions =
         { PermissionKeys.MatrixUpload, PermissionKeys.MatrixDashboardsEdit, PermissionKeys.MatrixViewPersonal };
 
+    /// <summary>The HRIS Workspace and Settings (docs/HRIS_WORKSPACE_PROMPT.md §3.1).</summary>
+    private static readonly string[] ExecutiveTabs = { "hris", "settings" };
+
+    /// <summary>
+    /// HRIS Workspace (§3.1): Executive gets Reports, Ask and export, the Hub only as its
+    /// status card (the section stays off); hr-assistant gets every section, the shared
+    /// board and export. Debug is SystemAdmin's. Other roles: none.
+    /// </summary>
+    private static readonly string[] HrisRoles = { UserRoles.Executive, UserRoles.HrAssistant };
+    private static readonly Dictionary<string, string[]> HrisHolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [PermissionKeys.HrisReports] = HrisRoles,
+        [PermissionKeys.HrisAsk] = HrisRoles,
+        [PermissionKeys.HrisHub] = new[] { UserRoles.HrAssistant },
+        [PermissionKeys.HrisPin] = new[] { UserRoles.HrAssistant },
+        [PermissionKeys.HrisExport] = HrisRoles,
+        [PermissionKeys.HrisDebug] = Array.Empty<string>(),
+    };
+
     private static IReadOnlyCollection<string> TabsFor(string role) => role switch
     {
+        UserRoles.Executive => ExecutiveTabs,
         UserRoles.GroundControl => GroundControlTabs,
         UserRoles.System => SystemTabs,
         UserRoles.HrAssistant => HrAssistantTabs,
@@ -93,6 +113,9 @@ public static class RolePresetSeeds
             return MatrixRoles.Contains(role);
         if (p.Key.StartsWith("action:matrix.", StringComparison.Ordinal))
             return MatrixRoles.Contains(role) && MatrixActions.Contains(p.Key);
+
+        if (p.Key == PermissionKeys.TabHris) return HrisRoles.Contains(role);
+        if (HrisHolders.TryGetValue(p.Key, out var hris)) return hris.Contains(role);
 
         return p.Kind switch
         {

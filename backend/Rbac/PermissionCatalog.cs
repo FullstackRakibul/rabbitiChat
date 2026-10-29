@@ -62,6 +62,16 @@ public static class PermissionKeys
     public const string TabTruth = "tab:truth";
     public const string TruthPublish = "action:truth.publish";
 
+    // এইচআর ওয়ার্কস্পেস · HRIS Workspace (docs/HRIS_WORKSPACE_PROMPT.md §3.1). It never widens
+    // access: what a pin or an answer shows still passes Matrix's salary and personal checks.
+    public const string TabHris = "tab:hris";
+    public const string HrisReports = "section:hris.reports";
+    public const string HrisAsk = "section:hris.ask";
+    public const string HrisHub = "section:hris.hub";
+    public const string HrisPin = "action:hris.pin";
+    public const string HrisExport = "action:hris.export";
+    public const string HrisDebug = "action:hris.debug";
+
     public static string Tab(string tabKey) => "tab:" + tabKey;
 }
 
@@ -120,6 +130,13 @@ public static class PermissionCatalog
         Section(PermissionKeys.MatrixAsk, "Ask", "প্রশ্ন", "Work", PermissionKeys.TabMatrix),
         Action(PermissionKeys.MatrixViewPersonal, "See names", "নাম দেখা", "Work", PermissionKeys.TabMatrix),
         Action(PermissionKeys.MatrixViewSalary, "See salary figures", "বেতনের অঙ্ক দেখা", "Work", PermissionKeys.TabMatrix),
+        Tab("hris", "HRIS Workspace", "এইচআর ওয়ার্কস্পেস", "Work", label: "এইচআর ওয়ার্কস্পেস · HRIS Workspace"),
+        Section(PermissionKeys.HrisReports, "Reports", "রিপোর্ট", "Work", PermissionKeys.TabHris),
+        Section(PermissionKeys.HrisAsk, "Ask", "প্রশ্ন", "Work", PermissionKeys.TabHris),
+        Section(PermissionKeys.HrisHub, "Data & Rules", "ডেটা ও নিয়ম", "Work", PermissionKeys.TabHris),
+        Action(PermissionKeys.HrisPin, "Arrange the shared board", "শেয়ার্ড বোর্ড সাজানো", "Work", PermissionKeys.HrisReports),
+        Action(PermissionKeys.HrisExport, "Export pins and boards", "পিন ও বোর্ড এক্সপোর্ট", "Work", PermissionKeys.TabHris),
+        Action(PermissionKeys.HrisDebug, "See timings, tokens and route reasons", "সময়, টোকেন ও রুটের কারণ দেখা", "Work", PermissionKeys.TabHris),
         Tab("truth", "Ministry of Truth", "সত্য মন্ত্রণালয়", "Work", label: "সত্য মন্ত্রণালয় · Ministry of Truth"),
         Action(PermissionKeys.TruthPublish, "Publish: issues, guides, mail, site text and memes", "প্রকাশ: সংখ্যা, গাইড, মেইল, সাইটের লেখা ও মিম", "Work", PermissionKeys.TabTruth),
         Tab("todo", "To-Do", "করণীয়", "Work"),

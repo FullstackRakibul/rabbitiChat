@@ -131,6 +131,14 @@ namespace RabbitIC.Api.Middleware
             return app;
         }
 
+        /// <summary>এইচআর ওয়ার্কস্পেস: /api/hris/*, only when Hris:Enabled is on (otherwise 404).</summary>
+        public static WebApplication ApplicationHrisApis(this WebApplication app)
+        {
+            if (!RabbitIC.Api.Rbac.HrisFeature.Enabled) return app;
+            app.MapGroup("/api").WithTags("HRIS Workspace").MapHrisApis();
+            return app;
+        }
+
         /// <summary>
         /// সত্য মন্ত্রণালয়: the staff API under /api/truth (gated by the `truth` tab), and the
         /// public snapshots under /public/truth — the only paths the tunnel lets through.

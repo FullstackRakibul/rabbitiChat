@@ -7,6 +7,9 @@ export {
   listMatrixKpis, updateMatrixKpi, downloadMatrixExport, saveBlob, getMatrixCard, runMatrixReport, getMatrixSummary, writeMatrixSummary,
   streamMatrixChat, listMatrixConversations, getMatrixConversation, deleteMatrixConversation, warmMatrixAsk, warmMatrixAskAll,
 } from './matrix.service.js'
+export {
+  listHrisPins, createHrisPin, updateHrisPin, deleteHrisPin, orderHrisPins, renderHrisPins, getHrisStatus, downloadHrisExport,
+} from './hris.service.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'
 export { getModels, streamChat } from './chat.service.js'
