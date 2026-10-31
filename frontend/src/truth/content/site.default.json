@@ -2,7 +2,7 @@
   "bn": {
     "site": {
       "name": "সত্য মন্ত্রণালয়",
-      "series": "সাইবার সপ্তাহ",
+      "series": "অজ্ঞতাই শক্তি",
       "tagline": "আপনার ব্যবহার করা প্রযুক্তির নিরাপত্তা ও আপডেটের খবর, প্রতি সপ্তাহে।",
       "description": "পিএইচপি, নোড.জেএস, ক্লাউড প্ল্যাটফর্ম ও আরও প্রযুক্তির সাপ্তাহিক নিরাপত্তা বুলেটিন: সারসংক্ষেপ, সংস্করণ, করণীয় আর সূত্র।"
     },
@@ -381,7 +381,7 @@
   "en": {
     "site": {
       "name": "Ministry of Truth",
-      "series": "Cyber Week",
+      "series": "IGNORANCE IS STRENGTH",
       "tagline": "Security and update news for the technologies you run, every week.",
       "description": "A weekly security bulletin for PHP, Node.js, cloud platforms and more: summaries, versions, what to do, and sources."
     },
