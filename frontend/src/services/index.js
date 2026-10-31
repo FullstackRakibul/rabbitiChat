@@ -10,6 +10,7 @@ export {
 export {
   listHrisPins, createHrisPin, updateHrisPin, deleteHrisPin, orderHrisPins, renderHrisPins, getHrisStatus, downloadHrisExport,
 } from './hris.service.js'
+export { getJijiStatus, listJijiContents, getJijiContent } from './jiji.service.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'
 export { getModels, streamChat } from './chat.service.js'

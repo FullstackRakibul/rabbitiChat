@@ -30,7 +30,7 @@ function typingNow() {
  *   onSidebar   Cmd/Ctrl+B      toggle the active tab's sidebar
  *   onSubmit    Cmd/Ctrl+Enter  primary action of the active tab (fires while typing)
  *   onEscape    Esc             close the top-most overlay (fires while typing)
- *   onJump      g then c/w/d/t  jump to a tab, by tab id
+ *   onJump      g then c/w/d/t/j  jump to a tab, by tab id
  *   onLauncher  g then m        open the module launcher
  *   enabled     ref/getter — shortcuts are inert when it returns false (e.g. login)
  */
@@ -75,7 +75,7 @@ export function useShortcuts({
   // Tracked by hand: a leading "g" arms a short window in which the next key
   // selects a tab. Never armed while typing.
 
-  const JUMPS = { c: 'chat', w: 'workspace', d: 'docs', t: 'todo' }
+  const JUMPS = { c: 'chat', w: 'workspace', d: 'docs', t: 'todo', j: 'jiji' }
   const armed = ref(false)
   let armedTimer = null
 

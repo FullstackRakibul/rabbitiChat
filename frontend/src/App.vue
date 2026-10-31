@@ -5,7 +5,7 @@ import { pathForTab, tabForPath, useRoutePermissions } from '@/app/router.js'
 import {
   FileText, Globe, LayoutDashboard, ListTodo, MessageSquare, PanelLeft,
   Plug, Plus, Settings, Brain, Upload, Table, BadgeDollarSign, ShieldCheck, GraduationCap,
-  Scissors, StickyNote, Activity, Satellite, Grip, Users, Grid3x3, Newspaper, Briefcase
+  Scissors, StickyNote, Activity, Satellite, Grip, Users, Grid3x3, Newspaper, Briefcase, Clapperboard
 } from '@lucide/vue'
 import {
   listModels, listConversations, getConversation,
@@ -45,6 +45,7 @@ import HrTab from '@/components/tabs/HrTab.vue'
 import MatrixTab from '@/components/tabs/MatrixTab.vue'
 import HrisTab from '@/components/tabs/HrisTab.vue'
 import TruthTab from '@/components/tabs/TruthTab.vue'
+import JijiTab from '@/components/tabs/JijiTab.vue'
 import PublicNote from '@/components/notes/PublicNote.vue'
 import LogsTab from '@/components/tabs/LogsTab.vue'
 import OddityTab from '@/components/tabs/OddityTab.vue'
@@ -445,6 +446,7 @@ const MODULE_ICONS = {
   matrix: Grid3x3,
   hris: Briefcase,
   truth: Newspaper,
+  jiji: Clapperboard,
   todo: ListTodo,
   search: Globe,
   notes: StickyNote,
@@ -824,7 +826,7 @@ const commands = computed(() => [
     label: t.label,
     group: 'Go to',
     icon: t.icon,
-    keys: { chat: 'g then c', workspace: 'g then w', docs: 'g then d', todo: 'g then t' }[t.id],
+    keys: { chat: 'g then c', workspace: 'g then w', docs: 'g then d', todo: 'g then t', jiji: 'g then j' }[t.id],
     run: () => goTab(t.id),
   })),
   {
@@ -1192,6 +1194,11 @@ const notesTabRef = ref(null)
       <!-- সত্য মন্ত্রণালয় · Ministry of Truth: the staff side; the public page is /truth (truth.html). -->
       <TabsContent v-if="allowedTabs?.includes('truth')" value="truth" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <TruthTab :actions="myActions" />
+      </TabsContent>
+
+      <!-- Jiji: notes into YouTube Shorts. Absent unless the server lists the tab; its API answers 403 regardless. -->
+      <TabsContent v-if="allowedTabs?.includes('jiji')" value="jiji" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        <JijiTab />
       </TabsContent>
       
       <TabsContent value="logs" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

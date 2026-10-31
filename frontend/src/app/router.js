@@ -41,6 +41,8 @@ export const MODULE_ROUTES = [
   { key: 'hris', path: '/hris' },
   // The staff side. Not /truth: that is the public page (truth.html), on Vercel and on the LAN.
   { key: 'truth', path: '/ministry-of-truth' },
+  // Jiji: notes into YouTube Shorts (docs/JIJI_PLAN.md).
+  { key: 'jiji', path: '/jiji' },
   { key: 'todo', path: '/todo' },
   { key: 'search', path: '/search' },
   { key: 'jsonto', path: '/json-converter' },
