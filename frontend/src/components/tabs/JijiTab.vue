@@ -5,17 +5,18 @@
  * Sub-navigation only, like Oddity: each board is its own component under
  * components/jiji/, mounted the first time its entry is chosen and only hidden
  * after, so it fetches on first open and keeps its state across switches.
- * Day 1 ships the shell and Settings' status card; the boards say when they arrive.
+ * Queue holds the items and their script editor; Settings shows what is configured.
  */
 import { ref, watch } from 'vue'
 import { LayoutList, Settings2 } from '@lucide/vue'
 import JijiSettings from '@/components/jiji/JijiSettings.vue'
+import QueueBoard from '@/components/jiji/QueueBoard.vue'
 
 /** @type {import('vue').Ref<'queue' | 'settings'>} */
 const view = ref('queue')
 
 const views = [
-  { id: 'queue', label: 'Queue', icon: LayoutList, blurb: 'Ideas, scripts and videos by status. Arrives on day 2 (new idea, script editor) and day 5 (queue board, review).' },
+  { id: 'queue', label: 'Queue', icon: LayoutList, board: QueueBoard },
   { id: 'settings', label: 'Settings', icon: Settings2, board: JijiSettings },
 ]
 
