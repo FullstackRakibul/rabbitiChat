@@ -72,6 +72,9 @@ public static class PermissionKeys
     public const string HrisExport = "action:hris.export";
     public const string HrisDebug = "action:hris.debug";
 
+    // Jiji (docs/JIJI_PLAN.md): one user's Shorts pipeline. Every row is the caller's own.
+    public const string TabJiji = "tab:jiji";
+
     public static string Tab(string tabKey) => "tab:" + tabKey;
 }
 
@@ -139,6 +142,7 @@ public static class PermissionCatalog
         Action(PermissionKeys.HrisDebug, "See timings, tokens and route reasons", "সময়, টোকেন ও রুটের কারণ দেখা", "Work", PermissionKeys.TabHris),
         Tab("truth", "Ministry of Truth", "সত্য মন্ত্রণালয়", "Work", label: "সত্য মন্ত্রণালয় · Ministry of Truth"),
         Action(PermissionKeys.TruthPublish, "Publish: issues, guides, mail, site text and memes", "প্রকাশ: সংখ্যা, গাইড, মেইল, সাইটের লেখা ও মিম", "Work", PermissionKeys.TabTruth),
+        Tab("jiji", "Jiji", "জিজি", "Work"),
         Tab("todo", "To-Do", "করণীয়", "Work"),
         Tab("search", "Search", "অনুসন্ধান", "Work"),
         Tab("notes", "Notes", "নোট", "Work"),

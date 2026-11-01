@@ -56,6 +56,24 @@ export function approveJijiScript(id, expectedUpdatedAt) {
   return http.post(`/jiji/contents/${id}/approve-script`, { expectedUpdatedAt })
 }
 
+/** Re-queues a Failed job. The server refuses UnknownOutcome. → the item. */
+export function retryJijiJob(jobId) {
+  return http.post(`/jiji/jobs/${jobId}/retry`)
+}
+
+/** Every spoken part's start and end in narration.wav. */
+export function getJijiTimings(id) {
+  return http.get(`/jiji/contents/${id}/timings`)
+}
+
+/**
+ * narration.wav as a Blob. An <audio src> cannot send the bearer header, so the file comes
+ * through http.js and plays from URL.createObjectURL; the caller revokes the URL.
+ */
+export async function fetchJijiAudio(id) {
+  return (await http.raw(`/jiji/contents/${id}/audio`)).blob()
+}
+
 export const JIJI_CONTENT_TYPES = [
   { value: 'TechExplainer', label: 'Tech explainer' },
   { value: 'BuildLog', label: 'Build log' },

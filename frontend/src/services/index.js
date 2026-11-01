@@ -12,7 +12,7 @@ export {
 } from './hris.service.js'
 export {
   getJijiStatus, generateJijiIdeas, listJijiContents, createJijiContent, getJijiContent, updateJijiContent, deleteJijiContent,
-  generateJijiScript, saveJijiScript, approveJijiScript,
+  generateJijiScript, saveJijiScript, approveJijiScript, retryJijiJob, getJijiTimings, fetchJijiAudio,
 } from './jiji.service.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'

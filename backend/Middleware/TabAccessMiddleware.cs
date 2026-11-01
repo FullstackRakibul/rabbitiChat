@@ -58,6 +58,7 @@ public class TabAccessMiddleware
         ("/api/hr", "hr"),
         ("/api/matrix", "matrix"),
         ("/api/truth", "truth"),
+        ("/api/jiji", "jiji"),
     };
 
     /// <summary>

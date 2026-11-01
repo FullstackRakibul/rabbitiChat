@@ -24,7 +24,7 @@ const rows = (s) => [
   { label: 'Storage folder writable', ok: s.storageWritable },
   { label: 'Default script model', ok: !!s.model, note: s.model ? `${s.model} (${s.modelSource})` : 'None: pick one each time, or set Jiji:Model' },
   { label: 'Writing style', ok: s.voiceFound, note: s.voiceFound ? 'Context source "Jiji voice"' : 'Optional: add a context source named "Jiji voice" in Sources' },
-  { label: 'Azure Speech', ok: s.speechConfigured, note: s.speechConfigured ? '' : 'Jiji__AzureSpeech__Key and Region (day 3)' },
+  { label: 'Azure Speech', ok: s.speechConfigured, note: s.speechConfigured ? '' : 'Jiji__AzureSpeech__ApiKey and Jiji:AzureSpeech:Region' },
   { label: 'YouTube OAuth client', ok: s.youTubeConfigured, note: s.youTubeConfigured ? '' : 'Jiji:YouTube:ClientId and Jiji__YouTube__ClientSecret (day 6)' },
   { label: 'YouTube channel', ok: s.youTubeConnected, note: s.channelTitle || (s.youTubeConnected ? '' : 'Not connected') },
 ]

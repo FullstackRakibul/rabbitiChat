@@ -29,6 +29,8 @@ primary_region = "sin"
   ConnectionStrings__Default = "Data Source=/data/rabbitic.db"
   ASPNETCORE_ENVIRONMENT = "Production"
   ASPNETCORE_URLS = "http://+:8080"
+  # Jiji keeps final.mp4 and its scripts on the same volume (docs/JIJI_PLAN.md, Worker and files).
+  Jiji__StoragePath = "/data/jiji"
 
 # THE PERSISTENCE GUARANTEE on Fly: a volume attached to the machine.
 # Without this block the database would live in the machine's ephemeral

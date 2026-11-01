@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RabbitIC.Api.Jiji.Models;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
 using RabbitIC.Api.Observability;
@@ -40,6 +41,11 @@ public class AppDbContext : DbContext
     // এইচআর ওয়ার্কস্পেস · HRIS Workspace (docs/HRIS_WORKSPACE_PROMPT.md §3.2): pins over Matrix, nothing of its own to compute.
     public DbSet<HrisPin> HrisPins => Set<HrisPin>();
     public DbSet<HrisBoardSeed> HrisBoardSeeds => Set<HrisBoardSeed>();
+
+    // Jiji (docs/JIJI_PLAN.md): Shorts from notes. No keys into other modules; ownership is the user id only.
+    public DbSet<JijiContent> JijiContents => Set<JijiContent>();
+    public DbSet<JijiJob> JijiJobs => Set<JijiJob>();
+    public DbSet<JijiYouTubeAccount> JijiYouTubeAccounts => Set<JijiYouTubeAccount>();
 
     // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md §2). The public reads TrSnapshots only.
     public DbSet<TrTech> TrTechs => Set<TrTech>();
@@ -348,8 +354,20 @@ public class AppDbContext : DbContext
         b.Entity<OdditySettings>().Property(s => s.UpdatedAtUtc).HasConversion(utc);
         b.Entity<OddityRequest>().Property(r => r.TimestampUtc).HasConversion(utc);
 
-        // The same for the Ministry of Truth: every time it shows is converted from UTC to Bangladesh time.
-        foreach (var type in b.Model.GetEntityTypes().Where(t => t.ClrType.Name.StartsWith("Tr", StringComparison.Ordinal)))
+        // ---- Jiji ----
+        b.Entity<JijiContent>().HasIndex(c => new { c.OwnerId, c.Status });
+        // Every write names the UpdatedAt it read; a stale one changes nothing (409).
+        b.Entity<JijiContent>().Property(c => c.UpdatedAt).IsConcurrencyToken();
+        b.Entity<JijiJob>().HasOne<JijiContent>().WithMany().HasForeignKey(j => j.ContentId).OnDelete(DeleteBehavior.Cascade);
+        // A repeated completion inserts the next job again; this index makes the second insert a no-op.
+        b.Entity<JijiJob>().HasIndex(j => new { j.ContentId, j.Type, j.ContentRevision }).IsUnique();
+        b.Entity<JijiJob>().HasIndex(j => new { j.Status, j.AvailableAtUtc });
+        b.Entity<JijiYouTubeAccount>().HasKey(a => a.OwnerId);
+        b.Entity<JijiYouTubeAccount>().Property(a => a.OwnerId).ValueGeneratedNever();
+
+        // The same for the Ministry of Truth and Jiji: every time they show is converted from UTC to Bangladesh time.
+        foreach (var type in b.Model.GetEntityTypes().Where(t => t.ClrType.Name.StartsWith("Tr", StringComparison.Ordinal)
+                                                              || t.ClrType.Name.StartsWith("Jiji", StringComparison.Ordinal)))
         foreach (var prop in type.GetProperties())
         {
             if (prop.ClrType == typeof(DateTime)) prop.SetValueConverter(utc);

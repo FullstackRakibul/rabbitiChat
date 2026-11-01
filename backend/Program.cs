@@ -370,6 +370,9 @@ builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityKeyService>();
 builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityRecorder>();
 builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityProxy>();
 
+// Jiji (docs/JIJI_PLAN.md): notes into YouTube Shorts. Options, services and, later, its worker.
+RabbitIC.Api.Jiji.JijiModule.AddJijiModule(builder.Services, builder.Configuration);
+
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 	p.WithOrigins("http://localhost:5173", "http://192.168.61.41:4200",
@@ -443,6 +446,7 @@ app.ApplicationHrApis();
 app.ApplicationMatrixApis();
 app.ApplicationHrisApis();
 app.ApplicationTruthApis();
+RabbitIC.Api.Jiji.JijiModule.ApplicationJijiApis(app);
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);

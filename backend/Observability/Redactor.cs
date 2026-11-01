@@ -44,6 +44,8 @@ public sealed class Redactor : IRedactor
         "keyhash",
         // User's password material (N3): matched by exact name, so "secret" alone missed them.
         "secrethash", "secretsalt",
+        // Jiji: Azure Speech's key header, if a request's headers are ever logged.
+        "ocp-apim-subscription-key",
     };
 
     // Matches a key=value pair where key is on the deny list (query strings).

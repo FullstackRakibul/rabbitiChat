@@ -7,17 +7,19 @@
  * The server checks every save (code only from your notes, at most 4 lines, YouTube's
  * limits) and refuses a broken one whole. Approve stays off until originalAngle and
  * myTake have text; the server checks the rest and queues the narration.
- * While a job is queued or running, the item is re-read every 5 seconds.
+ * While a job is queued or running, the item is re-read every 5 seconds. Once narrated,
+ * the narration plays here (fetched as a blob: <audio> cannot send the bearer header)
+ * with every part's timing; a failed job shows its error and Retry.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Check, Code2, List, Loader2, Plus, RefreshCw, Save, Sparkles, Trash2, Type } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Check, Code2, List, Loader2, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, Type } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import ModelPicker from '@/components/ModelPicker.vue'
 import {
-  JIJI_CONTENT_TYPES, JIJI_STATUSES, approveJijiScript, deleteJijiContent, generateJijiScript, getJijiContent,
-  jijiIssues, saveJijiScript, updateJijiContent,
+  JIJI_CONTENT_TYPES, JIJI_STATUSES, approveJijiScript, deleteJijiContent, fetchJijiAudio, generateJijiScript, getJijiContent,
+  getJijiTimings, jijiIssues, retryJijiJob, saveJijiScript, updateJijiContent,
 } from '@/services/jiji.service.js'
 
 const props = defineProps({ id: { type: Number, required: true } })
@@ -171,6 +173,30 @@ watch(working, (on) => {
   }, 5000)
 }, { immediate: true })
 onBeforeUnmount(() => clearInterval(timer))
+
+// ---- Narration ----
+const audioUrl = ref('')
+const timings = ref(null)
+let audioFor = ''
+watch(() => item.value && `${item.value.id}:${item.value.revision}:${item.value.hasNarration}`, async (key) => {
+  if (!key || key === audioFor) return
+  audioFor = key
+  if (audioUrl.value) { URL.revokeObjectURL(audioUrl.value); audioUrl.value = '' }
+  timings.value = null
+  if (!item.value.hasNarration) return
+  try {
+    const [blob, t] = await Promise.all([fetchJijiAudio(props.id), getJijiTimings(props.id)])
+    audioUrl.value = URL.createObjectURL(blob)
+    timings.value = t
+  } catch (e) { fail(e) }
+})
+onBeforeUnmount(() => { if (audioUrl.value) URL.revokeObjectURL(audioUrl.value) })
+const secs = (ms) => (ms / 1000).toFixed(2)
+
+async function retry(jobId) {
+  busy.value = 'retry'; clear()
+  try { take(await retryJijiJob(jobId), { keepScript: scriptDirty.value }); emit('changed') } catch (e) { fail(e) } finally { busy.value = '' }
+}
 
 watch(() => props.id, load, { immediate: true })
 
@@ -326,6 +352,25 @@ const VISUALS = [
         </div>
       </section>
 
+      <p v-if="item.lastError" class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-jiji-last-error>
+        {{ item.lastError }}
+      </p>
+
+      <!-- Narration -->
+      <section v-if="audioUrl" class="flex flex-col gap-2 rounded-lg border bg-card p-4 text-sm" data-jiji-narration>
+        <h3 class="font-semibold">Narration <span class="text-xs font-normal text-muted-foreground">{{ secs(timings?.totalMs ?? 0) }} s</span></h3>
+        <audio :src="audioUrl" controls class="w-full" />
+        <table v-if="timings" class="w-full text-xs">
+          <tbody>
+            <tr v-for="p in timings.parts" :key="p.id" class="border-t align-top">
+              <td class="py-1 pr-2 font-mono text-muted-foreground">{{ secs(p.startMs) }}–{{ secs(p.endMs) }}</td>
+              <td class="py-1 pr-2 text-muted-foreground">{{ p.id }}</td>
+              <td class="py-1">{{ p.text }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
       <!-- Jobs -->
       <section v-if="item.jobs.length" class="flex flex-col gap-1 rounded-lg border bg-card p-4 text-sm">
         <h3 class="mb-1 font-semibold">Jobs</h3>
@@ -333,8 +378,11 @@ const VISUALS = [
           <span class="w-14 font-medium">{{ j.type }}</span>
           <span class="rounded border px-1.5" :class="j.status === 'Failed' || j.status === 'UnknownOutcome' ? 'border-destructive text-destructive' : ''">{{ j.status }}</span>
           <span class="text-muted-foreground">revision {{ j.contentRevision }} · attempts {{ j.attempts }}</span>
-          <span v-if="j.status === 'Pending' && j.type === 'Tts'" class="text-muted-foreground">(narration runs once the worker arrives, day 3)</span>
-          <span v-if="j.lastError" class="w-full text-destructive">{{ j.lastError }}</span>
+          <span v-if="j.status === 'Pending' && j.type === 'Render'" class="text-muted-foreground">(the renderer arrives on day 4)</span>
+          <span v-if="j.status === 'Pending' && j.attempts > 0" class="text-muted-foreground">retry at {{ new Date(j.availableAtUtc).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka' }) }}</span>
+          <Button v-if="j.status === 'Failed' && j.contentRevision === item.revision" size="sm" variant="outline" class="h-6 px-2 text-xs"
+            :disabled="!!busy" data-jiji-retry @click="retry(j.id)"><RotateCcw /> Retry</Button>
+          <span v-if="j.lastError" class="w-full" :class="j.status === 'Done' ? 'text-muted-foreground' : 'text-destructive'">{{ j.lastError }}</span>
         </div>
       </section>
     </template>
