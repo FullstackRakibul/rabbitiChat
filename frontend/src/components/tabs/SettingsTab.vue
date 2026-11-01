@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { Moon, Sun, Settings, BookOpen, KeyRound, Loader2 } from '@lucide/vue'
+import { Moon, Sun, Settings, BookOpen, KeyRound, Loader2, Cpu } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { changeSecret } from '@/services/index.js'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/card'
 import { useTheme } from '@/composables/useTheme'
 import MostiskoDocsPage from '@/components/mostisko-docs/MostiskoDocsPage.vue'
+import ModelProvidersPanel from '@/components/settings/ModelProvidersPanel.vue'
 
 const props = defineProps({
   username: { type: String, default: '' },
@@ -25,6 +26,8 @@ const props = defineProps({
   apiBaseUrl: { type: String, default: '' },
   models: { type: Array, default: () => [] },
   model: { type: String, default: '' },
+  /** The signed-in role. Model providers show for SystemAdmin only; the server refuses everyone else. */
+  role: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:model', 'logout'])
@@ -69,14 +72,15 @@ async function submitSecret() {
   }
 }
 
-/** @type {import('vue').Ref<'settings' | 'docs'>} */
+/** @type {import('vue').Ref<'settings' | 'providers' | 'docs'>} */
 const settingsView = ref('settings')
 
-/** @type {{ id: 'settings' | 'docs', label: string, icon: object }[]} */
-const viewTabs = [
-  { id: 'settings', label: 'General',       icon: Settings },
-  { id: 'docs',     label: 'Documentation', icon: BookOpen },
-]
+/** @type {import('vue').ComputedRef<{ id: 'settings' | 'providers' | 'docs', label: string, icon: object }[]>} */
+const viewTabs = computed(() => [
+  { id: 'settings',  label: 'General',         icon: Settings },
+  ...(props.role === 'SystemAdmin' ? [{ id: 'providers', label: 'Model providers', icon: Cpu }] : []),
+  { id: 'docs',      label: 'Documentation',   icon: BookOpen },
+])
 </script>
 
 <template>
@@ -101,6 +105,9 @@ const viewTabs = [
         {{ tab.label }}
       </button>
     </div>
+
+    <!-- Model providers (SystemAdmin) -->
+    <ModelProvidersPanel v-if="settingsView === 'providers' && role === 'SystemAdmin'" />
 
     <!-- General Settings view -->
     <div v-if="settingsView === 'settings'" class="flex-1 overflow-y-auto p-4 sm:p-6">
@@ -223,6 +230,6 @@ const viewTabs = [
     </div>
 
     <!-- Documentation view — fills remaining space, manages its own scrolling -->
-    <MostiskoDocsPage v-else class="min-h-0 flex-1" />
+    <MostiskoDocsPage v-else-if="settingsView === 'docs'" class="min-h-0 flex-1" />
   </div>
 </template>

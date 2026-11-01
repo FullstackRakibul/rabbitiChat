@@ -20,9 +20,35 @@ async function load() {
 
 onMounted(load)
 
+/** Tokens as 0.3M / 12.4k, for a prepaid budget at a glance. */
+function tokens(n) {
+  if (n == null) return ''
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`
+  return String(n)
+}
+
+const PROVIDER_STATUS = {
+  ok: 'Connected', untested: 'Not tested yet', key_rejected: 'Key rejected', no_credit: 'Credit used up — top up',
+  rate_limited: 'Rate limited', unreachable: 'Unreachable', error: 'Error', key_unreadable: 'Key unreadable — paste it again',
+  disabled: 'Switched off',
+}
+
+function providerRow(p) {
+  const used = `Jiji ${tokens(p.jijiTokensThisMonth)} this month`
+    + (p.monthlyTokenBudget ? ` · all ${tokens(p.tokensThisMonth)} of ${tokens(p.monthlyTokenBudget)}` : '')
+  return {
+    label: `Model provider · ${p.name}`,
+    ok: p.status === 'ok',
+    note: `${PROVIDER_STATUS[p.status] || p.status} · ${used}`,
+    word: p.status === 'ok' ? 'Ready' : 'Check Settings',
+  }
+}
+
 const rows = (s) => [
   { label: 'Storage folder writable', ok: s.storageWritable },
   { label: 'Default script model', ok: !!s.model, note: s.model ? `${s.model} (${s.modelSource})` : 'None: pick one each time, or set Jiji:Model' },
+  ...(s.provider ? [providerRow(s.provider)] : []),
   { label: 'Writing style', ok: s.voiceFound, note: s.voiceFound ? 'Context source "Jiji voice"' : 'Optional: add a context source named "Jiji voice" in Sources' },
   { label: 'Azure Speech', ok: s.speechConfigured, note: s.speechConfigured ? '' : 'Jiji__AzureSpeech__ApiKey and Jiji:AzureSpeech:Region' },
   { label: 'YouTube OAuth client', ok: s.youTubeConfigured, note: s.youTubeConfigured ? '' : 'Jiji:YouTube:ClientId and Jiji__YouTube__ClientSecret (day 6)' },
@@ -44,7 +70,7 @@ const rows = (s) => [
         <span>{{ r.label }}</span>
         <span class="flex items-center gap-2 text-right">
           <span v-if="r.note" class="text-xs text-muted-foreground">{{ r.note }}</span>
-          <span :class="r.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'">{{ r.ok ? 'Ready' : 'Missing' }}</span>
+          <span :class="r.ok ? 'text-emerald-600 dark:text-emerald-400' : r.word ? 'text-destructive' : 'text-muted-foreground'">{{ r.word || (r.ok ? 'Ready' : 'Missing') }}</span>
         </span>
       </li>
     </ul>

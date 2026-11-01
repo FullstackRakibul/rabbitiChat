@@ -14,6 +14,10 @@ export {
   getJijiStatus, generateJijiIdeas, listJijiContents, createJijiContent, getJijiContent, updateJijiContent, deleteJijiContent,
   generateJijiScript, saveJijiScript, approveJijiScript, retryJijiJob, getJijiTimings, fetchJijiAudio,
 } from './jiji.service.js'
+export {
+  listModelProviders, createModelProvider, updateModelProvider, deleteModelProvider, testModelProvider,
+  getModelProviderCatalog, refreshModelProviderCatalog, saveModelProviderModels,
+} from './model-providers.service.js'
 export { getToken, getUsername, setSession, clearSession } from './session.service.js'
 export { login, logout, changeSecret } from './auth.service.js'
 export { getModels, streamChat } from './chat.service.js'

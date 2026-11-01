@@ -1170,7 +1170,7 @@ const notesTabRef = ref(null)
       <TabsContent value="settings" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <SettingsTab v-model:model="model" :username="username" :initials="initials"
           :status="status" :connected="connected" :api-base-url="environment.apiBaseUrl" :models="models"
-          @logout="logout" />
+          :role="myRole" @logout="logout" />
       </TabsContent>
       
       <TabsContent value="notes" class="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
