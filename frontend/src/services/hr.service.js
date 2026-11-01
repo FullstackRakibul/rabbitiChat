@@ -100,7 +100,7 @@ export function deleteHrConversation(id) {
  * calculated), `done`. `items` is the "Search in" scope; empty means the whole
  * library. Resolves with the conversation id.
  */
-export async function streamHrChat({ conversationId, message, items = [], model }, handlers, signal) {
+export async function streamHrChat({ conversationId, message, items = [], model, source }, handlers, signal) {
   let buffer = ''
   const consume = (line) => {
     const trimmed = line.trim()
@@ -116,7 +116,8 @@ export async function streamHrChat({ conversationId, message, items = [], model 
       case 'unverified': handlers.onUnverified?.(frame.amounts ?? [], frame.formulas ?? [], frame.citations ?? []); break
     }
   }
-  const res = await http.stream('/hr/chat', { conversationId, message, items, model }, (chunk) => {
+  // `model` and `source` empty = the HR default model; the server checks either against Access → Models.
+  const res = await http.stream('/hr/chat', { conversationId, message, items, model: model || null, source: source || null }, (chunk) => {
     buffer += chunk
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''

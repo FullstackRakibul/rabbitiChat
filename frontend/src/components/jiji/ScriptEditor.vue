@@ -246,7 +246,7 @@ const VISUALS = [
 
       <!-- Generate -->
       <section v-if="editable" class="flex flex-wrap items-center gap-2">
-        <ModelPicker v-model="model" v-model:source="source" :disabled="!!busy" />
+        <ModelPicker v-model="model" v-model:source="source" module="jiji" :disabled="!!busy" />
         <Button :disabled="!model || !!busy || notesDirty" data-jiji-generate @click="generate">
           <Loader2 v-if="busy === 'generate'" class="animate-spin" /><Sparkles v-else />
           {{ script ? 'Write again' : 'Write the script' }}

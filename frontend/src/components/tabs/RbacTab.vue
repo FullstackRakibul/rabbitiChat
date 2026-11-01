@@ -19,6 +19,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import ModelPolicyEditor from '@/components/rbac/ModelPolicyEditor.vue'
+import ModelAccessEditor from '@/components/rbac/ModelAccessEditor.vue'
+import ModelAccessRoles from '@/components/rbac/ModelAccessRoles.vue'
 import RolePresetMatrix from '@/components/rbac/RolePresetMatrix.vue'
 import { cn } from '@/lib/utils'
 
@@ -471,10 +473,20 @@ defineExpose({ refresh: refreshList })
       </section>
     </div>
 
+    <!-- The selected user's models in Chat, HR and Jiji: adds to the role's. -->
+    <ModelAccessEditor v-if="view === 'users' && selected" :key="selected.id" :user-id="selected.id" />
+
     <!--
-      The model policy. Same screen, same audience: the access managers, which is
-      the gate on the editor too.
+      Models: Chat, HR and Jiji follow the per-role rules above (Access → Models); every other
+      model-running feature keeps the older per-role policy below. Same audience, same gate.
     -->
-    <ModelPolicyEditor v-if="view === 'models'" />
+    <template v-if="view === 'models'">
+      <ModelAccessRoles />
+      <div class="flex flex-col gap-1">
+        <h3 class="text-sm font-semibold">Other modules</h3>
+        <p class="text-xs text-muted-foreground">PO Studio, Matrix, Workspace, the component splitter and the gateway still use this per-role Ollama list.</p>
+      </div>
+      <ModelPolicyEditor />
+    </template>
   </div>
 </template>

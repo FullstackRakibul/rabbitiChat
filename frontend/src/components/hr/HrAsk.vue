@@ -26,6 +26,7 @@ import {
 import MarkdownBody from '@/components/MarkdownBody.vue'
 import { Button } from '@/components/ui/button'
 import HrItemViewer from '@/components/hr/HrItemViewer.vue'
+import ModelPicker from '@/components/ModelPicker.vue'
 import { attr, escapeHtml, UNKNOWN_SOURCE, withFormulas } from '@/lib/hr-text'
 
 /** A Rulebook citation was clicked: the tab opens that page at that version ({ pageId | title, version }). */
@@ -49,6 +50,10 @@ const error = ref('')
 let controller = null
 
 const scope = ref([])            // "Search in": item ids; empty = the whole library
+// The model, from the models this user may use in HR (Access → Models). A role locked in HR
+// sees its one model, the HR default, and no dropdown; empty sends nothing (= the HR default).
+const hrModel = ref('')
+const hrSource = ref('local')
 const scopeOpen = ref(false)
 
 const query = ref('')
@@ -137,7 +142,9 @@ async function send(text = input.value) {
   busy.value = true
   controller = new AbortController()
   try {
-    const id = await streamHrChat({ conversationId: currentId.value, message: question, items: scope.value }, {
+    const id = await streamHrChat({
+      conversationId: currentId.value, message: question, items: scope.value, model: hrModel.value, source: hrSource.value,
+    }, {
       onStatus: (text) => { reply.status = text },
       onContext: (c) => { reply.context = c },
       onContent: (chunk) => { reply.content += chunk; scrollDown() },
@@ -470,6 +477,7 @@ const contextTokens = (c) => c ? c.tokens.system + c.tokens.excerpts + c.tokens.
                 <span class="truncate">Search in: {{ scopeLabel }}</span>
                 <ChevronDown class="h-3.5 w-3.5 shrink-0" />
               </button>
+              <ModelPicker v-model="hrModel" v-model:source="hrSource" module="hr" up class="w-52 min-w-0 text-xs" :disabled="busy" data-hr-model />
               <Button size="icon" class="ml-auto h-9 w-9 shrink-0 rounded-full" :variant="busy ? 'destructive' : 'default'"
                 :disabled="!busy && !input.trim()" :aria-label="busy ? 'Stop' : 'Send'" @click="send()">
                 <Square v-if="busy" class="h-3.5 w-3.5" />

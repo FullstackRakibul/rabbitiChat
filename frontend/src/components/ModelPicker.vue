@@ -9,7 +9,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Check, ChevronDown, Cloud, HardDrive, Lock } from '@lucide/vue'
 import { cn } from '@/lib/utils'
-import { listModelsGrouped, loadModelChoice, saveModelChoice } from '@/services/model.service.js'
+import { formatMultiplier, listModelsGrouped, loadModelChoice, saveModelChoice } from '@/services/model.service.js'
 
 const props = defineProps({
   /** Selected model name. */
@@ -17,6 +17,13 @@ const props = defineProps({
   /** Selected source key ("local" | "cloud"). */
   source: { type: String, default: 'local' },
   disabled: { type: Boolean, default: false },
+  /**
+   * chat, hr or jiji: the list follows Access → Models' rules for that module. Empty for
+   * the pickers outside those modules, which keep the per-role model policy.
+   */
+  module: { type: String, default: '' },
+  /** Open the list above the button — for a composer at the bottom of the screen. */
+  up: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:source'])
@@ -47,18 +54,39 @@ function choose(model) {
   open.value = false
   emit('update:modelValue', model.name)
   emit('update:source', model.source)
-  saveModelChoice(model.source, model.name)
+  saveModelChoice(model.source, model.name, props.module)
+}
+
+/**
+ * Read again every time the list opens: the picker lives as long as the page, and a
+ * provider added or a rule changed in Settings or Access must show without a reload.
+ * The list on screen stays until the new one arrives.
+ */
+async function reload() {
+  try {
+    const served = await listModelsGrouped(props.module)
+    groups.value = served.groups
+    locked.value = served.locked
+    error.value = ''
+  } catch (e) {
+    error.value = e.message || 'Could not load models.'
+  }
+}
+
+function toggle() {
+  open.value = !open.value
+  if (open.value) reload()
 }
 
 onMounted(async () => {
   try {
-    const served = await listModelsGrouped()
+    const served = await listModelsGrouped(props.module)
     groups.value = served.groups
     locked.value = served.locked
 
     // Restore the remembered choice when it still exists; otherwise fall back to
     // the first local model, so a vanished cloud plan can't leave a dead picker.
-    const remembered = loadModelChoice()
+    const remembered = loadModelChoice(props.module) || served.defaultChoice
     const all = groups.value.flatMap((g) => g.models)
     const match = remembered
       && all.find((m) => m.name === remembered.model && m.source === remembered.source)
@@ -106,11 +134,14 @@ onMounted(async () => {
         'flex h-9 w-full items-center gap-2 rounded-md border bg-background px-3 text-sm transition-colors',
         'hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50',
       )"
-      @click="open = !open"
+      @click="toggle"
     >
       <component :is="iconFor(source)" class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1 truncate text-left">
         {{ loading ? 'Loading models…' : (modelValue || 'Select a model') }}
+      </span>
+      <span v-if="selected?.multiplier != null" class="shrink-0 font-mono text-[10px] text-muted-foreground">
+        {{ formatMultiplier(selected.multiplier) }}
       </span>
       <span
         v-if="selected?.metered"
@@ -123,7 +154,7 @@ onMounted(async () => {
 
     <template v-if="open">
       <div class="fixed inset-0 z-40" @click="open = false" />
-      <div class="absolute left-0 z-50 mt-1 max-h-80 w-full min-w-[16rem] overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">
+      <div :class="cn('absolute left-0 z-50 max-h-80 w-full min-w-[16rem] overflow-y-auto rounded-lg border bg-popover p-1 shadow-md', up ? 'bottom-full mb-1' : 'mt-1')">
         <p v-if="error" class="px-2 py-3 text-sm text-destructive">
           {{ error }}
         </p>
@@ -151,6 +182,9 @@ onMounted(async () => {
               )"
             />
             <span class="min-w-0 flex-1 truncate">{{ m.name }}</span>
+            <span v-if="m.multiplier != null" class="shrink-0 font-mono text-[10px] text-muted-foreground" :title="`Cost multiplier ${formatMultiplier(m.multiplier)}`">
+              {{ formatMultiplier(m.multiplier) }}
+            </span>
             <span
               v-if="m.metered"
               class="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-400"

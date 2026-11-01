@@ -102,7 +102,7 @@ async function create() {
       </label>
 
       <div class="flex flex-wrap items-center gap-2">
-        <ModelPicker v-model="model" v-model:source="source" :disabled="!!busy" />
+        <ModelPicker v-model="model" v-model:source="source" module="jiji" :disabled="!!busy" />
         <Button :disabled="!canAsk" data-jiji-ask @click="askAngles">
           <Loader2 v-if="busy === 'ideas'" class="animate-spin" /><Sparkles v-else />
           {{ angles.length ? 'Ask again' : 'Suggest 5 angles' }}

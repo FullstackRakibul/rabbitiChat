@@ -150,7 +150,7 @@ async function refreshModels() {
   try {
     // The full records, not just names: the composer gates Think and Search on
     // each model's declared capabilities, and shows its real context window.
-    modelRecords.value = await listModels()
+    modelRecords.value = await listModels('chat')
     models.value = modelRecords.value.map((m) => m.name)
 
     if (models.value.length) {

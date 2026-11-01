@@ -118,6 +118,7 @@ const hasPrices = computed(() => (catalog.value?.models || []).some((m) => m.inp
             <th class="px-2 py-1.5 text-left font-medium">Model</th>
             <th v-if="hasPrices" class="px-2 py-1.5 text-right font-medium">Input</th>
             <th v-if="hasPrices" class="px-2 py-1.5 text-right font-medium">Output</th>
+            <th class="w-14 px-2 py-1.5 text-right font-medium" title="Cost multiplier: weighted tokens = tokens × this">Cost</th>
             <th class="w-16 px-2 py-1.5 text-center font-medium">Allowed</th>
             <th class="w-14 px-2 py-1.5 text-center font-medium">Tools</th>
           </tr>
@@ -130,6 +131,9 @@ const hasPrices = computed(() => (catalog.value?.models || []).some((m) => m.inp
             </td>
             <td v-if="hasPrices" class="px-2 py-1.5 text-right font-mono text-xs tabular-nums">{{ m.inputPrice ?? '' }}</td>
             <td v-if="hasPrices" class="px-2 py-1.5 text-right font-mono text-xs tabular-nums">{{ m.outputPrice ?? '' }}</td>
+            <td class="px-2 py-1.5 text-right font-mono text-xs tabular-nums" :class="m.multiplier > 1.3 ? 'text-amber-600 dark:text-amber-400' : ''">
+              {{ m.multiplier != null ? `${m.multiplier}x` : '' }}
+            </td>
             <td class="px-2 py-1.5 text-center">
               <Checkbox :model-value="allowed.has(m.id)" :aria-label="`Allow ${m.id}`" @update:model-value="(v) => setAllowed(m.id, v)" />
             </td>
@@ -138,7 +142,7 @@ const hasPrices = computed(() => (catalog.value?.models || []).some((m) => m.inp
             </td>
           </tr>
           <tr v-if="catalog && !rows.length">
-            <td colspan="5" class="px-2 py-6 text-center text-xs text-muted-foreground">Nothing matches.</td>
+            <td colspan="6" class="px-2 py-6 text-center text-xs text-muted-foreground">Nothing matches.</td>
           </tr>
         </tbody>
       </table>

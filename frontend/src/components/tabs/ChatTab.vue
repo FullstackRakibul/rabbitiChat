@@ -50,6 +50,8 @@ const activeSources = computed(() =>
         <!-- Grouped by source: local models are private, cloud ones are metered. -->
         <ModelPicker
           v-model="modelValue"
+          module="chat"
+          data-chat-model
           :source="source"
           class="w-56"
           @update:source="emit('update:source', $event)"

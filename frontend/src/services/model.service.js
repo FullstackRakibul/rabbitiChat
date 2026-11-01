@@ -27,8 +27,17 @@ function labelFor(model, key) {
  * not the control - every endpoint enforces the policy itself.
  * @returns {Promise<Array<{name, source, contextLength, capabilities, metered, sourceLabel}>>}
  */
-export function listModels() {
-  return http.get('/models')
+export function listModels(module = '') {
+  return http.get(modelsPath(module))
+}
+
+/**
+ * `module` is chat, hr or jiji: the server then answers with Access → Models' rules
+ * for that module (and X-Model-Locked when the module is locked for this user).
+ * Without it, the per-role model policy every other picker uses.
+ */
+function modelsPath(module) {
+  return module ? `/models?module=${encodeURIComponent(module)}` : '/models'
 }
 
 /**
@@ -38,10 +47,13 @@ export function listModels() {
  * plain listModels() shape stays exactly as every existing caller expects.
  * @returns {Promise<{models: Array, locked: boolean}>}
  */
-export async function listModelsWithPolicy() {
-  const res = await http.raw('/models')
+export async function listModelsWithPolicy(module = '') {
+  const res = await http.raw(modelsPath(module))
   const models = await res.json()
-  return { models, locked: res.headers.get('X-Model-Locked') === 'true' }
+  // "source|model", URL-encoded: the module's default, for a picker with no remembered choice.
+  const raw = res.headers.get('X-Model-Default')
+  const [s, m] = raw ? raw.split('|').map(decodeURIComponent) : []
+  return { models, locked: res.headers.get('X-Model-Locked') === 'true', defaultChoice: m ? { source: s, model: m } : null }
 }
 
 /** True when this model can be used for tool calling (agentic search). */
@@ -54,8 +66,8 @@ export function supportsTools(model) {
  * Ollama cloud, then any configured OpenAI-compatible provider in config order.
  * @returns {Promise<{groups: Array<{key: string, label: string, models: Array}>, locked: boolean}>}
  */
-export async function listModelsGrouped() {
-  const { models, locked } = await listModelsWithPolicy()
+export async function listModelsGrouped(module = '') {
+  const { models, locked, defaultChoice } = await listModelsWithPolicy(module)
   const order = ['local', 'cloud']
 
   const groups = []
@@ -74,19 +86,30 @@ export async function listModelsGrouped() {
 
   // Returned together, from the one request: a second call for `locked` could
   // answer differently and leave the picker disagreeing with its own list.
-  return { groups, locked }
+  return { groups, locked, defaultChoice }
 }
 
-/** Remembers the last picked model across reloads. Shape: { source, model }. */
-export function saveModelChoice(source, model) {
+/**
+ * Remembers the last picked model across reloads, per module: HR's choice must not
+ * become Chat's. Shape: { source, model }.
+ */
+export function saveModelChoice(source, model, module = '') {
   try {
-    localStorage.setItem(LAST_CHOICE_KEY, JSON.stringify({ source, model }))
+    localStorage.setItem(choiceKey(module), JSON.stringify({ source, model }))
   } catch { /* private mode / storage disabled — the picker still works */ }
 }
 
-export function loadModelChoice() {
+const choiceKey = (module) => (module ? `${LAST_CHOICE_KEY}.${module}` : LAST_CHOICE_KEY)
+
+/** "0.2x" from 0.2; '' when the model has no multiplier (Ollama). */
+export function formatMultiplier(m) {
+  if (m == null) return ''
+  return `${Number.isInteger(m) ? m.toFixed(1) : String(m)}x`
+}
+
+export function loadModelChoice(module = '') {
   try {
-    const raw = localStorage.getItem(LAST_CHOICE_KEY)
+    const raw = localStorage.getItem(choiceKey(module))
     if (!raw) return null
     const parsed = JSON.parse(raw)
     return parsed && parsed.model ? parsed : null

@@ -74,14 +74,27 @@ function status(p) { return PROVIDER_STATUS[p.status] || { label: p.status, tone
 
 const DOT = { ok: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-destructive', idle: 'bg-muted-foreground/40' }
 
+/** Weighted tokens (tokens × each model's multiplier): what the plan counts. */
 function usage(p) {
-  const used = formatTokens(p.usage.totalTokens)
+  const used = formatTokens(Math.round(p.usage.weightedTokens))
   return p.monthlyTokenBudget ? `${used} of ${formatTokens(p.monthlyTokenBudget)}` : used
 }
 
 function budgetShare(p) {
-  return p.monthlyTokenBudget ? Math.min(100, (p.usage.totalTokens / p.monthlyTokenBudget) * 100) : 0
+  return p.monthlyTokenBudget ? Math.min(100, (p.usage.weightedTokens / p.monthlyTokenBudget) * 100) : 0
 }
+
+// The plan size, edited in place (million weighted tokens a month).
+const planEdit = ref({})
+function editPlan(p) { planEdit.value = { ...planEdit.value, [p.id]: p.monthlyTokenBudget ? String(p.monthlyTokenBudget / 1e6) : '' } }
+const savePlan = (p) => run(p, 'plan', async () => {
+  const m = planEdit.value[p.id]
+  const tokens = m === '' ? 0 : Math.round(Number(m) * 1e6)
+  if (!Number.isFinite(tokens) || tokens < 0) throw new Error('The plan size is a number of million tokens, e.g. 4.5.')
+  replace(await updateModelProvider(p.id, { monthlyTokenBudget: tokens }))
+  const { [p.id]: _, ...rest } = planEdit.value
+  planEdit.value = rest
+})
 </script>
 
 <template>
@@ -129,8 +142,18 @@ function budgetShare(p) {
               </span>
             </div>
 
-            <div class="flex w-32 flex-col gap-1 text-xs" :title="`${p.usage.calls} calls this month`">
-              <span class="text-muted-foreground">This month: <span class="tabular-nums text-foreground">{{ usage(p) }}</span></span>
+            <div class="flex w-40 flex-col gap-1 text-xs"
+              :title="`${p.usage.calls} calls · ${p.usage.totalTokens} raw tokens · ${Math.round(p.usage.weightedTokens)} weighted, since the 1st (Asia/Dhaka)`">
+              <form v-if="planEdit[p.id] !== undefined" class="flex items-center gap-1" @submit.prevent="savePlan(p)">
+                <input v-model="planEdit[p.id]" inputmode="decimal" placeholder="4.5" aria-label="Plan size, million tokens"
+                  class="h-6 w-14 rounded border bg-background px-1 text-xs" />
+                <span class="text-muted-foreground">M</span>
+                <button type="submit" class="text-primary hover:underline">Save</button>
+              </form>
+              <span v-else class="text-muted-foreground">
+                This month: <span class="tabular-nums text-foreground">{{ usage(p) }}</span>
+                <button type="button" class="ml-1 text-primary hover:underline" :aria-label="`Edit ${p.name}'s plan size`" @click="editPlan(p)">plan</button>
+              </span>
               <div v-if="p.monthlyTokenBudget" class="h-1.5 overflow-hidden rounded-full bg-muted">
                 <div class="h-full rounded-full" :class="budgetShare(p) > 85 ? 'bg-destructive' : 'bg-primary'" :style="{ width: `${budgetShare(p)}%` }" />
               </div>
