@@ -1,59 +1,58 @@
-// Jiji — Azure Speech text to speech, over its REST API: one SSML request per spoken
-// part, answered as 24 kHz 16-bit mono PCM WAV (riff-24khz-16bit-mono-pcm, the SDK's
-// Riff24Khz16BitMonoPcm). The key goes in a header on this request only.
+// Jiji — text to speech through the speech provider chosen in Jiji → Settings: a Model providers
+// entry with the speech capability (Kokoro-FastAPI or any OpenAI-compatible speech API).
+// POST {baseUrl}/audio/speech with model, voice, input, response_format "wav", speed and
+// "stream": false; one call per spoken part. The provider's URL and key stay in Model providers.
 
-using System.Net;
-using System.Security;
-using System.Text;
-using Microsoft.Extensions.Options;
 using RabbitIC.Api.Jiji.Workers;
+using RabbitIC.Api.ModelProviders;
 
 namespace RabbitIC.Api.Jiji.Services;
 
-public sealed class TtsService(IHttpClientFactory http, IOptions<JijiOptions> options)
+/// <summary>Who will speak: the provider, the model and the voice, resolved from the settings.</summary>
+public sealed record JijiVoiceChoice(SpeechTarget Target, string Model, string Voice, double Speed, int GapMs);
+
+public sealed class TtsService(SpeechClient speech, DbModelSourceProvider providers, JijiSettingsService settings)
 {
-    public const string ClientName = "jiji-speech";
-    public const string OutputFormat = "riff-24khz-16bit-mono-pcm";
-
-    /// <summary>The WAV for one part. Throws <see cref="JijiJobException"/>, transient or not.</summary>
-    public async Task<byte[]> SynthesizeAsync(string text, string language, CancellationToken ct)
+    /// <summary>The provider, model and voice the settings name. Throws a permanent <see cref="JijiJobException"/> when one is missing.</summary>
+    public async Task<JijiVoiceChoice> ChooseAsync(CancellationToken ct)
     {
-        var opt = options.Value.AzureSpeech;
-        if (!opt.IsConfigured)
-            throw new JijiJobException("Azure Speech is not configured: set Jiji__AzureSpeech__ApiKey and Jiji:AzureSpeech:Region, then retry.", transient: false);
-        if (!opt.Voices.TryGetValue(language, out var voice) || string.IsNullOrWhiteSpace(voice))
-            throw new JijiJobException($"No voice for '{language}': set Jiji:AzureSpeech:Voices:{language}.", transient: false);
-
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(opt.BaseUri, "cognitiveservices/v1"))
+        var s = await settings.GetAsync(ct);
+        if (s.SpeechProvider is null)
+            throw new JijiJobException("No speech provider is set: choose one in Jiji → Settings, then retry.", transient: false);
+        if (providers.Speech(s.SpeechProvider) is not { } p)
         {
-            Content = new StringContent(Ssml(text, voice), Encoding.UTF8, "application/ssml+xml"),
-        };
-        req.Headers.Add("Ocp-Apim-Subscription-Key", opt.ApiKey);
-        req.Headers.Add("X-Microsoft-OutputFormat", OutputFormat);
-        req.Headers.UserAgent.ParseAdd("Mostisko-Jiji");
+            var rt = providers.Runtime(s.SpeechProvider);
+            throw new JijiJobException(rt is null
+                ? $"The speech provider '{s.SpeechProvider}' no longer exists in Settings → Model providers. Choose another in Jiji → Settings."
+                : $"{rt.Name} is switched off or cannot be used ({rt.Message ?? rt.Status}). Check Settings → Model providers, then retry.", transient: false);
+        }
+        if (s.Voice is null)
+            throw new JijiJobException("No voice is set: choose one in Jiji → Settings, then retry.", transient: false);
+        return new JijiVoiceChoice(p.Target, s.SpeechModel, s.Voice, s.Speed, s.GapMs);
+    }
 
-        HttpResponseMessage resp;
-        try { resp = await http.CreateClient(ClientName).SendAsync(req, ct); }
-        catch (HttpRequestException e) { throw new JijiJobException($"Azure Speech could not be reached: {e.Message}", transient: true, e); }
-        catch (TaskCanceledException e) when (!ct.IsCancellationRequested)
-        { throw new JijiJobException("Azure Speech did not answer in time.", transient: true, e); }
-
-        using (resp)
+    /// <summary>The WAV for one part. Throws <see cref="JijiJobException"/>: unreachable and 5xx/429 are transient (retried), a 4xx is not.</summary>
+    public async Task<byte[]> SynthesizeAsync(JijiVoiceChoice v, string text, CancellationToken ct)
+    {
+        try
         {
-            if (resp.IsSuccessStatusCode) return await resp.Content.ReadAsByteArrayAsync(ct);
-            var code = (int)resp.StatusCode;
-            var transient = code >= 500 || resp.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout;
-            var hint = resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden ? " Check the key and region." : "";
-            throw new JijiJobException($"Azure Speech answered {code} {resp.ReasonPhrase}.{hint}", transient);
+            return await speech.SynthesizeAsync(v.Target, v.Model, v.Voice, text, v.Speed, ct);
+        }
+        catch (SpeechException e)
+        {
+            throw new JijiJobException(e.Message, e.Transient, e);
         }
     }
 
-    /// <summary>The voice's own locale ("en-US-AndrewNeural" → en-US) and the text, XML-escaped; nothing in it can become markup.</summary>
-    public static string Ssml(string text, string voice)
+    /// <summary>One sentence in the chosen (or given) voice, for the Preview button.</summary>
+    public async Task<byte[]> PreviewAsync(string? provider, string? voice, string text, CancellationToken ct)
     {
-        var parts = voice.Split('-');
-        var locale = parts.Length >= 2 ? $"{parts[0]}-{parts[1]}" : "en-US";
-        return $"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"{SecurityElement.Escape(locale)}\">" +
-               $"<voice name=\"{SecurityElement.Escape(voice)}\">{SecurityElement.Escape(text)}</voice></speak>";
+        var s = await settings.GetAsync(ct);
+        var key = string.IsNullOrWhiteSpace(provider) ? s.SpeechProvider : provider.Trim();
+        if (key is null || providers.Speech(key) is not { } p)
+            throw new SpeechException("Choose a speech provider first.", 400, false);
+        var v = string.IsNullOrWhiteSpace(voice) ? s.Voice : voice.Trim();
+        if (v is null) throw new SpeechException("Choose a voice first.", 400, false);
+        return await speech.SynthesizeAsync(p.Target, s.SpeechModel, v, text, s.Speed, ct, TimeSpan.FromSeconds(60));
     }
 }

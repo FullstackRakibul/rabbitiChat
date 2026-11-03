@@ -1,6 +1,6 @@
 namespace RabbitIC.Api.Jiji.Services;
 
-public enum JijiResultKind { Ok, NotFound, Invalid, Conflict, Forbidden, Upstream }
+public enum JijiResultKind { Ok, NotFound, Invalid, Conflict, Forbidden, Upstream, OverBudget }
 
 /// <summary>A service answer the endpoint maps to a status: 200, 404, 422, 409, 403, 502.</summary>
 public sealed record JijiResult<T>(JijiResultKind Kind, T? Value, string? Error, IReadOnlyList<string>? Issues = null)

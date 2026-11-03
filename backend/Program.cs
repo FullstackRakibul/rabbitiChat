@@ -372,6 +372,8 @@ builder.Services.AddScoped<RabbitIC.Api.Oddity.OddityProxy>();
 
 // Jiji (docs/JIJI_PLAN.md): notes into YouTube Shorts. Options, services and, later, its worker.
 RabbitIC.Api.Jiji.JijiModule.AddJijiModule(builder.Services, builder.Configuration);
+// Model providers added in Settings (MangoMind, …): encrypted keys, loaded into the registry without a restart.
+RabbitIC.Api.ModelProviders.ModelProviderModule.AddModelProviders(builder.Services, builder.Configuration, dbDirectory);
 
 // CORS so a Vue app on another origin can call us (the Vite dev proxy also covers this).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -382,7 +384,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 					"http://localhost:4200")
 	 .AllowAnyHeader()
 	 .AllowAnyMethod()
-	 .WithExposedHeaders("X-Conversation-Id", "X-Access-Rev")));
+	 .WithExposedHeaders("X-Conversation-Id", "X-Access-Rev", "X-Model-Locked", "X-Model-Default")));
 
 
 
@@ -447,6 +449,8 @@ app.ApplicationMatrixApis();
 app.ApplicationHrisApis();
 app.ApplicationTruthApis();
 RabbitIC.Api.Jiji.JijiModule.ApplicationJijiApis(app);
+RabbitIC.Api.ModelProviders.ModelProviderApis.ApplicationModelProviderApis(app);
+RabbitIC.Api.ModelProviders.ModelProviderApis.ApplicationModelAccessApis(app);
 
 // Observability REST + SSE endpoints (mapped directly, not via MiddlewareDependencyInversion).
 LogEndpoints.MapLogApis(app);
@@ -497,6 +501,8 @@ using (var scope = app.Services.CreateScope())
 	app.Logger.LogInformation("SQLite database: {Path}", sqliteConnectionString);
 	db.Database.EnsureCreated();   // creates everything fresh if the file is new
 	SchemaUpgrade.Run(db);         // one-time, idempotent upgrade for older db files
+	// The providers added in Settings, into the model registry before the first request.
+	app.Services.GetRequiredService<RabbitIC.Api.ModelProviders.DbModelSourceProvider>().ReloadAsync().GetAwaiter().GetResult();
 	// The HR library's keyword index: an FTS5 table EnsureCreated cannot make, so
 	// it is ensured on every start, fresh database or not.
 	RabbitIC.Api.Hr.HrKeywordIndex.EnsureSchema(db);
@@ -512,6 +518,8 @@ using (var scope = app.Services.CreateScope())
 	RbacSeeder.SeedModelPolicies(db, app.Configuration, app.Logger);
 	// What each role gets: one row per role and permission key, missing rows only.
 	RbacSeeder.SeedRolePermissions(db, app.Logger);
+	// Who may run which model in Chat, HR and Jiji: the role defaults, once; and the HR default model.
+	RabbitIC.Api.ModelProviders.ModelAccessAdmin.Seed(db, app.Configuration, app.Logger);
 	// Matrix: how report kinds join, and the KPI library's editable definitions — missing rows only.
 	RabbitIC.Api.Repositories.MatrixRepository.SeedRelations(db);
 	RabbitIC.Api.Repositories.MatrixRepository.SeedKpis(db);

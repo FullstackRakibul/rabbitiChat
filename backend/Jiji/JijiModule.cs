@@ -1,6 +1,6 @@
 // Jiji — the module's two hooks into Program.cs: services in, routes out.
 // Day 1: options, the content service and the read endpoints. Day 2: ideas, scripts, checks, approval.
-// Day 3: storage, Azure Speech, the Tts handler and the worker. The renderer and the YouTube
+// Day 3: storage, speech (a Model providers entry with the speech capability), the Tts handler and the worker. The renderer and the YouTube
 // publisher register here as they arrive: a handler registered is a job type the worker claims.
 
 using RabbitIC.Api.Jiji.Services;
@@ -19,7 +19,7 @@ public static class JijiModule
         services.AddScoped<JijiContentService>();
 
         services.AddSingleton<JijiStorage>();
-        services.AddHttpClient(TtsService.ClientName, c => c.Timeout = TimeSpan.FromSeconds(60));
+        services.AddScoped<JijiSettingsService>();
         services.AddScoped<TtsService>();
         services.AddScoped<IJijiJobHandler, TtsJobHandler>();
         services.AddHostedService<JijiWorker>();

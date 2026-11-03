@@ -44,9 +44,19 @@ public sealed class Redactor : IRedactor
         "keyhash",
         // User's password material (N3): matched by exact name, so "secret" alone missed them.
         "secrethash", "secretsalt",
-        // Jiji: Azure Speech's key header, if a request's headers are ever logged.
-        "ocp-apim-subscription-key",
+        // Model providers: the stored, encrypted key column (the audit shows only that it changed).
+        "apikeyprotected",
     };
+
+    // A key in free text — a log message, a client event, an exception that echoed a header.
+    // MangoMind keys start mm_live_; any bearer credential is cut the same way.
+    private static readonly Regex SecretValueRegex = new(
+        @"(?<keep>mm_(?:live|test)_)[A-Za-z0-9_\-]+|(?<keep>Bearer\s+)[A-Za-z0-9._~+/=\-]{8,}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Free text with every key-shaped value replaced by ***; the prefix stays so the line still reads.</summary>
+    public static string Scrub(string text) =>
+        string.IsNullOrEmpty(text) ? text : SecretValueRegex.Replace(text, m => m.Groups["keep"].Value + "***");
 
     // Matches a key=value pair where key is on the deny list (query strings).
     // Works on URL-encoded strings; values may be empty.
@@ -61,13 +71,13 @@ public sealed class Redactor : IRedactor
     public string RedactQueryString(string? queryString)
     {
         if (string.IsNullOrEmpty(queryString)) return "";
-        return QueryParamRegex.Replace(queryString, m =>
+        return Scrub(QueryParamRegex.Replace(queryString, m =>
         {
             var key = m.Groups["key"].Value;
             var sep = m.Groups["sep"].Value;  // = or &key=
             var prefix = m.Groups["prefix"].Value;
             return $"{prefix}{key}=***";
-        });
+        }));
     }
 
     public string? RedactJson(string? json)
@@ -83,7 +93,7 @@ public sealed class Redactor : IRedactor
             var key = m.Groups["key"].Value;
             return IsSensitive(key) ? $"\"{key}\": \"***\"" : m.Value;
         });
-        return result;
+        return Scrub(result);
     }
 
     public bool IsSensitive(string propertyName) =>

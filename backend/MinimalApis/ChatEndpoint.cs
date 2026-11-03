@@ -57,13 +57,15 @@ namespace RabbitIC.Api.MinimalApis
                 return;
             }
 
-            // The model policy, before the conversation and the user's message are
-            // stored: a refused request must leave no trace (§3.1, §9).
-            var policy = await modelPolicy.CheckAsync(user, req.Model, req.Source, ct: ct);
-            if (!policy.Allowed)
+            // Access → Models' rules for Chat, before the conversation and the user's
+            // message are stored: a refused request must leave no trace (§3.1, §9).
+            // 403 for a model the user may not run, 429 once their monthly budget is spent.
+            var access = await ctx.RequestServices.GetRequiredService<ModelProviders.ModelAccess>()
+                .CheckAsync(user, ModelProviders.ModelModules.Chat, req.Source, req.Model, ct);
+            if (!access.Allowed)
             {
-                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await ctx.Response.WriteAsync(policy.Error!);
+                ctx.Response.StatusCode = access.Status;
+                await ctx.Response.WriteAsync(access.Error!);
                 return;
             }
 
@@ -171,7 +173,7 @@ namespace RabbitIC.Api.MinimalApis
 
             try
             {
-                await RunToolLoopAsync(chat, req.Source, new ChatArgs(req.Model, turns, tools, think), turns,
+                await RunToolLoopAsync(chat, req.Source, new ChatArgs(req.Model, turns, tools, think, Stream: true, Module: ModelProviders.ModelModules.Chat, UserId: user.Id), turns,
                     MaxToolRounds, writer, answer, async call =>
                     {
                         var (result, used) = await RunToolAsync(call, webSearchRunner, writer, log, ct);

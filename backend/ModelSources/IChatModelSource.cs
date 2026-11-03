@@ -6,12 +6,17 @@
 /// <param name="ContextLength">Context window when the source knows it; null otherwise.</param>
 /// <param name="Capabilities">Free-form tags, e.g. "chat", "tools", "vision".</param>
 /// <param name="Metered">True when calls cost money / consume a quota upstream.</param>
+/// <param name="Multiplier">
+/// The provider's cost multiplier for this model ("0.2x" → 0.2), from its catalog; null for
+/// sources that have none (Ollama). Usage is weighted by it, and model rules can cap it.
+/// </param>
 public record ModelInfo(
     string Name,
     string Source,
     int? ContextLength,
     IReadOnlyList<string> Capabilities,
-    bool Metered);
+    bool Metered,
+    double? Multiplier = null);
 
 /// <summary>A chat turn to stream, independent of which backend answers it.</summary>
 /// <param name="Model">Model name as chosen in the picker (pre-suffix mapping).</param>
@@ -28,6 +33,12 @@ public record ModelInfo(
 /// <param name="NumCtx">The context window to ask for; null keeps the daemon's own.</param>
 /// <param name="KeepAlive">How long the daemon keeps the model loaded (seconds, -1 = always); null keeps its default.</param>
 /// <param name="Temperature">Sampling temperature; null keeps the model's own.</param>
+/// <param name="Stream">
+/// False asks an OpenAI-compatible provider for one JSON reply instead of SSE; the caller
+/// still reads the same event sequence. Ollama sources stream either way.
+/// </param>
+/// <param name="Module">Which feature made the call ("chat", "jiji", …), for provider usage rows.</param>
+/// <param name="UserId">Who the call is for, so a provider's usage counts against their monthly cap.</param>
 public record ChatArgs(
     string Model,
     IReadOnlyList<ChatTurn> Messages,
@@ -35,7 +46,10 @@ public record ChatArgs(
     bool? Think = null,
     int? NumCtx = null,
     int? KeepAlive = null,
-    double? Temperature = null);
+    double? Temperature = null,
+    bool Stream = true,
+    string? Module = null,
+    int? UserId = null);
 
 /// <summary>
 /// One message in a chat history.
@@ -78,4 +92,7 @@ public interface IChatModelSource
 public class ChatSourceException : Exception
 {
     public ChatSourceException(string message, Exception? inner = null) : base(message, inner) { }
+
+    /// <summary>The provider's HTTP status when it answered with one (401, 402, 429, …); null otherwise.</summary>
+    public int? UpstreamStatus { get; init; }
 }

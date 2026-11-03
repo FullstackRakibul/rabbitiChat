@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RabbitIC.Api.Jiji.Models;
+using RabbitIC.Api.ModelProviders;
 using RabbitIC.Api.Models;
 using RabbitIC.Api.Models.TodoRabbit;
 using RabbitIC.Api.Observability;
@@ -46,6 +47,14 @@ public class AppDbContext : DbContext
     public DbSet<JijiContent> JijiContents => Set<JijiContent>();
     public DbSet<JijiJob> JijiJobs => Set<JijiJob>();
     public DbSet<JijiYouTubeAccount> JijiYouTubeAccounts => Set<JijiYouTubeAccount>();
+    public DbSet<JijiSettings> JijiSettings => Set<JijiSettings>();
+
+    // Model providers added in Settings: an encrypted key and a shortlist of models; usage per call, no FK.
+    public DbSet<ModelProvider> ModelProviders => Set<ModelProvider>();
+    public DbSet<ModelProviderUsage> ModelProviderUsages => Set<ModelProviderUsage>();
+    // Access → Models: who may run which model in Chat, HR and Jiji, and each module's default.
+    public DbSet<ModelAccessRule> ModelAccessRules => Set<ModelAccessRule>();
+    public DbSet<ModelModuleDefault> ModelModuleDefaults => Set<ModelModuleDefault>();
 
     // সত্য মন্ত্রণালয় · Ministry of Truth (docs/TRUTH_PROMPT.md §2). The public reads TrSnapshots only.
     public DbSet<TrTech> TrTechs => Set<TrTech>();
@@ -364,10 +373,22 @@ public class AppDbContext : DbContext
         b.Entity<JijiJob>().HasIndex(j => new { j.Status, j.AvailableAtUtc });
         b.Entity<JijiYouTubeAccount>().HasKey(a => a.OwnerId);
         b.Entity<JijiYouTubeAccount>().Property(a => a.OwnerId).ValueGeneratedNever();
+        b.Entity<JijiSettings>().Property(x => x.Id).ValueGeneratedNever();
 
-        // The same for the Ministry of Truth and Jiji: every time they show is converted from UTC to Bangladesh time.
+        // ---- Model providers ----
+        b.Entity<ModelProvider>().HasIndex(p => p.Key).IsUnique();
+        b.Entity<ModelProviderUsage>().HasIndex(u => new { u.ProviderKey, u.CreatedAt });
+        b.Entity<ModelProviderUsage>().HasIndex(u => new { u.UserId, u.CreatedAt });
+        b.Entity<ModelAccessRule>().HasIndex(r => r.Role);
+        b.Entity<ModelAccessRule>().HasIndex(r => r.UserId);
+        b.Entity<ModelModuleDefault>().HasKey(d => d.Module);
+
+        // The same for the Ministry of Truth, Jiji and model providers: every time they show is converted from UTC to Bangladesh time.
         foreach (var type in b.Model.GetEntityTypes().Where(t => t.ClrType.Name.StartsWith("Tr", StringComparison.Ordinal)
-                                                              || t.ClrType.Name.StartsWith("Jiji", StringComparison.Ordinal)))
+                                                              || t.ClrType.Name.StartsWith("Jiji", StringComparison.Ordinal)
+                                                              || t.ClrType.Name.StartsWith("ModelProvider", StringComparison.Ordinal)
+                                                              || t.ClrType.Name.StartsWith("ModelAccess", StringComparison.Ordinal)
+                                                              || t.ClrType.Name.StartsWith("ModelModule", StringComparison.Ordinal)))
         foreach (var prop in type.GetProperties())
         {
             if (prop.ClrType == typeof(DateTime)) prop.SetValueConverter(utc);

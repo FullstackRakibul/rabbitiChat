@@ -14,8 +14,9 @@ namespace RabbitIC.Api.ModelSources;
 public class OpenAiCompatibleSource : IChatModelSource
 {
     private readonly OpenAiProviderOptions _provider;
-    private readonly IHttpClientFactory _http;
-    private readonly ILogger<OpenAiCompatibleSource> _log;
+    private readonly IHttpClientFactory? _http;
+    private readonly ILogger _log;
+    private readonly Func<ChatArgs, OpenAiCall>? _callFor;
 
     public OpenAiCompatibleSource(
         OpenAiProviderOptions provider,
@@ -25,6 +26,18 @@ public class OpenAiCompatibleSource : IChatModelSource
         _provider = provider;
         _http = http;
         _log = log;
+    }
+
+    /// <summary>
+    /// A provider from the database (ModelProviders/DbModelSourceProvider): its base URL, key,
+    /// retries and usage reporting are decided per call by <paramref name="callFor"/>, so the key
+    /// is set on each request rather than on a client's defaults.
+    /// </summary>
+    internal OpenAiCompatibleSource(OpenAiProviderOptions provider, ILogger log, Func<ChatArgs, OpenAiCall> callFor)
+    {
+        _provider = provider;
+        _log = log;
+        _callFor = callFor;
     }
 
     public string SourceKey => _provider.Key;
@@ -46,7 +59,8 @@ public class OpenAiCompatibleSource : IChatModelSource
                 Source: SourceKey,
                 ContextLength: null,            // not published per-model; don't invent one
                 Capabilities: CapabilitiesFor(m),
-                Metered: _provider.Metered))
+                Metered: _provider.Metered,
+                Multiplier: _provider.Multipliers.TryGetValue(m, out var x) ? x : null))
             .ToList();
 
         return Task.FromResult(models);
@@ -66,9 +80,10 @@ public class OpenAiCompatibleSource : IChatModelSource
                 SourceKey, args.Model);
         }
 
-        return OpenAiChatStream.StreamAsync(
-            _http.CreateClient(_provider.HttpClientName),
-            args.Model, args.Messages, _log, ct, tools);
+        var call = _callFor?.Invoke(args)
+            ?? new OpenAiCall(_http!.CreateClient(_provider.HttpClientName), Stream: args.Stream, Temperature: args.Temperature);
+
+        return OpenAiChatStream.StreamAsync(call, args.Model, args.Messages, _log, ct, tools);
     }
 
     /// <summary>Every model can chat; "tools" is added only for a configured match.</summary>

@@ -68,7 +68,10 @@
             /// ignores unknown fields (Oddity's /api/tags passthrough) still sees
             /// the header, and the field keeps the browser from a second request.
             /// </summary>
-            bool Locked = false);
+            bool Locked = false,
+
+            /// <summary>The provider's cost multiplier ("0.2x"), shown in the picker; null for Ollama.</summary>
+            double? Multiplier = null);
 
 
         /// <summary>Proxied web search. MaxResults is clamped to 1..10 server-side.</summary>

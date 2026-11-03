@@ -184,7 +184,7 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
 
         // [SensitiveData] attribute on the property type
         if (_redactor.IsSensitive(propertyName)) return "***";
-        return s;
+        return Redactor.Scrub(s);
     }
 }
 

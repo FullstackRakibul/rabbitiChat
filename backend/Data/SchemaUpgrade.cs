@@ -42,6 +42,14 @@ public static class SchemaUpgrade
         EnsureTablesFromModel(db, "Tr");
         EnsureTablesFromModel(db, "Hris");
         EnsureTablesFromModel(db, "Jiji");
+        EnsureTablesFromModel(db, "ModelProvider");
+        AddColumnIfMissing(db, "ModelProviders", "VoicesJson", @"ALTER TABLE ""ModelProviders"" ADD COLUMN ""VoicesJson"" TEXT NOT NULL DEFAULT '[]';");
+        AddColumnIfMissing(db, "ModelProviderUsages", "UserId", @"ALTER TABLE ""ModelProviderUsages"" ADD COLUMN ""UserId"" INTEGER NULL;");
+        AddColumnIfMissing(db, "ModelProviderUsages", "WeightedTokens", @"ALTER TABLE ""ModelProviderUsages"" ADD COLUMN ""WeightedTokens"" REAL NOT NULL DEFAULT 0;");
+        db.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_ModelProviderUsages_UserId_CreatedAt"" ON ""ModelProviderUsages"" (""UserId"", ""CreatedAt"");");
+        // Who may run which model in Chat, HR and Jiji, and each module's default (Access → Models).
+        EnsureTablesFromModel(db, "ModelAccess");
+        EnsureTablesFromModel(db, "ModelModule");
         // Memes and the glossary joined the site text as content kinds (docs/TRUTH_PROMPT.md v4).
         AddColumnIfMissing(db, "TrSiteContents", "Kind", @"ALTER TABLE ""TrSiteContents"" ADD COLUMN ""Kind"" TEXT NOT NULL DEFAULT 'site';");
         // Fix guides (P2): guide sources, "do now" and EOL lines, on tables P1 made.

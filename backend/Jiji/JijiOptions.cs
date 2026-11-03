@@ -1,6 +1,7 @@
-// Jiji's configuration, section "Jiji". The secrets (AzureSpeech:ApiKey, YouTube:ClientSecret)
-// come from user-secrets or the environment only, e.g. Jiji__AzureSpeech__ApiKey. Both names
-// end in a secret word, so SecretConfig drops either if it is ever put in appsettings.
+// Jiji's configuration, section "Jiji". Script model, speech provider and voice are fallbacks:
+// Jiji → Settings stores the real values. The one secret (YouTube:ClientSecret) comes from
+// user-secrets or the environment only; its name ends in a secret word, so SecretConfig drops
+// it if it is ever put in appsettings. Speech keys live with the provider (Model providers).
 
 namespace RabbitIC.Api.Jiji;
 
@@ -20,27 +21,30 @@ public sealed class JijiOptions
     public string FfmpegPath { get; set; } = "ffmpeg";
     public string? FontsDir { get; set; }
 
-    public AzureSpeechOptions AzureSpeech { get; set; } = new();
+    public SpeechOptions Speech { get; set; } = new();
     public WorkerOptions Worker { get; set; } = new();
     public YouTubeOptions YouTube { get; set; } = new();
 
-    public sealed class AzureSpeechOptions
+    /// <summary>
+    /// Fallbacks only: Jiji → Settings (the JijiSettings row) wins. The speech provider itself, its
+    /// URL and key, live in Settings → Model providers.
+    /// </summary>
+    public sealed class SpeechOptions
     {
-        public string? ApiKey { get; set; }
-        public string? Region { get; set; }
+        /// <summary>Key of a Model providers entry with the speech capability, e.g. "kokoro".</summary>
+        public string? Provider { get; set; }
 
-        /// <summary>Optional base URL instead of https://{Region}.tts.speech.microsoft.com (a sovereign cloud, a test double).</summary>
-        public string? Endpoint { get; set; }
+        /// <summary>The model the speech API is asked for.</summary>
+        public string Model { get; set; } = "kokoro";
 
-        /// <summary>Language → neural voice name, e.g. en → en-US-AndrewNeural.</summary>
-        public Dictionary<string, string> Voices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>A voice id from the provider's voice list.</summary>
+        public string? Voice { get; set; }
+
+        /// <summary>Speaking speed sent with every request.</summary>
+        public double Speed { get; set; } = 1.0;
 
         /// <summary>Silence between two spoken parts in narration.wav, in milliseconds. Part of every timing.</summary>
         public int GapMs { get; set; } = 200;
-
-        public bool IsConfigured => !string.IsNullOrWhiteSpace(ApiKey) && (!string.IsNullOrWhiteSpace(Region) || !string.IsNullOrWhiteSpace(Endpoint));
-
-        public Uri BaseUri => new((string.IsNullOrWhiteSpace(Endpoint) ? $"https://{Region}.tts.speech.microsoft.com" : Endpoint).TrimEnd('/') + "/");
     }
 
     /// <summary>JijiWorker. The defaults are the plan's; shorter values exist for the failure drills.</summary>

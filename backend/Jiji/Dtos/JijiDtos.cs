@@ -48,5 +48,25 @@ public sealed record JijiContentDto(
 }
 
 public sealed record JijiStatusDto(
-    bool StorageWritable, string? Model, string? ModelSource, bool VoiceFound, bool SpeechConfigured, bool YouTubeConfigured,
-    bool YouTubeConnected, string? ChannelTitle);
+    bool StorageWritable, string? Model, string? ModelSource, bool VoiceFound, JijiSpeechStatusDto Speech, bool YouTubeConfigured,
+    bool YouTubeConnected, string? ChannelTitle, JijiProviderStatusDto? Provider = null);
+
+/// <summary>
+/// The speech provider in Jiji → Settings, checked live (GET /audio/voices, a few seconds at most):
+/// Reachable null = no provider chosen. VoiceListed = the voice is in the provider's stored list.
+/// </summary>
+public sealed record JijiSpeechStatusDto(
+    string? Provider, string? ProviderName, bool? Reachable, string? Message, string Model, string? Voice, bool VoiceListed);
+
+/// <summary>Jiji → Settings: what is set (stored, or the config fallback) and the choices for the speech dropdowns.</summary>
+public sealed record JijiSettingsDto(
+    string? ScriptModel, string ScriptModelSource, string? SpeechProvider, string SpeechModel, string? Voice,
+    IReadOnlyList<JijiSpeechProviderDto> SpeechProviders, bool CanEdit);
+
+public sealed record JijiSpeechProviderDto(string Key, string Name, bool Enabled, string Status, IReadOnlyList<string> Voices);
+
+public sealed record JijiPreviewRequest(string? Provider, string? Voice, string? Text);
+
+/// <summary>Set when Jiji:ModelSource names a provider from Settings: whether it works, and what Jiji spent this month.</summary>
+public sealed record JijiProviderStatusDto(
+    string Key, string Name, string Status, string? Message, long JijiTokensThisMonth, long TokensThisMonth, long? MonthlyTokenBudget);

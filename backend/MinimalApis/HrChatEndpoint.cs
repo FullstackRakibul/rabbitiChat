@@ -41,7 +41,7 @@ using RabbitIC.Api.Services;
 namespace RabbitIC.Api.MinimalApis
 {
     /// <param name="Items">"Search in": retrieval limited to these library items. Empty or null: the whole library.</param>
-    public record HrChatRequest(int? ConversationId, string? Message, string? Model, List<int>? Items);
+    public record HrChatRequest(int? ConversationId, string? Message, string? Model, List<int>? Items, string? Source = null);
 
     public static class HrChatEndpoint
     {

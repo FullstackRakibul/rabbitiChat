@@ -1,9 +1,28 @@
-using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
 namespace RabbitIC.Api.ModelSources;
+
+/// <summary>
+/// How one OpenAI-compatible call is made. A config provider passes only the client (its base
+/// address and key are the client's defaults, as before); a database provider passes the base
+/// and key here, so they go on each request and never on a shared client.
+/// </summary>
+internal sealed record OpenAiCall(
+    HttpClient Client,
+    Uri? BaseUri = null,
+    string? ApiKey = null,
+    string? ProviderName = null,
+    bool Stream = true,
+    bool IncludeUsage = false,
+    bool RetryTransient = false,
+    double? Temperature = null,
+    int? MaxTokens = null,
+    Action<OpenAiCallOutcome>? OnDone = null);
+
+/// <summary>What one call cost and how it ended: "ok", the HTTP status, "unreachable" or "cancelled".</summary>
+public sealed record OpenAiCallOutcome(string Model, string Status, int PromptTokens, int CompletionTokens, string? RequestId);
 
 /// <summary>
 /// Server-sent-events streaming for the OpenAI chat-completions wire format.
@@ -12,82 +31,180 @@ namespace RabbitIC.Api.ModelSources;
 /// protocol. Ollama streams bare NDJSON objects; OpenAI-compatible providers
 /// stream "data: {json}" lines terminated by "data: [DONE]", and split a tool
 /// call across many deltas that have to be reassembled before the call is whole.
+///
+/// "stream" is always sent explicitly: some providers (MangoMind) stream by default,
+/// so leaving it out would hand an SSE body to a caller expecting one JSON object.
+/// Nothing Ollama-only (think, keep_alive, options.num_ctx) is ever sent.
 /// </summary>
 internal static class OpenAiChatStream
 {
     private const string DataPrefix = "data:";
     private const string DoneMarker = "[DONE]";
 
+    /// <summary>Waits before retrying a 429, then a 502 (database providers only).</summary>
+    private static readonly TimeSpan[] RateLimitWaits = { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15) };
+    /// <summary>The same options JsonContent.Create used, so the wire format is unchanged.</summary>
+    private static readonly JsonSerializerOptions WireJson = new(JsonSerializerDefaults.Web);
+
+    private static readonly TimeSpan[] BadGatewayWaits = { TimeSpan.FromSeconds(1) };
+
     /// <summary>
-    /// POSTs to {BaseAddress}/chat/completions and yields deltas as they arrive.
-    /// The path is relative so it appends to the configured BaseUrl's version
-    /// segment (".../api/v1" + "chat/completions") — unlike the Ollama clients,
-    /// whose bare-origin bases take rooted paths.
+    /// POSTs to {base}/chat/completions and yields deltas as they arrive (or, with
+    /// Stream false, the one reply as the same events). The path is relative so it
+    /// appends to the BaseUrl's version segment (".../api/v1" + "chat/completions").
     /// </summary>
     public static async IAsyncEnumerable<ChatStreamEvent> StreamAsync(
-        HttpClient client,
+        OpenAiCall call,
         string model,
         IReadOnlyList<ChatTurn> messages,
         ILogger log,
         [EnumeratorCancellation] CancellationToken ct,
         IReadOnlyList<ToolDefinition>? tools = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
-        {
-            Content = JsonContent.Create(BuildPayload(model, messages, tools)),
-        };
-
-        HttpResponseMessage resp;
+        var usage = new UsageHolder();
+        var status = "cancelled";
+        string? requestId = null;
         try
         {
-            resp = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            HttpResponseMessage resp;
+            try
+            {
+                (resp, requestId) = await SendAsync(call, model, messages, tools, log, ct);
+            }
+            catch (ChatSourceException ex)
+            {
+                status = ex.UpstreamStatus?.ToString() ?? "unreachable";
+                throw;
+            }
+
+            using (resp)
+            {
+                if (!call.Stream)
+                {
+                    var body = await resp.Content.ReadAsStringAsync(ct);
+                    foreach (var e in ParseWhole(body, usage)) yield return e;
+                    status = "ok";
+                    yield break;
+                }
+
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                using var reader = new StreamReader(stream);
+
+                // Tool calls arrive in fragments keyed by index; assembled here and
+                // emitted once the stream finishes, so the loop consuming them sees a
+                // complete call rather than a half-built argument string.
+                var pendingCalls = new SortedDictionary<int, ToolCallBuilder>();
+
+                string? line;
+                while ((line = await reader.ReadLineAsync(ct)) is not null)
+                {
+                    if (line.Length == 0) continue;                      // SSE frame separator
+                    if (!line.StartsWith(DataPrefix, StringComparison.Ordinal)) continue;
+
+                    var payload = line[DataPrefix.Length..].Trim();
+                    if (payload.Length == 0) continue;
+                    if (payload == DoneMarker) break;                    // clean end of stream
+
+                    List<ChatStreamEvent> events;
+                    try { events = ParseChunk(payload, pendingCalls, usage); }
+                    catch (ChatSourceException) { status = "error"; throw; }
+                    foreach (var e in events) yield return e;
+                }
+
+                foreach (var pending in pendingCalls.Values)
+                {
+                    if (pending.TryBuild() is { } built) yield return ChatStreamEvent.Tool(built);
+                }
+                status = "ok";
+            }
         }
-        catch (HttpRequestException ex)
+        finally
         {
-            throw new ChatSourceException($"Cannot reach {client.BaseAddress}: {ex.Message}", ex);
+            // Every call is reported, failures and abandoned streams included: a prepaid
+            // budget is spent by tokens the provider counted, whether or not we used them.
+            call.OnDone?.Invoke(new OpenAiCallOutcome(model, status, usage.Prompt, usage.Completion, requestId));
         }
+    }
 
-        using (resp)
+    /// <summary>Sends, retrying 429 and 502 for a database provider. Returns a successful response or throws.</summary>
+    private static async Task<(HttpResponseMessage Response, string? RequestId)> SendAsync(
+        OpenAiCall call, string model, IReadOnlyList<ChatTurn> messages, IReadOnlyList<ToolDefinition>? tools,
+        ILogger log, CancellationToken ct)
+    {
+        int rateLimited = 0, badGateway = 0;
+        while (true)
         {
-            if (!resp.IsSuccessStatusCode)
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                call.BaseUri is null ? new Uri("chat/completions", UriKind.Relative) : new Uri(call.BaseUri, "chat/completions"))
             {
-                var body = await SafeReadAsync(resp, ct);
+                // Serialised up front so the body goes with a Content-Length: some gateways refuse a chunked request body.
+                Content = new StringContent(JsonSerializer.Serialize(BuildPayload(call, model, messages, tools), WireJson),
+                    Encoding.UTF8, "application/json"),
+            };
+            if (!string.IsNullOrEmpty(call.ApiKey))
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", call.ApiKey);
 
-                // Logged with the resolved URL and status so a stale model name
-                // (400/404) is distinguishable from a key problem (401) at a
-                // glance. The body never reaches the client — it can echo the key.
-                log.LogWarning(
-                    "OpenAI-compatible upstream {Url} answered {Status} for model {Model}. Detail: {Detail}",
-                    request.RequestUri, (int)resp.StatusCode, model, Truncate(body, 300));
-
-                throw new ChatSourceException(DescribeFailure(resp.StatusCode, model));
+            HttpResponseMessage resp;
+            try
+            {
+                resp = await call.Client.SendAsync(request,
+                    call.Stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct);
+            }
+            catch (HttpRequestException ex)
+            {
+                var where = call.ProviderName ?? call.BaseUri?.Host ?? call.Client.BaseAddress?.ToString();
+                throw new ChatSourceException($"Cannot reach {where}: {ex.Message}", ex);
+            }
+            catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                throw new ChatSourceException($"{call.ProviderName ?? "The model provider"} did not answer in time.", ex);
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var reader = new StreamReader(stream);
+            var requestId = HeaderRequestId(resp);
+            if (resp.IsSuccessStatusCode) return (resp, requestId);
 
-            // Tool calls arrive in fragments keyed by index; assembled here and
-            // emitted once the stream finishes, so the loop consuming them sees a
-            // complete call rather than a half-built argument string.
-            var pendingCalls = new SortedDictionary<int, ToolCallBuilder>();
+            var code = (int)resp.StatusCode;
+            var body = await SafeReadAsync(resp, ct);
+            requestId ??= BodyRequestId(body);
+            resp.Dispose();
 
-            string? line;
-            while ((line = await reader.ReadLineAsync(ct)) is not null)
+            // Logged with the resolved URL, status and the provider's request id, so a stale
+            // model (400/404) is told apart from a key problem (401) and the call can be quoted
+            // to the provider's support. The body never reaches the client — it can echo the key.
+            log.LogWarning(
+                "OpenAI-compatible upstream {Url} answered {Status} for model {Model} (request_id {RequestId}). Detail: {Detail}",
+                request.RequestUri, code, model, requestId ?? "none", Truncate(body, 300));
+
+            if (call.RetryTransient)
             {
-                if (line.Length == 0) continue;                      // SSE frame separator
-                if (!line.StartsWith(DataPrefix, StringComparison.Ordinal)) continue;
-
-                var payload = line[DataPrefix.Length..].Trim();
-                if (payload.Length == 0) continue;
-                if (payload == DoneMarker) break;                    // clean end of stream
-
-                foreach (var e in ParseChunk(payload, pendingCalls)) yield return e;
+                TimeSpan? wait = code == 429 && rateLimited < RateLimitWaits.Length ? RateLimitWaits[rateLimited++]
+                               : code == 502 && badGateway < BadGatewayWaits.Length ? BadGatewayWaits[badGateway++]
+                               : null;
+                if (wait is { } w)
+                {
+                    await Task.Delay(w, ct);
+                    continue;
+                }
             }
 
-            foreach (var call in pendingCalls.Values)
+            throw new ChatSourceException(DescribeFailure(code, model, call.ProviderName, ErrorMessage(body)))
             {
-                if (call.TryBuild() is { } built) yield return ChatStreamEvent.Tool(built);
-            }
+                UpstreamStatus = code,
+            };
+        }
+    }
+
+    /// <summary>Running token counts from a "usage" object, wherever the provider puts one.</summary>
+    private sealed class UsageHolder
+    {
+        public int Prompt;
+        public int Completion;
+
+        public void Read(JsonElement root)
+        {
+            if (!root.TryGetProperty("usage", out var u) || u.ValueKind != JsonValueKind.Object) return;
+            if (u.TryGetProperty("prompt_tokens", out var p) && p.TryGetInt32(out var pi)) Prompt = pi;
+            if (u.TryGetProperty("completion_tokens", out var c) && c.TryGetInt32(out var ci)) Completion = ci;
         }
     }
 
@@ -108,8 +225,8 @@ internal static class OpenAiChatStream
     }
 
     /// <summary>The request body in OpenAI chat-completions shape.</summary>
-    private static object BuildPayload(
-        string model, IReadOnlyList<ChatTurn> messages, IReadOnlyList<ToolDefinition>? tools)
+    private static Dictionary<string, object?> BuildPayload(
+        OpenAiCall call, string model, IReadOnlyList<ChatTurn> messages, IReadOnlyList<ToolDefinition>? tools)
     {
         // OpenAI matches a tool result to its call by tool_call_id; Ollama uses the
         // name. The shared ChatTurn carries the name, so it is sent as both the
@@ -139,15 +256,19 @@ internal static class OpenAiChatStream
                 }
                 : new { role = m.Role, content = m.Content });
 
-        if (tools is null || tools.Count == 0)
-            return new { model, messages = wireMessages, stream = true };
-
-        return new
+        var payload = new Dictionary<string, object?>
         {
-            model,
-            messages = wireMessages,
-            stream = true,
-            tools = tools.Select(t => new
+            ["model"] = model,
+            ["messages"] = wireMessages,
+            ["stream"] = call.Stream,
+        };
+        if (call.Stream && call.IncludeUsage) payload["stream_options"] = new { include_usage = true };
+        if (call.Temperature is { } t) payload["temperature"] = t;
+        if (call.MaxTokens is { } max) payload["max_tokens"] = max;
+
+        if (tools is { Count: > 0 })
+        {
+            payload["tools"] = tools.Select(t => new
             {
                 type = "function",
                 function = new
@@ -156,8 +277,52 @@ internal static class OpenAiChatStream
                     description = t.Description,
                     parameters = JsonDocument.Parse(t.ParametersJson).RootElement,
                 },
-            }),
-        };
+            });
+        }
+        return payload;
+    }
+
+    /// <summary>A non-streamed reply ("stream": false) as the same events a stream would give.</summary>
+    private static List<ChatStreamEvent> ParseWhole(string json, UsageHolder usage)
+    {
+        var events = new List<ChatStreamEvent>();
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(json); }
+        catch (JsonException)
+        {
+            // An SSE body here means the provider ignored "stream": false.
+            throw new ChatSourceException(json.TrimStart().StartsWith("data:", StringComparison.Ordinal)
+                ? "The model provider streamed although a single reply was asked for."
+                : "The model provider's reply was not JSON.");
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            ThrowIfError(root);
+            usage.Read(root);
+            if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array) return events;
+
+            foreach (var choice in choices.EnumerateArray())
+            {
+                if (!choice.TryGetProperty("message", out var message)) continue;
+                foreach (var key in new[] { "reasoning", "reasoning_content" })
+                {
+                    if (message.TryGetProperty(key, out var r) && r.ValueKind == JsonValueKind.String && r.GetString() is { Length: > 0 } rt)
+                        events.Add(ChatStreamEvent.Thinking(rt));
+                }
+                if (message.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String && c.GetString() is { Length: > 0 } text)
+                    events.Add(ChatStreamEvent.Content(text));
+                if (message.TryGetProperty("tool_calls", out var calls) && calls.ValueKind == JsonValueKind.Array)
+                {
+                    var pending = new SortedDictionary<int, ToolCallBuilder>();
+                    FoldToolCalls(calls, pending);
+                    foreach (var p in pending.Values)
+                        if (p.TryBuild() is { } built) events.Add(ChatStreamEvent.Tool(built));
+                }
+            }
+        }
+        return events;
     }
 
     /// <summary>
@@ -166,7 +331,7 @@ internal static class OpenAiChatStream
     /// fragment is not yet a callable request.
     /// </summary>
     private static List<ChatStreamEvent> ParseChunk(
-        string json, SortedDictionary<int, ToolCallBuilder> pendingCalls)
+        string json, SortedDictionary<int, ToolCallBuilder> pendingCalls, UsageHolder usage)
     {
         var events = new List<ChatStreamEvent>();
 
@@ -177,14 +342,10 @@ internal static class OpenAiChatStream
 
             // Some providers report a mid-stream failure as a chunk rather than a
             // status code; surface it instead of silently truncating the answer.
-            if (root.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.Object)
-            {
-                var message = err.TryGetProperty("message", out var m) ? m.GetString() : null;
-                throw new ChatSourceException(
-                    string.IsNullOrWhiteSpace(message)
-                        ? "The model provider reported an error."
-                        : $"The model provider reported: {Truncate(message!, 200)}");
-            }
+            ThrowIfError(root);
+
+            // The final chunk carries the call's usage when the provider sends it.
+            usage.Read(root);
 
             if (!root.TryGetProperty("choices", out var choices) ||
                 choices.ValueKind != JsonValueKind.Array)
@@ -230,6 +391,18 @@ internal static class OpenAiChatStream
         return events;
     }
 
+    private static void ThrowIfError(JsonElement root)
+    {
+        if (root.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.Object)
+        {
+            var message = err.TryGetProperty("message", out var m) ? m.GetString() : null;
+            throw new ChatSourceException(
+                string.IsNullOrWhiteSpace(message)
+                    ? "The model provider reported an error."
+                    : $"The model provider reported: {Truncate(message!, 200)}");
+        }
+    }
+
     /// <summary>Merges tool-call fragments into their builders, keyed by delta index.</summary>
     private static void FoldToolCalls(
         JsonElement calls, SortedDictionary<int, ToolCallBuilder> pendingCalls)
@@ -273,17 +446,69 @@ internal static class OpenAiChatStream
     /// Client-facing text for an upstream failure. A stale model name is the most
     /// likely cause of a 400/404 here — free tiers rotate — so it is named
     /// explicitly, which lets the user fall back to local instead of guessing.
+    /// A database provider is named, and its 400 shows the provider's own message.
     /// </summary>
-    private static string DescribeFailure(System.Net.HttpStatusCode status, string model) => status switch
+    internal static string DescribeFailure(int status, string model, string? provider = null, string? upstreamMessage = null)
     {
-        System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden =>
-            "The model provider rejected this server's credentials.",
-        System.Net.HttpStatusCode.TooManyRequests =>
-            "The model provider is rate-limiting this account — try again shortly.",
-        System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.BadRequest =>
-            $"'{model}' is unavailable at this provider — it may have been retired. Pick another model.",
-        _ => $"The model provider returned {(int)status}.",
-    };
+        var who = provider ?? "The model provider";
+        return status switch
+        {
+            401 or 403 => provider is null
+                ? "The model provider rejected this server's credentials."
+                : $"{provider} rejected the API key — paste a new one in Settings → Model providers.",
+            402 => $"{provider ?? "The model provider"} credit used up — top up.",
+            429 => $"{who} is rate-limiting this account — try again shortly.",
+            404 => $"'{model}' is unavailable at this provider — it may have been retired. Pick another model.",
+            400 when provider is not null && !string.IsNullOrWhiteSpace(upstreamMessage) =>
+                $"{provider} refused the request: {Truncate(upstreamMessage!, 200)}",
+            400 => $"'{model}' is unavailable at this provider — it may have been retired. Pick another model.",
+            502 => $"{who} could not reach '{model}' upstream (502).",
+            _ => $"{who} returned {status}.",
+        };
+    }
+
+    /// <summary>error.message (or message) from an error body; never the whole body.</summary>
+    private static string? ErrorMessage(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (root.TryGetProperty("error", out var e))
+            {
+                if (e.ValueKind == JsonValueKind.String) return Observability.Redactor.Scrub(e.GetString() ?? "");
+                if (e.ValueKind == JsonValueKind.Object && e.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String)
+                    return Observability.Redactor.Scrub(m.GetString() ?? "");
+            }
+            if (root.TryGetProperty("message", out var msg) && msg.ValueKind == JsonValueKind.String)
+                return Observability.Redactor.Scrub(msg.GetString() ?? "");
+        }
+        catch (JsonException) { }
+        return null;
+    }
+
+    private static string? HeaderRequestId(HttpResponseMessage resp)
+    {
+        foreach (var name in new[] { "x-request-id", "request-id", "x-req-id" })
+            if (resp.Headers.TryGetValues(name, out var v) && v.FirstOrDefault() is { Length: > 0 } id) return Truncate(id, 100);
+        return null;
+    }
+
+    private static string? BodyRequestId(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (root.TryGetProperty("request_id", out var r) && r.ValueKind == JsonValueKind.String) return Truncate(r.GetString()!, 100);
+            if (root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.Object
+                && e.TryGetProperty("request_id", out var er) && er.ValueKind == JsonValueKind.String) return Truncate(er.GetString()!, 100);
+        }
+        catch (JsonException) { }
+        return null;
+    }
 
     private static async Task<string> SafeReadAsync(HttpResponseMessage resp, CancellationToken ct)
     {

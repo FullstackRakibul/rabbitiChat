@@ -14,9 +14,10 @@ using RabbitIC.Api.Services;
 
 namespace RabbitIC.Api.Jiji.Services;
 
-public sealed record JijiModelChoice(string Model, string Source);
+public sealed record JijiModelChoice(string Model, string Source, int? UserId = null);
 
-public sealed partial class JijiLlm(ChatService chat, ModelPolicy policy, IOptions<JijiOptions> options, ILogger<JijiLlm> log)
+public sealed partial class JijiLlm(ChatService chat, ModelProviders.ModelAccess access, IModelSourceRegistry registry,
+    ModelProviders.DbModelSourceProvider providers, JijiSettingsService settings, ILogger<JijiLlm> log)
 {
     /// <summary>A long local generation is still bounded; the request's own token cancels sooner.</summary>
     private static readonly TimeSpan CallLimit = TimeSpan.FromMinutes(5);
@@ -28,15 +29,27 @@ public sealed partial class JijiLlm(ChatService chat, ModelPolicy policy, IOptio
     public async Task<(JijiModelChoice? Choice, JijiResultKind Refusal, string? Error)> ChooseAsync(
         User user, string? model, string? source, CancellationToken ct)
     {
-        var opt = options.Value;
-        var name = !string.IsNullOrWhiteSpace(model) ? model.Trim() : opt.Model?.Trim();
-        var src = !string.IsNullOrWhiteSpace(model) ? (source?.Trim() ?? "local") : (opt.ModelSource?.Trim() ?? "local");
+        // The request's model, else Jiji → Settings' script model (config Jiji:Model as the fallback).
+        var s = await settings.GetAsync(ct);
+        var name = !string.IsNullOrWhiteSpace(model) ? model.Trim() : s.ScriptModel;
+        var src = !string.IsNullOrWhiteSpace(model) ? (source?.Trim() ?? "local") : s.ScriptModelSource;
         if (string.IsNullOrWhiteSpace(name))
-            return (null, JijiResultKind.Invalid, "Pick a model, or set Jiji:Model for a default.");
+            return (null, JijiResultKind.Invalid, "Pick a model, or set the default script model in Jiji → Settings.");
 
-        var check = await policy.CheckAsync(user, name, src, ct: ct);
-        if (!check.Allowed) return (null, JijiResultKind.Forbidden, check.Error);
-        return (new JijiModelChoice(name!, src), JijiResultKind.Ok, null);
+        // A provider from Settings that is off, unreadable or deleted gets a plain sentence, not "unknown source".
+        if (registry.Resolve(src) is null)
+        {
+            var rt = providers.Runtime(src);
+            return (null, JijiResultKind.Upstream, rt is null
+                ? $"Model source '{src}' is not connected. Add it in Settings → Model providers, or pick another model."
+                : $"{rt.Name} is not connected ({rt.Message ?? rt.Status}). Check Settings → Model providers.");
+        }
+
+        // Access → Models' rules for Jiji: a model the user may not run is refused, never swapped.
+        var check = await access.CheckAsync(user, ModelProviders.ModelModules.Jiji, src, name, ct);
+        if (!check.Allowed)
+            return (null, check.Status == StatusCodes.Status429TooManyRequests ? JijiResultKind.OverBudget : JijiResultKind.Forbidden, check.Error);
+        return (new JijiModelChoice(name!, src, user.Id), JijiResultKind.Ok, null);
     }
 
     /// <summary>The visible reply as text. Throws <see cref="ChatSourceException"/> on an upstream failure.</summary>
@@ -46,12 +59,14 @@ public sealed partial class JijiLlm(ChatService chat, ModelPolicy policy, IOptio
         limit.CancelAfter(CallLimit);
         var text = new StringBuilder();
         var started = DateTime.UtcNow;
+        // One JSON object is wanted, so an OpenAI-compatible provider is asked for one reply
+        // ("stream": false), and every call is counted as Jiji's in the provider's usage.
         // Filling a JSON shape needs no reasoning pass, and on a local thinking model that pass
         // is most of the time (minutes). `think` goes only to models that declare it (OllamaChatStream).
         var think = await DeclaresThinkingAsync(m, ct) ? false : (bool?)null;
         try
         {
-            await foreach (var e in chat.StreamAsync(m.Source, new ChatArgs(m.Model, turns, Think: think, Temperature: temperature), limit.Token))
+            await foreach (var e in chat.StreamAsync(m.Source, new ChatArgs(m.Model, turns, Think: think, Temperature: temperature, Stream: false, Module: "jiji", UserId: m.UserId), limit.Token))
                 if (e.Kind == ChatEventKind.Content) text.Append(e.Text);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)

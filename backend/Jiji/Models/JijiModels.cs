@@ -136,3 +136,28 @@ public class JijiYouTubeAccount
     public DateTime? OAuthStateExpiresAtUtc { get; set; }
     public string? OAuthCodeVerifierProtected { get; set; }
 }
+
+/// <summary>
+/// Jiji's settings, edited in Jiji → Settings by SystemAdmin: one row (Id 1). A blank field falls
+/// back to the matching Jiji:* config value.
+/// </summary>
+public class JijiSettings
+{
+    public int Id { get; set; } = 1;
+
+    /// <summary>The model that writes ideas and scripts, and its source (local, cloud, a provider key).</summary>
+    public string? ScriptModel { get; set; }
+    public string? ScriptModelSource { get; set; }
+
+    /// <summary>The Settings → Model providers key of a provider with the speech capability.</summary>
+    public string? SpeechProvider { get; set; }
+
+    /// <summary>The speech model the provider is asked for ("kokoro").</summary>
+    public string? SpeechModel { get; set; }
+
+    /// <summary>A voice id from the provider's voice list, e.g. af_heart.</summary>
+    public string? Voice { get; set; }
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public int? UpdatedByUserId { get; set; }
+}

@@ -48,7 +48,7 @@ public sealed class IdeaGenerator(AppDbContext db, JijiLlm llm)
         for (var attempt = 0; attempt < 2; attempt++)
         {
             string reply;
-            try { reply = await llm.AskAsync(choice, turns, temperature: 0.8, ct); }
+            try { reply = await llm.AskAsync(choice, turns, temperature: 0.9, ct); }
             catch (ChatSourceException e) { return JijiResult<JijiIdeasDto>.Fail(JijiResultKind.Upstream, e.Message); }
 
             var angles = Read(reply, out problems);
@@ -107,7 +107,7 @@ public sealed class ScriptGenerator(AppDbContext db, JijiLlm llm)
         for (var attempt = 0; attempt < 2; attempt++)
         {
             string reply;
-            try { reply = await llm.AskAsync(choice, turns, temperature: 0.4, ct); }
+            try { reply = await llm.AskAsync(choice, turns, temperature: 0.7, ct); }
             catch (ChatSourceException e) { return JijiResult<Generated>.Fail(JijiResultKind.Upstream, e.Message); }
 
             problems = new();

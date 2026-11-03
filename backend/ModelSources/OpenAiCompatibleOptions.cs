@@ -51,6 +51,9 @@ public class OpenAiProviderOptions
     /// </summary>
     public Dictionary<string, string> ExtraHeaders { get; set; } = new();
 
+    /// <summary>Cost multiplier per model id, from a database provider's catalog. Empty for config providers.</summary>
+    public Dictionary<string, double> Multipliers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>A provider with no key is inert: skipped at registration, never an error.</summary>
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(ApiKey) &&

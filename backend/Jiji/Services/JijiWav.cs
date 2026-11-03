@@ -1,6 +1,7 @@
-// Jiji — PCM WAV, read from its own header. A part's duration is its data bytes ÷ the
-// byte rate in its fmt chunk, never the speech service's estimate, and every part must
-// be the one format narration.wav is joined in (24 kHz, 16-bit, mono PCM).
+// Jiji — PCM WAV. A part's duration is its real data size ÷ the byte rate in its fmt chunk:
+// the file's length from the start of the "data" chunk to the end, never the size field in
+// the header (a streamed WAV carries a placeholder there) and never the service's estimate.
+// Every part must have the first part's format; narration.wav is written in that format.
 
 using System.Buffers.Binary;
 using System.Text;
@@ -15,10 +16,6 @@ public sealed record JijiWavInfo(int SampleRate, int Channels, int BitsPerSample
 
 public static class JijiWav
 {
-    public const int SampleRate = 24_000;
-    public const int Channels = 1;
-    public const int BitsPerSample = 16;
-
     /// <summary>The header of a RIFF/WAVE file. Throws <see cref="InvalidDataException"/> when it is not one.</summary>
     public static JijiWavInfo Read(ReadOnlySpan<byte> wav)
     {
@@ -48,10 +45,11 @@ public static class JijiWav
                 if (format is null) throw new InvalidDataException("The data chunk comes before fmt.");
                 if (format != 1) throw new InvalidDataException($"Not PCM (format {format}).");
                 if (byteRate is not > 0) throw new InvalidDataException("The byte rate is zero.");
-                // A streamed header may carry 0 or 0xFFFFFFFF; the bytes that are there are the data.
-                long available = wav.Length - body;
-                long bytes = size is 0 or uint.MaxValue || size > available ? available : size;
-                bytes -= bytes % align!.Value;
+                // The header's size is not trusted (0, 0xFFFFFFFF or a stale value in a streamed WAV):
+                // the data is every byte from here to the end of the file, whole frames only.
+                if (align is not > 0) throw new InvalidDataException("The block align is zero.");
+                long bytes = wav.Length - body;
+                bytes -= bytes % align.Value;
                 return new JijiWavInfo(rate!.Value, channels!.Value, bits!.Value, byteRate.Value, align.Value, body, bytes);
             }
             pos = body + (int)size + (int)(size & 1);   // chunks are word-aligned
@@ -59,22 +57,33 @@ public static class JijiWav
         throw new InvalidDataException("No data chunk.");
     }
 
-    public static void RequireNarrationFormat(JijiWavInfo w)
+    /// <summary>Null when <paramref name="w"/> can be joined after <paramref name="first"/>; otherwise why not.</summary>
+    public static string? FormatMismatch(JijiWavInfo first, JijiWavInfo w)
     {
-        if (w.SampleRate != SampleRate || w.Channels != Channels || w.BitsPerSample != BitsPerSample)
-            throw new InvalidDataException($"Expected {SampleRate} Hz, {BitsPerSample}-bit, mono; got {w.SampleRate} Hz, {w.BitsPerSample}-bit, {w.Channels} channel(s).");
+        if (w.SampleRate == first.SampleRate && w.Channels == first.Channels && w.BitsPerSample == first.BitsPerSample) return null;
+        return $"{w.SampleRate} Hz, {w.Channels} channel(s), {w.BitsPerSample}-bit, but the first part is "
+             + $"{first.SampleRate} Hz, {first.Channels} channel(s), {first.BitsPerSample}-bit";
     }
 
-    /// <summary>Joins parts of the narration format, with <paramref name="gapMs"/> of silence between two parts.</summary>
+    private static long GapBytes(JijiWavInfo format, int gapMs)
+    {
+        var gapBytes = (long)format.ByteRate * gapMs / 1000;
+        return gapBytes - gapBytes % format.BlockAlign;
+    }
+
+    /// <summary>Joins parts of one format (the first part's), with <paramref name="gapMs"/> of silence between two parts.</summary>
     public static void Join(string outputPath, IReadOnlyList<(byte[] Bytes, JijiWavInfo Info)> parts, int gapMs)
     {
-        var gapBytes = (long)SampleRate * Channels * (BitsPerSample / 8) * gapMs / 1000;
-        gapBytes -= gapBytes % (Channels * BitsPerSample / 8);
+        if (parts.Count == 0) throw new InvalidDataException("Nothing to join.");
+        var format = parts[0].Info;
+        foreach (var (_, info) in parts)
+            if (FormatMismatch(format, info) is { } why) throw new InvalidDataException(why);
+        var gapBytes = GapBytes(format, gapMs);
         var dataBytes = parts.Sum(p => p.Info.DataBytes) + gapBytes * Math.Max(0, parts.Count - 1);
         if (dataBytes > uint.MaxValue - 36) throw new InvalidDataException("The narration is too long for one WAV file.");
 
         using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
-        WriteHeader(fs, (uint)dataBytes);
+        WriteHeader(fs, format, (uint)dataBytes);
         var silence = new byte[gapBytes];
         for (var i = 0; i < parts.Count; i++)
         {
@@ -84,15 +93,10 @@ public static class JijiWav
         }
     }
 
-    public static double GapMsExact(int gapMs)
-    {
-        var block = Channels * BitsPerSample / 8;
-        var gapBytes = (long)SampleRate * block * gapMs / 1000;
-        gapBytes -= gapBytes % block;
-        return gapBytes * 1000.0 / (SampleRate * block);
-    }
+    /// <summary>The gap as it is really written: whole frames of <paramref name="format"/>.</summary>
+    public static double GapMsExact(JijiWavInfo format, int gapMs) => GapBytes(format, gapMs) * 1000.0 / format.ByteRate;
 
-    private static void WriteHeader(Stream s, uint dataBytes)
+    private static void WriteHeader(Stream s, JijiWavInfo f, uint dataBytes)
     {
         Span<byte> h = stackalloc byte[44];
         "RIFF"u8.CopyTo(h);
@@ -101,11 +105,11 @@ public static class JijiWav
         "fmt "u8.CopyTo(h[12..]);
         BinaryPrimitives.WriteUInt32LittleEndian(h[16..], 16);
         BinaryPrimitives.WriteUInt16LittleEndian(h[20..], 1);
-        BinaryPrimitives.WriteUInt16LittleEndian(h[22..], Channels);
-        BinaryPrimitives.WriteUInt32LittleEndian(h[24..], SampleRate);
-        BinaryPrimitives.WriteUInt32LittleEndian(h[28..], (uint)(SampleRate * Channels * BitsPerSample / 8));
-        BinaryPrimitives.WriteUInt16LittleEndian(h[32..], Channels * BitsPerSample / 8);
-        BinaryPrimitives.WriteUInt16LittleEndian(h[34..], BitsPerSample);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[22..], (ushort)f.Channels);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[24..], (uint)f.SampleRate);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[28..], (uint)f.ByteRate);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[32..], (ushort)f.BlockAlign);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[34..], (ushort)f.BitsPerSample);
         "data"u8.CopyTo(h[36..]);
         BinaryPrimitives.WriteUInt32LittleEndian(h[40..], dataBytes);
         s.Write(h);

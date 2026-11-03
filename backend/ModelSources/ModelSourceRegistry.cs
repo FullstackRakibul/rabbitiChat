@@ -21,25 +21,36 @@ public interface IModelSourceRegistry
 
 public class ModelSourceRegistry : IModelSourceRegistry
 {
+    private readonly IReadOnlyList<IChatModelSource> _static;
     private readonly Dictionary<string, IChatModelSource> _byKey;
+    private readonly ModelProviders.DbModelSourceProvider? _database;
 
     /// <summary>
     /// Takes every IChatModelSource the container knows about. New sources join
-    /// simply by being registered — this constructor never changes.
+    /// simply by being registered — this constructor never changes. Providers added
+    /// in Settings come from <paramref name="database"/>, read on every call, so a
+    /// saved one is listed without a restart. A database key can never shadow a
+    /// registered one: the admin API refuses it, and the registered source wins here.
     /// </summary>
-    public ModelSourceRegistry(IEnumerable<IChatModelSource> sources)
+    public ModelSourceRegistry(IEnumerable<IChatModelSource> sources, ModelProviders.DbModelSourceProvider? database = null)
     {
-        All = sources.ToList();
-        _byKey = All.ToDictionary(s => s.SourceKey, StringComparer.OrdinalIgnoreCase);
+        _static = sources.ToList();
+        _byKey = _static.ToDictionary(s => s.SourceKey, StringComparer.OrdinalIgnoreCase);
+        _database = database;
     }
 
-    public IReadOnlyList<IChatModelSource> All { get; }
+    public IReadOnlyList<IChatModelSource> All => _database is null || _database.Sources.Count == 0
+        ? _static
+        : _static.Concat(_database.Sources.Where(s => !_byKey.ContainsKey(s.SourceKey))).ToList();
+
+    /// <summary>Keys of the sources registered at startup — the ones a database provider may not take.</summary>
+    public IEnumerable<string> RegisteredKeys => _byKey.Keys;
 
     public string DefaultSourceKey => "local";
 
     public IChatModelSource? Resolve(string? sourceKey)
     {
         var key = string.IsNullOrWhiteSpace(sourceKey) ? DefaultSourceKey : sourceKey.Trim();
-        return _byKey.TryGetValue(key, out var source) ? source : null;
+        return _byKey.TryGetValue(key, out var source) ? source : _database?.Resolve(key);
     }
 }

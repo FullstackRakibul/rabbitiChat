@@ -1,6 +1,9 @@
 // Jiji — HTTP surface, /api/jiji (docs/JIJI_PLAN.md, Endpoints).
 //
 //   GET    /api/jiji/status                          what is configured (storage, model, voice, speech, YouTube)
+//   GET    /api/jiji/settings                        script model, speech provider, voice (+ the choices)
+//   PUT    /api/jiji/settings                        save them (SystemAdmin)
+//   POST   /api/jiji/speech/preview                  one sentence as WAV
 //   POST   /api/jiji/ideas                           5 angles from a content type, subject and your notes (nothing saved)
 //   GET    /api/jiji/contents?status=                the queue, newest change first
 //   POST   /api/jiji/contents                        a new item, once an angle is picked
@@ -36,6 +39,40 @@ public static class JijiApis
             await Authorization.ResolveUser(ctx, db) is { } user
                 ? Results.Ok(await svc.StatusAsync(user.Id, ct))
                 : Results.Unauthorized());
+
+        // Jiji → Settings: anyone with the tab reads them; only SystemAdmin saves (the service refuses others).
+        g.MapGet("/settings", async (HttpContext ctx, AppDbContext db, JijiContentService svc, CancellationToken ct) =>
+            await Authorization.ResolveUser(ctx, db) is { } user
+                ? Results.Ok(await svc.SettingsAsync(user, ct))
+                : Results.Unauthorized());
+
+        g.MapPut("/settings", async (JijiSettingsInput input, HttpContext ctx, AppDbContext db, JijiSettingsService settings,
+            JijiContentService svc, CancellationToken ct) =>
+        {
+            var user = await Authorization.ResolveUser(ctx, db);
+            if (user is null) return Results.Unauthorized();
+            if (!Rbac.AccessPolicy.IsSuperUser(user))
+                return Results.Json(new { error = "Only SystemAdmin can change Jiji's settings." }, statusCode: StatusCodes.Status403Forbidden);
+            var error = await settings.SaveAsync(user, input, ct);
+            return error is null ? Results.Ok(await svc.SettingsAsync(user, ct)) : Results.Json(new { error }, statusCode: StatusCodes.Status400BadRequest);
+        });
+
+        // One sentence in a voice, as WAV, for the Preview button. Never stored.
+        g.MapPost("/speech/preview", async (JijiPreviewRequest req, HttpContext ctx, AppDbContext db, TtsService tts, CancellationToken ct) =>
+        {
+            var user = await Authorization.ResolveUser(ctx, db);
+            if (user is null) return Results.Unauthorized();
+            var text = string.IsNullOrWhiteSpace(req.Text) ? "Your API returned two hundred. The data never saved." : req.Text.Trim();
+            if (text.Length > 300) return Results.Json(new { error = "A preview is one sentence (300 characters at most)." }, statusCode: 400);
+            try
+            {
+                return Results.File(await tts.PreviewAsync(req.Provider, req.Voice, text, ct), "audio/wav");
+            }
+            catch (ModelProviders.SpeechException e)
+            {
+                return Results.Json(new { error = e.Message }, statusCode: e.Status is >= 400 and < 500 && !e.Unreachable ? 400 : 502);
+            }
+        });
 
         g.MapPost("/ideas", async (JijiIdeaRequest req, HttpContext ctx, AppDbContext db, IdeaGenerator ideas, CancellationToken ct) =>
             await Authorization.ResolveUser(ctx, db) is { } user
@@ -125,6 +162,7 @@ public static class JijiApis
         JijiResultKind.Conflict => Results.Conflict(new { error = r.Error }),
         JijiResultKind.Forbidden => Results.Json(new { error = r.Error }, statusCode: StatusCodes.Status403Forbidden),
         JijiResultKind.Upstream => Results.Json(new { error = r.Error, issues = r.Issues ?? [] }, statusCode: StatusCodes.Status502BadGateway),
+        JijiResultKind.OverBudget => Results.Json(new { error = r.Error }, statusCode: StatusCodes.Status429TooManyRequests),
         _ => Results.UnprocessableEntity(new { error = r.Error, issues = r.Issues ?? [] }),
     };
 }

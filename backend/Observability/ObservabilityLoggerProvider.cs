@@ -57,6 +57,7 @@ internal sealed class ObservabilityLogger : ILogger
         var message = formatter(state, exception);
         if (exception is not null)
             message = $"{message}\n{exception}";
+        message = Redactor.Scrub(message);
 
         _queue.Enqueue(new ActivityLog
         {

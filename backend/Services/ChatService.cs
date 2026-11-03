@@ -7,7 +7,7 @@ namespace RabbitIC.Api.Services;
 ///
 /// Depends on <see cref="IModelSourceRegistry"/> only — no concrete source type
 /// is named anywhere in this file. That is what
-/// makes a third provider (Azure, a second cluster, a mock) a registration-only
+/// makes a third provider (another API, a second cluster, a mock) a registration-only
 /// change: this class, and the endpoints that use it, stay untouched.
 /// </summary>
 public class ChatService

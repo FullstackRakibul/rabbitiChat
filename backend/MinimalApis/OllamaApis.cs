@@ -25,6 +25,7 @@ namespace RabbitIC.Api.MinimalApis
             group.MapGet("/models", async (
                 HttpContext ctx, AppDbContext db, ChatService chat,
                 IModelSourceRegistry registry, Rbac.ModelPolicy modelPolicy,
+                ModelProviders.ModelAccess modelAccess, string? module,
                 CancellationToken ct) =>
             {
                 var user = await Authorization.ResolveUser(ctx, db);
@@ -34,9 +35,24 @@ namespace RabbitIC.Api.MinimalApis
 
                 // Convenience, not control: the picker stops offering what every
                 // endpoint would refuse anyway (rule 4). An unrestricted role's
-                // list is returned untouched.
-                models = await modelPolicy.FilterAsync(user, models, m => (m.Name, m.Source), ct);
-                var locked = await modelPolicy.IsLockedAsync(user, ct);
+                // list is returned untouched. Chat, HR and Jiji ask with ?module=
+                // and get Access → Models' rules; every other picker keeps the
+                // per-role model policy.
+                bool locked;
+                if (!string.IsNullOrWhiteSpace(module))
+                {
+                    if (!ModelProviders.ModelModules.IsKnown(module))
+                        return Results.Json(new { error = "module must be chat, hr or jiji." }, statusCode: 400);
+                    (models, locked) = await modelAccess.ListAsync(user, module, models, ct);
+                    // The module's default (the HR default model), for a picker with nothing remembered yet.
+                    if (await modelAccess.DefaultAsync(module, ct) is { } def)
+                        ctx.Response.Headers["X-Model-Default"] = Uri.EscapeDataString(def.Source) + "|" + Uri.EscapeDataString(def.Model);
+                }
+                else
+                {
+                    models = await modelPolicy.FilterAsync(user, models, m => (m.Name, m.Source), ct);
+                    locked = await modelPolicy.IsLockedAsync(user, ct);
+                }
                 if (locked) ctx.Response.Headers["X-Model-Locked"] = "true";
 
                 // A configured provider names its own picker group; the built-in
@@ -49,7 +65,7 @@ namespace RabbitIC.Api.MinimalApis
                     .Select(m => new ModelDto(
                         m.Name, m.Source, m.ContextLength, m.Capabilities, m.Metered,
                         labels.TryGetValue(m.Source, out var label) ? label : null,
-                        locked))
+                        locked, m.Multiplier))
                     .ToList());
             });
 

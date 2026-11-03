@@ -15,7 +15,8 @@ using RabbitIC.Api.Jiji.Workers;
 
 namespace RabbitIC.Api.Jiji.Services;
 
-public sealed class JijiContentService(AppDbContext db, IOptions<JijiOptions> options, ScriptGenerator scripts, JijiStorage storage)
+public sealed class JijiContentService(AppDbContext db, IOptions<JijiOptions> options, ScriptGenerator scripts, JijiStorage storage,
+    ModelProviders.DbModelSourceProvider providers, JijiSettingsService settings, ModelProviders.SpeechClient speech)
 {
     public const int SubjectMax = 200;
     public const int AngleMax = 400;
@@ -168,19 +169,72 @@ public sealed class JijiContentService(AppDbContext db, IOptions<JijiOptions> op
     public async Task<JijiStatusDto> StatusAsync(int ownerId, CancellationToken ct)
     {
         var account = await db.JijiYouTubeAccounts.AsNoTracking().FirstOrDefaultAsync(a => a.OwnerId == ownerId, ct);
+        var s = await settings.GetAsync(ct);
         return new JijiStatusDto(
             StorageWritable(),
-            string.IsNullOrWhiteSpace(_opt.Model) ? null : _opt.Model,
-            string.IsNullOrWhiteSpace(_opt.Model) ? null : _opt.ModelSource,
+            s.ScriptModel,
+            s.ScriptModel is null ? null : s.ScriptModelSource,
             await JijiVoice.LoadAsync(db, ownerId, ct) is { Length: > 0 },
-            _opt.AzureSpeech.IsConfigured,
+            await SpeechStatusAsync(s, ct),
             _opt.YouTube.IsConfigured,
             account?.RefreshTokenProtected is not null,
-            account?.ChannelTitle);
+            account?.ChannelTitle,
+            await ProviderStatusAsync(s, ct));
+    }
+
+    /// <summary>Is the speech provider answering right now? A short GET /audio/voices; never a synthesis.</summary>
+    private async Task<JijiSpeechStatusDto> SpeechStatusAsync(JijiEffectiveSettings s, CancellationToken ct)
+    {
+        if (s.SpeechProvider is null) return new(null, null, null, "Not chosen", s.SpeechModel, s.Voice, false);
+        var rt = providers.Runtime(s.SpeechProvider);
+        if (providers.Speech(s.SpeechProvider) is not { } p)
+            return new(s.SpeechProvider, rt?.Name, false, rt is null ? "Not in Model providers" : "Switched off or key unreadable", s.SpeechModel, s.Voice, false);
+
+        var listed = s.Voice is not null && p.Voices.Contains(s.Voice);
+        try
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(TimeSpan.FromSeconds(4));
+            await speech.VoicesAsync(p.Target, limit.Token);
+            return new(s.SpeechProvider, p.Target.Name, true, "Connected", s.SpeechModel, s.Voice, listed);
+        }
+        catch (ModelProviders.SpeechException e)
+        {
+            return new(s.SpeechProvider, p.Target.Name, false, e.Message, s.SpeechModel, s.Voice, listed);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new(s.SpeechProvider, p.Target.Name, false, $"Speech provider not reachable at {p.Target.BaseUri.GetLeftPart(UriPartial.Path).TrimEnd('/')}. Is Kokoro running?", s.SpeechModel, s.Voice, listed);
+        }
+    }
+
+    /// <summary>Jiji → Settings: the effective values and every speech provider with its voices.</summary>
+    public async Task<JijiSettingsDto> SettingsAsync(User user, CancellationToken ct)
+    {
+        var s = await settings.GetAsync(ct);
+        var list = providers.SpeechProviders
+            .Select(r => new JijiSpeechProviderDto(r.Key, r.Name, r.Enabled, r.Status, providers.Speech(r.Key)?.Voices ?? Array.Empty<string>()))
+            .ToList();
+        return new JijiSettingsDto(s.ScriptModel, s.ScriptModelSource, s.SpeechProvider, s.SpeechModel, s.Voice, list,
+            Rbac.AccessPolicy.IsSuperUser(user));
+    }
+
+    /// <summary>The Settings provider behind Jiji:ModelSource, or null for Ollama and config sources.</summary>
+    private async Task<JijiProviderStatusDto?> ProviderStatusAsync(JijiEffectiveSettings s, CancellationToken ct)
+    {
+        var key = s.ScriptModel is null ? null : s.ScriptModelSource;
+        if (string.IsNullOrEmpty(key) || providers.Runtime(key) is not { } rt) return null;
+        var row = await db.ModelProviders.AsNoTracking().FirstOrDefaultAsync(p => p.Key == key, ct);
+        // Weighted tokens (tokens × the model's multiplier), the unit the plan and the caps count in.
+        var start = ModelProviders.ModelAccess.MonthStartUtc();
+        var month = db.ModelProviderUsages.AsNoTracking().Where(u => u.ProviderKey == key && u.CreatedAt >= start);
+        var all = (long)Math.Round(await month.SumAsync(u => u.WeightedTokens, ct));
+        var jiji = (long)Math.Round(await month.Where(u => u.Module == "jiji").SumAsync(u => u.WeightedTokens, ct));
+        return new JijiProviderStatusDto(rt.Key, rt.Name, rt.Status, rt.Message, jiji, all, row?.MonthlyTokenBudget);
     }
 
     /// <summary>
-    /// A Failed job back to Pending, its attempts reset. Refused for UnknownOutcome (an upload
+    /// A Failed job (or a Pending one waiting after a failed attempt) back to Pending now, its attempts reset. Refused for UnknownOutcome (an upload
     /// nobody can vouch for: resolve-upload settles it) and for a job of an older revision.
     /// One conditional UPDATE, so two clicks re-queue it once.
     /// </summary>
@@ -198,9 +252,11 @@ public sealed class JijiContentService(AppDbContext db, IOptions<JijiOptions> op
         var n = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE "JijiJobs" SET "Status" = 'Pending', "Attempts" = 0, "AvailableAtUtc" = {now}, "CompletedAtUtc" = NULL,
                 "LeaseToken" = NULL, "LeasedBy" = NULL, "LeaseUntilUtc" = NULL
-            WHERE "Id" = {jobId} AND "Status" = 'Failed'
+            WHERE "Id" = {jobId} AND ("Status" = 'Failed' OR ("Status" = 'Pending' AND "Attempts" > 0))
             """, ct);
-        if (n != 1) return JijiResult<JijiContentDto>.Fail(JijiResultKind.Conflict, $"Only a failed job can be retried; this one is {job.Status}.");
+        // A failed job, or one waiting out its back-off after a failed attempt (Retry now: the back-off
+        // rules are unchanged, a person only skips the wait — e.g. once the speech server is back).
+        if (n != 1) return JijiResult<JijiContentDto>.Fail(JijiResultKind.Conflict, $"Only a failed or waiting job can be retried; this one is {job.Status}.");
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE "JijiContents" SET "LastError" = NULL, "UpdatedAt" = {now} WHERE "Id" = {c.Id}
             """, ct);

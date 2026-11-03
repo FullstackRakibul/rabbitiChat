@@ -31,7 +31,7 @@ public interface IHrChatService
     Task<HrChatRefusal?> AskAsync(User user, HrChatRequest req, Func<int, ChatStreamWriter> start, CancellationToken ct);
 }
 
-public sealed class HrChatService(AppDbContext db, ChatService chat, HrLibrary library, Rbac.ModelPolicy modelPolicy,
+public sealed class HrChatService(AppDbContext db, ChatService chat, HrLibrary library, ModelProviders.ModelAccess modelAccess,
     IConfiguration config, ILoggerFactory logs) : IHrChatService
 {
     public const int ReservedForAnswer = HrChatEndpoint.ReservedForAnswer;
@@ -45,19 +45,20 @@ public sealed class HrChatService(AppDbContext db, ChatService chat, HrLibrary l
             var question = (req.Message ?? "").Trim();
             if (question.Length == 0) return new HrChatRefusal(400, "message is required.", null);
 
-            // ---- 1. the model, through the one policy ----
-            var model = string.IsNullOrWhiteSpace(req.Model)
-                ? await modelPolicy.DefaultForAsync(user, ct) ?? config["Hr:Model"] ?? "gemma4:12b"
-                : req.Model.Trim();
-            var policy = await modelPolicy.CheckAsync(user, model, Rbac.ModelPolicy.LocalSource, ct: ct);
-            if (!policy.Allowed) return new HrChatRefusal(StatusCodes.Status403Forbidden, policy.Error!, null);
+            // ---- 1. the model, through Access → Models' rules for HR ----
+            // No model named: the HR default (a locked role's only model). A model this user may
+            // not run is refused (403), a spent monthly budget too (429); never swapped silently.
+            var access = await modelAccess.CheckAsync(user, ModelProviders.ModelModules.Hr, req.Source, req.Model, ct);
+            if (!access.Allowed) return new HrChatRefusal(access.Status, access.Error!, null);
+            var model = access.Model!;
+            var source = access.Source!;
 
             var window = int.TryParse(config["Hr:NumCtx"], out var w) && w > 0 ? w : 16384;
             var keepAlive = int.TryParse(config["Hr:KeepAlive"], out var k) ? k : -1;
-            // The same question gets the same answer, and the model keeps to the rules
-            // (a formula for every amount) rather than sampling around them.
+            // Low, so the same question gets the same answer and the model keeps to the rules
+            // (a formula for every amount) rather than sampling around them. Hr:Temperature overrides.
             var temperature = double.TryParse(config["Hr:Temperature"], System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var tv) ? tv : 0;
+                System.Globalization.CultureInfo.InvariantCulture, out var tv) ? tv : 0.2;
 
             // ---- 2. persona + always items, never cut ----
             var always = await library.AlwaysItemsAsync(ct);
@@ -130,6 +131,7 @@ public sealed class HrChatService(AppDbContext db, ChatService chat, HrLibrary l
             {
                 type = "context",
                 model,
+                source,
                 always = always.Select(i => new { itemId = i.Id, name = i.Name, version = i.Version, tokens = PoPromptBuilder.EstimateTokens(i.Content) }),
                 excerpts = excerpts.Select(e => new
                 {
@@ -151,10 +153,13 @@ public sealed class HrChatService(AppDbContext db, ChatService chat, HrLibrary l
             await writer.FrameAsync(receipt);
 
             // ---- 6. the model, no tools; formulas evaluated as the answer streams ----
-            var capabilities = await ChatEndpoint.ModelCapabilitiesAsync(chat, Rbac.ModelPolicy.LocalSource, model, ct);
+            var capabilities = await ChatEndpoint.ModelCapabilitiesAsync(chat, source, model, ct);
             bool? think = capabilities.Any(c => c.Equals("thinking", StringComparison.OrdinalIgnoreCase)
                                              || c.Equals("reasoning", StringComparison.OrdinalIgnoreCase)) ? false : null;
-            var args = new ChatArgs(model, turns, Tools: null, think, window, keepAlive, temperature);
+            // NumCtx and KeepAlive reach Ollama only; a Settings provider is sent model, messages,
+            // "stream": true and the temperature, nothing Ollama-specific.
+            var args = new ChatArgs(model, turns, Tools: null, think, window, keepAlive, temperature,
+                Stream: true, Module: ModelProviders.ModelModules.Hr, UserId: user.Id);
 
             var answer = new StringBuilder();
             var formulas = new HrFormulaStream();
@@ -176,7 +181,7 @@ public sealed class HrChatService(AppDbContext db, ChatService chat, HrLibrary l
 
             try
             {
-                await foreach (var e in chat.StreamAsync(Rbac.ModelPolicy.LocalSource, args, ct))
+                await foreach (var e in chat.StreamAsync(source, args, ct))
                     if (e.Kind == ChatEventKind.Content) await SendAsync(formulas.Push(e.Text));
                 await SendAsync(formulas.Finish());
             }
