@@ -15,7 +15,7 @@ import {
 import ModelProviderDialog from './ModelProviderDialog.vue'
 import ModelPickerList from './ModelPickerList.vue'
 import {
-  PROVIDER_STATUS, deleteModelProvider, formatTokens, listModelProviders, testModelProvider, updateModelProvider,
+  PROVIDER_STATUS, deleteModelProvider, formatTokens, listModelProviders, refreshModelProviderCatalog, testModelProvider, updateModelProvider,
 } from '@/services/model-providers.service.js'
 
 const providers = ref(null)
@@ -60,6 +60,11 @@ const test = (p) => run(p, 'test', async () => {
   const r = await testModelProvider(p.id)
   tests.value = { ...tests.value, [p.id]: r }
   replace(r.provider)
+})
+
+const refreshVoices = (p) => run(p, 'voices', async () => {
+  await refreshModelProviderCatalog(p.id)
+  await load()
 })
 
 const toggle = (p, enabled) => run(p, 'toggle', async () => replace(await updateModelProvider(p.id, { enabled })))
@@ -191,8 +196,22 @@ const savePlan = (p) => run(p, 'plan', async () => {
             </li>
           </ul>
 
-          <div v-if="expanded === p.id" class="border-t p-3">
-            <ModelPickerList :provider="p" @saved="load" />
+          <div v-if="expanded === p.id" class="flex flex-col gap-3 border-t p-3">
+            <!-- A speech provider's catalog is its voice list (from GET /audio/voices). -->
+            <div v-if="p.capabilities.includes('speech')" class="flex flex-col gap-2" data-provider-voices>
+              <div class="flex items-center gap-2 text-xs">
+                <span class="font-medium">Voices</span>
+                <span class="text-muted-foreground">{{ (p.voices || []).length }} stored · chosen in Jiji → Settings</span>
+                <Button variant="outline" size="sm" class="ml-auto h-7" :disabled="!!busy[p.id]" @click="refreshVoices(p)">
+                  <Loader2 v-if="busy[p.id] === 'voices'" class="h-3.5 w-3.5 animate-spin" /> Refresh voices
+                </Button>
+              </div>
+              <div class="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
+                <span v-for="v in p.voices || []" :key="v" class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">{{ v }}</span>
+                <span v-if="!(p.voices || []).length" class="text-xs text-muted-foreground">None yet — Test or Refresh voices reads them.</span>
+              </div>
+            </div>
+            <ModelPickerList v-if="p.capabilities.some((c) => c === 'chat' || c === 'embeddings')" :provider="p" @saved="load" />
           </div>
         </div>
       </CardContent>

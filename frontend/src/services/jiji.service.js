@@ -12,6 +12,21 @@ export function getJijiStatus() {
   return http.get('/jiji/status')
 }
 
+/** Jiji → Settings: { scriptModel, scriptModelSource, speechProvider, speechModel, voice, speechProviders: [{ key, name, enabled, status, voices }], canEdit } */
+export function getJijiSettings() {
+  return http.get('/jiji/settings')
+}
+
+/** SystemAdmin only. { scriptModel, scriptModelSource, speechProvider, speechModel, voice } → the settings. Blank = the config fallback. */
+export function saveJijiSettings(settings) {
+  return http.put('/jiji/settings', settings)
+}
+
+/** One sentence in a voice, as a WAV Blob (play it from URL.createObjectURL; the caller revokes the URL). */
+export async function previewJijiVoice({ provider, voice, text } = {}) {
+  return (await http.raw('/jiji/speech/preview', { method: 'POST', body: { provider, voice, text } })).blob()
+}
+
 /** { contentType, subject, sourceNotes, model?, source? } → { angles: [{ angle, hook, why }], model }. Nothing is saved. */
 export function generateJijiIdeas(request) {
   return http.post('/jiji/ideas', request)

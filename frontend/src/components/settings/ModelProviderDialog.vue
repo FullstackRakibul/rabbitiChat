@@ -122,7 +122,7 @@ async function save() {
           <p v-else-if="editing && provider.hasKey" class="text-xs text-muted-foreground">
             Stored key {{ provider.apiKeyHint ? `ends in ${provider.apiKeyHint}` : 'is set' }} — leave blank to keep it.
           </p>
-          <p v-else class="text-xs text-muted-foreground">Optional only for a server on this machine or the LAN.</p>
+          <p v-else class="text-xs text-muted-foreground">Leave blank for a server on this machine or the LAN (e.g. Kokoro): no Authorization header is sent then.</p>
         </div>
 
         <div class="flex flex-col gap-1.5">

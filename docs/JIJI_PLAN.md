@@ -70,7 +70,7 @@ If the first 12 Shorts show the music audience holds them back, move to a new ch
 | Database | The existing SQLite file, 3 new tables through SchemaUpgrade |
 | Jobs | One BackgroundService with leases and retries |
 | LLM | ChatService / ModelSourceRegistry; default chosen on day 2 |
-| Voice | Azure Speech, one English neural voice |
+| Voice | An OpenAI-compatible speech provider from Settings → Model providers (Kokoro-FastAPI, local), one English voice chosen in Jiji → Settings |
 | Video | One template rendered by FFmpeg + ASS subtitles inside Mostisko |
 | Captions | Line by line, timed from each beat's audio length |
 | Publishing | YouTube Data API v3, private + publishAt, verified by read-back |
@@ -80,7 +80,7 @@ Not in week one: Remotion, extra templates, Whisper, text-to-video AI, other pla
 
 ## Architecture
 
-Everything runs inside Mostisko. The worker calls the LLM, Azure Speech, FFmpeg and YouTube in turn; Mostisko alone holds the credentials.
+Everything runs inside Mostisko. The worker calls the LLM, the speech provider, FFmpeg and YouTube in turn; Mostisko alone holds the credentials.
 
 ```
 backend/Jiji/
@@ -164,7 +164,7 @@ TTS job: one WAV per beat (hook, beats, myTake, CTA) through SSML, all Riff24Khz
 
 Files: /data/jiji/{contentId}/. Keep final.mp4 and the script. Delete beat WAVs, narration.wav, the .ass file and intermediates after a successful render. At 70% volume, extend it or copy old MP4s off.
 
-Config (secrets from env): Jiji:AzureSpeech:ApiKey (renamed from Key so SecretConfig scrubs it), Region, Endpoint (optional), GapMs, Jiji:Worker:{Enabled, PollSeconds, LeaseSeconds, HeartbeatSeconds}, Voices:en, Voices:bn, Jiji:YouTube:ClientId, ClientSecret, Jiji:StoragePath, Jiji:Model, Jiji:FfmpegPath, Jiji:FontsDir.
+Settings (Jiji → Settings, stored in JijiSettings; SystemAdmin edits): script model and source, speech provider (a Model providers key with the speech capability), speech model (kokoro), voice. Config fallbacks: Jiji:Model, Jiji:ModelSource, Jiji:Speech:{Provider, Model, Voice, Speed, GapMs}. Also Jiji:Worker:{Enabled, PollSeconds, LeaseSeconds, HeartbeatSeconds}, Jiji:YouTube:ClientId, ClientSecret (env), Jiji:StoragePath, Jiji:FfmpegPath, Jiji:FontsDir. The speech provider's URL and key live in Model providers.
 
 ## Renderer (FFmpeg inside Mostisko)
 
@@ -256,7 +256,7 @@ Worker
 - [x] Retry classification and UnknownOutcome handling (day 3: transient/permanent, retry endpoint refuses UnknownOutcome; resolve-upload is day 6)
 
 Media
-- [x] Azure English TTS (day 3, REST; tested against a local stand-in, not yet against real Azure)
+- [x] English TTS through the speech provider (POST /audio/speech, WAV; Kokoro-FastAPI). Tested against a Kokoro stand-in; real Kokoro still to confirm
 - [x] Measure actual beat WAV durations (day 3)
 - [ ] Generate ASS subtitles safely
 - [ ] FFmpeg static-gradient template

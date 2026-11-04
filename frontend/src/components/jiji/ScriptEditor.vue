@@ -380,8 +380,8 @@ const VISUALS = [
           <span class="text-muted-foreground">revision {{ j.contentRevision }} · attempts {{ j.attempts }}</span>
           <span v-if="j.status === 'Pending' && j.type === 'Render'" class="text-muted-foreground">(the renderer arrives on day 4)</span>
           <span v-if="j.status === 'Pending' && j.attempts > 0" class="text-muted-foreground">retry at {{ new Date(j.availableAtUtc).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka' }) }}</span>
-          <Button v-if="j.status === 'Failed' && j.contentRevision === item.revision" size="sm" variant="outline" class="h-6 px-2 text-xs"
-            :disabled="!!busy" data-jiji-retry @click="retry(j.id)"><RotateCcw /> Retry</Button>
+          <Button v-if="(j.status === 'Failed' || (j.status === 'Pending' && j.attempts > 0)) && j.contentRevision === item.revision" size="sm" variant="outline" class="h-6 px-2 text-xs"
+            :disabled="!!busy" data-jiji-retry @click="retry(j.id)"><RotateCcw /> {{ j.status === 'Failed' ? 'Retry' : 'Retry now' }}</Button>
           <span v-if="j.lastError" class="w-full" :class="j.status === 'Done' ? 'text-muted-foreground' : 'text-destructive'">{{ j.lastError }}</span>
         </div>
       </section>

@@ -13,6 +13,7 @@ export {
 export {
   getJijiStatus, generateJijiIdeas, listJijiContents, createJijiContent, getJijiContent, updateJijiContent, deleteJijiContent,
   generateJijiScript, saveJijiScript, approveJijiScript, retryJijiJob, getJijiTimings, fetchJijiAudio,
+  getJijiSettings, saveJijiSettings, previewJijiVoice,
 } from './jiji.service.js'
 export {
   listModelProviders, createModelProvider, updateModelProvider, deleteModelProvider, testModelProvider,

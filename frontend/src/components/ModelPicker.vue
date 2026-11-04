@@ -24,6 +24,11 @@ const props = defineProps({
   module: { type: String, default: '' },
   /** Open the list above the button — for a composer at the bottom of the screen. */
   up: { type: Boolean, default: false },
+  /**
+   * Choose a model by itself when none is set (the remembered one, else the first local).
+   * Off for a settings form, where an empty value means "not set" and must stay so.
+   */
+  autoPick: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:source'])
@@ -102,7 +107,7 @@ onMounted(async () => {
     }
 
     const pick = match || all.find((m) => m.source === 'local' && !m.metered)
-    if (pick && !props.modelValue) choose(pick)
+    if (pick && !props.modelValue && props.autoPick) choose(pick)
   } catch (e) {
     error.value = e.message || 'Could not load models.'
   } finally {
